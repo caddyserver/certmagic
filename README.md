@@ -297,7 +297,7 @@ For example, if you're using the standard library:
 
 ```go
 mux := http.NewServeMux()
-mux.Handle("/", func(w http.ResponseWriter, req *http.Request) {
+mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Lookit my cool website over HTTPS!")
 })
 
