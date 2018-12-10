@@ -31,25 +31,25 @@ import (
 	"github.com/xenolf/lego/registration"
 )
 
-// User represents a Let's Encrypt user account.
-type User struct {
+// user represents a Let's Encrypt user account.
+type user struct {
 	Email        string
 	Registration *registration.Resource
 	key          crypto.PrivateKey
 }
 
 // GetEmail gets u's email.
-func (u User) GetEmail() string {
+func (u user) GetEmail() string {
 	return u.Email
 }
 
 // GetRegistration gets u's registration resource.
-func (u User) GetRegistration() *registration.Resource {
+func (u user) GetRegistration() *registration.Resource {
 	return u.Registration
 }
 
 // GetPrivateKey gets u's private key.
-func (u User) GetPrivateKey() crypto.PrivateKey {
+func (u user) GetPrivateKey() crypto.PrivateKey {
 	return u.key
 }
 
@@ -58,8 +58,8 @@ func (u User) GetPrivateKey() crypto.PrivateKey {
 // user to disk or register it via ACME. If you want to use
 // a user account that might already exist, call getUser
 // instead. It does NOT prompt the user.
-func (cfg *Config) newUser(email string) (User, error) {
-	user := User{Email: email}
+func (cfg *Config) newUser(email string) (user, error) {
+	user := user{Email: email}
 	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {
 		return user, fmt.Errorf("generating private key: %v", err)
@@ -148,8 +148,8 @@ func (cfg *Config) getEmail(userPresent bool) (string, error) {
 // it will create a new one, but it does NOT save new
 // users to the disk or register them via ACME. It does
 // NOT prompt the user.
-func (cfg *Config) getUser(email string) (User, error) {
-	var user User
+func (cfg *Config) getUser(email string) (user, error) {
+	var user user
 
 	regBytes, err := cfg.certCache.storage.Load(prefixUserReg(cfg.CA, email))
 	if err != nil {
@@ -181,7 +181,7 @@ func (cfg *Config) getUser(email string) (User, error) {
 // or prompt the user. You must also pass in the storage
 // wherein the user should be saved. It should be the storage
 // for the CA with which user has an account.
-func (cfg *Config) saveUser(user User) error {
+func (cfg *Config) saveUser(user user) error {
 	regBytes, err := json.MarshalIndent(&user, "", "\t")
 	if err != nil {
 		return err
