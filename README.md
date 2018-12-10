@@ -61,10 +61,10 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 	- [Examples](#examples)
 		- [Serving HTTP handlers with HTTPS](#serving-http-handlers-with-https)
 		- [Starting a TLS listener](#starting-a-tls-listener)
-		- [Getting a tls.Config](#getting-a-tls-config)
+		- [Getting a tls.Config](#getting-a-tlsconfig)
 		- [Advanced use](#advanced-use)
 	- [Wildcard Certificates](#wildcard-certificates)
-	- [Behind a load balancer (or in a cluster)](#behind-a-load-balancer)
+	- [Behind a load balancer (or in a cluster)](#behind-a-load-balancer-or-in-a-cluster)
 	- [The ACME Challenges](#the-acme-challenges)
 		- [HTTP Challenge](#http-challenge)
 		- [TLS-ALPN Challenge](#tls-alpn-challenge)
@@ -237,7 +237,7 @@ tlsConfig := magic.TLSConfig()
 // we can simply set its GetCertificate field and append the
 // TLS-ALPN challenge protocol to the NextProtos
 myTLSConfig.GetCertificate = magic.GetCertificate
-myTLSConfig.NextProtos = append(myTLSConfig.NextProtos, acme.ACMETLS1Protocol}
+myTLSConfig.NextProtos = append(myTLSConfig.NextProtos, tlsalpn01.ACMETLS1Protocol}
 
 // the HTTP challenge has to be handled by your HTTP server;
 // if you don't have one, you should have disabled it earlier
@@ -274,7 +274,7 @@ The default Storage and Sync are implemented using the file system, so mounting 
 
 Although Storage and Sync seem closely related, they are, in fact, distinct concepts, although in some cases a Locker may rely on a Storage (such as the default FileSystem ones). Storage is where assets are stored, whereas Sync is what coordinates certificate-related tasks. Storage keeps certificates that are obtained, whereas Sync ensures that a certificate is obtained only once at a time.
 
-See [Storage](#storage) and the associated [godoc](TODO) for more information!
+See [Storage](#storage) and the associated [godoc](https://godoc.org/github.com/mholt/certmagic#Storage) for more information!
 
 ## The ACME Challenges
 
@@ -284,7 +284,7 @@ If you're using the high-level convenience functions like `HTTPS()`, `Listen()`,
 
 The HTTP and TLS-ALPN challenges are the defaults because they don't require configuration from you, but they require that your server is accessible from external IPs on low ports. If that is not possible in your situation, you can enable the DNS challenge, which will disable the HTTP and TLS-ALPN challenges and use the DNS challenge exclusively.
 
-Only one challenge technically needs to be enabled for things to work, but using multiple is good for reliability in case a challenge is discontinued by the CA. This happened to the TLS-SNI challenge in early 2018&mdash;many popular ACME clients such as Traefik and Autocert broke, resulting in downtime for some sites, until new releases were made and patches deployed, because they used only one challenge; Caddy, however&mdash;this library's forerunner&mdash;was unaffected because it also used the HTTP challenge. If multiple challenges are enabled, they are chosen randomly to help prevent false reliance on a single challenge type.
+Technically, only one challenge needs to be enabled for things to work, but using multiple is good for reliability in case a challenge is discontinued by the CA. This happened to the TLS-SNI challenge in early 2018&mdash;many popular ACME clients such as Traefik and Autocert broke, resulting in downtime for some sites, until new releases were made and patches deployed, because they used only one challenge; Caddy, however&mdash;this library's forerunner&mdash;was unaffected because it also used the HTTP challenge. If multiple challenges are enabled, they are chosen randomly to help prevent false reliance on a single challenge type.
 
 
 ### HTTP Challenge
@@ -335,7 +335,7 @@ Or make two simple changes to an existing `tls.Config`:
 
 ```go
 myTLSConfig.GetCertificate = magic.GetCertificate
-myTLSConfig.NextProtos = append(myTLSConfig.NextProtos, acme.ACMETLS1Protocol}
+myTLSConfig.NextProtos = append(myTLSConfig.NextProtos, tlsalpn01.ACMETLS1Protocol}
 ```
 
 Then just make sure your TLS listener is listening on port 443:
@@ -392,7 +392,7 @@ certmagic.OnDemand = &certmagic.OnDemandConfig{MaxObtain: 5}
 
 This allows only 5 certificates to be requested and is the simplest way to enable On-Demand TLS, but is the least recommended. It prevents abuse, but only in the least helpful way.
 
-The [godoc](TODO) describes how to use the other policies, all of which are much-more recommended.
+The [godoc](https://godoc.org/github.com/mholt/certmagic#OnDemandConfig) describes how to use the other policies, all of which are much more recommended! :)
 
 If `OnDemand` is set and `Manage()` is called, then the names given to `Manage()` will be whitelisted rather than obtained right away.
 
@@ -405,7 +405,7 @@ By default, CertMagic stores assets on the local file system in `$HOME/.local/sh
 
 The notion of a "cluster" or "fleet" of instances that may be serving the same site and sharing certificates, etc, is tied to storage. Simply, any instances that use the same storage facilities are considered part of the cluster. So if you deploy 100 instances of CertMagic behind a load balancer, they are all part of the same cluster if they share storage. Sharing storage could be mounting a shared folder, or implementing some other distributed storage such as a database server or KV store.
 
-The easiest way to change the storage being used is to set `certmagic.DefaultStorage` to a value that satisfies the [Storage interface](TODO).
+The easiest way to change the storage being used is to set `certmagic.DefaultStorage` to a value that satisfies the [Storage interface](https://godoc.org/github.com/mholt/certmagic#Storage).
 
 If you write a Storage or Sync implementation, let us know and we'll add it to the project so people can find it!
 
@@ -423,13 +423,27 @@ Again, if you're needing to do this, you've probably over-complicated your appli
 
 ### Can I use some of my own certificates while using CertMagic?
 
-Yes, just call the proper method on the `Config` to cache an "unmanaged certificate": (TODO: godoc links)
+Yes, just call the relevant method on the `Config` to add your own certificate to the cache:
+
+- [`CacheUnmanagedCertificatePEMBytes()`](https://godoc.org/github.com/mholt/certmagic#Config.CacheUnmanagedCertificatePEMBytes)
+- [`CacheUnmanagedCertificatePEMFile()`](https://godoc.org/github.com/mholt/certmagic#Config.CacheUnmanagedCertificatePEMFile)
+- [`CacheUnmanagedTLSCertificate()`](https://godoc.org/github.com/mholt/certmagic#Config.CacheUnmanagedTLSCertificate)
 
 
 ### Does CertMagic obtain SAN certificates?
 
-Technically all certificates these days are SAN certificates because CommonName is deprecated. But if you're asking whether CertMagic issues and manages certificates with multiple SANs, the answer is no. But it does support those, if you provide your own.
+Technically all certificates these days are SAN certificates because CommonName is deprecated. But if you're asking whether CertMagic issues and manages certificates with multiple SANs, the answer is no. But it does support serving them, if you provide your own.
 
+
+### How can I listen on ports 80 and 443? Do I have to run as root?
+
+On Linux, you can use `setcap` to grant your binary the permission to bind low ports:
+
+```bash
+$ sudo setcap cap_net_bind_service=+ep /path/to/your/binary
+```
+
+and then you will not need to run with root privileges.
 
 
 ## Contributing

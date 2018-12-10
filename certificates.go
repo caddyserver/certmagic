@@ -77,6 +77,8 @@ func (c Certificate) NeedsRenewal() bool {
 // cache, from the TLS storage for managed certificates. It returns a
 // copy of the Certificate that was put into the cache.
 //
+// This is a lower-level method; normally you'll call Manage() instead.
+//
 // This method is safe for concurrent use.
 func (cfg *Config) CacheManagedCertificate(domain string) (Certificate, error) {
 	certRes, err := cfg.loadCertResource(domain)

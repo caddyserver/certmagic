@@ -20,7 +20,8 @@ import (
 	"log"
 	"path/filepath"
 
-	"github.com/xenolf/lego/acme"
+	"github.com/xenolf/lego/challenge"
+	"github.com/xenolf/lego/challenge/tlsalpn01"
 )
 
 // tlsALPNSolver is a type that can solve TLS-ALPN challenges using
@@ -31,7 +32,7 @@ type tlsALPNSolver struct {
 
 // Present adds the challenge certificate to the cache.
 func (s tlsALPNSolver) Present(domain, token, keyAuth string) error {
-	cert, err := acme.TLSALPNChallengeCert(domain, keyAuth)
+	cert, err := tlsalpn01.ChallengeCert(domain, keyAuth)
 	if err != nil {
 		return err
 	}
@@ -93,7 +94,7 @@ type distributedSolver struct {
 	// Since the distributedSolver is only a
 	// wrapper over an actual solver, place
 	// the actual solver here.
-	providerServer acme.ChallengeProvider
+	providerServer challenge.Provider
 }
 
 // Present invokes the underlying solver's Present method

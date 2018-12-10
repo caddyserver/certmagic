@@ -27,11 +27,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xenolf/lego/acme"
+	"github.com/xenolf/lego/certcrypto"
+	"github.com/xenolf/lego/challenge"
 )
 
-// HTTPS serves mux on domain name using the HTTP and HTTPS
-// ports, redirecting all HTTP requests to HTTPS.
+// HTTPS serves mux for all domainNames using the HTTP
+// and HTTPS ports, redirecting all HTTP requests to HTTPS.
 //
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
@@ -401,7 +402,7 @@ func isInternal(addr string) bool {
 var (
 	// The endpoint of the directory for the ACME
 	// CA we are to use
-	CA = LetsEncryptStagingCA // TODO: make production
+	CA = LetsEncryptProductionCA
 
 	// The email address to use when creating or
 	// selecting an existing ACME server account
@@ -462,11 +463,11 @@ var (
 
 	// The DNS provider to use when solving the
 	// ACME DNS challenge
-	DNSProvider acme.ChallengeProvider
+	DNSProvider challenge.Provider
 
 	// The type of key to use when generating
 	// certificates
-	KeyType = acme.RSA2048
+	KeyType = certcrypto.RSA2048
 
 	// The state needed to operate on-demand TLS
 	OnDemand *OnDemandConfig

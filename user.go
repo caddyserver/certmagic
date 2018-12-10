@@ -27,13 +27,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/xenolf/lego/acme"
+	"github.com/xenolf/lego/lego"
+	"github.com/xenolf/lego/registration"
 )
 
 // User represents a Let's Encrypt user account.
 type User struct {
 	Email        string
-	Registration *acme.RegistrationResource
+	Registration *registration.Resource
 	key          crypto.PrivateKey
 }
 
@@ -43,7 +44,7 @@ func (u User) GetEmail() string {
 }
 
 // GetRegistration gets u's registration resource.
-func (u User) GetRegistration() *acme.RegistrationResource {
+func (u User) GetRegistration() *registration.Resource {
 	return u.Registration
 }
 
@@ -107,7 +108,9 @@ func (cfg *Config) getEmail(userPresent bool) (string, error) {
 			if cfg.CA != "" {
 				caURL = cfg.CA
 			}
-			tempClient, err := acme.NewClient(caURL, user, "")
+			legoConfig := lego.NewConfig(user)
+			legoConfig.CADirURL = caURL
+			tempClient, err := lego.NewClient(legoConfig)
 			if err != nil {
 				return "", fmt.Errorf("making ACME client to get ToS URL: %v", err)
 			}

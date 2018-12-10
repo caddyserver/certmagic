@@ -46,8 +46,8 @@ func (certCache *Cache) maintainAssets() {
 			log.Println("[INFO] Done checking certificates")
 		case <-ocspTicker.C:
 			log.Println("[INFO] Scanning for stale OCSP staples")
-			certCache.UpdateOCSPStaples()
-			certCache.DeleteOldStapleFiles()
+			certCache.updateOCSPStaples()
+			certCache.deleteOldStapleFiles()
 			log.Println("[INFO] Done checking OCSP staples")
 		case <-certCache.stopChan:
 			renewalTicker.Stop()
@@ -59,7 +59,9 @@ func (certCache *Cache) maintainAssets() {
 }
 
 // RenewManagedCertificates renews managed certificates,
-// including ones loaded on-demand.
+// including ones loaded on-demand. Note that this is done
+// automatically on a regular basis; normally you will not
+// need to call this.
 func (certCache *Cache) RenewManagedCertificates(interactive bool) error {
 	// we use the queues for a very important reason: to do any and all
 	// operations that could require an exclusive write lock outside
@@ -193,13 +195,13 @@ func (certCache *Cache) RenewManagedCertificates(interactive bool) error {
 	return nil
 }
 
-// UpdateOCSPStaples updates the OCSP stapling in all
+// updateOCSPStaples updates the OCSP stapling in all
 // eligible, cached certificates.
 //
 // OCSP maintenance strives to abide the relevant points on
 // Ryan Sleevi's recommendations for good OCSP support:
 // https://gist.github.com/sleevi/5efe9ef98961ecfb4da8
-func (certCache *Cache) UpdateOCSPStaples() {
+func (certCache *Cache) updateOCSPStaples() {
 	// Create a temporary place to store updates
 	// until we release the potentially long-lived
 	// read lock and use a short-lived write lock
@@ -256,9 +258,9 @@ func (certCache *Cache) UpdateOCSPStaples() {
 	}
 }
 
-// DeleteOldStapleFiles deletes cached OCSP staples that have expired.
+// deleteOldStapleFiles deletes cached OCSP staples that have expired.
 // TODO: We should do this for long-expired certificates, too.
-func (certCache *Cache) DeleteOldStapleFiles() {
+func (certCache *Cache) deleteOldStapleFiles() {
 	ocspKeys, err := certCache.storage.List(prefixOCSP)
 	if err != nil {
 		// maybe just hasn't been created yet; no big deal

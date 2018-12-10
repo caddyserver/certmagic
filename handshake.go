@@ -25,7 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xenolf/lego/acme"
+	"github.com/xenolf/lego/challenge/tlsalpn01"
 )
 
 // GetCertificate gets a certificate to satisfy clientHello. In getting
@@ -44,7 +44,7 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 	// special case: serve up the certificate for a TLS-ALPN ACME challenge
 	// (https://tools.ietf.org/html/draft-ietf-acme-tls-alpn-05)
 	for _, proto := range clientHello.SupportedProtos {
-		if proto == acme.ACMETLS1Protocol {
+		if proto == tlsalpn01.ACMETLS1Protocol {
 			cfg.certCache.mu.RLock()
 			challengeCert, ok := cfg.certCache.cache[tlsALPNCertKeyName(clientHello.ServerName)]
 			cfg.certCache.mu.RUnlock()
@@ -385,7 +385,7 @@ func (cfg *Config) tryDistributedChallengeSolver(clientHello *tls.ClientHelloInf
 		return Certificate{}, false, fmt.Errorf("decoding challenge token file %s (corrupted?): %v", tokenKey, err)
 	}
 
-	cert, err := acme.TLSALPNChallengeCert(chalInfo.Domain, chalInfo.KeyAuth)
+	cert, err := tlsalpn01.ChallengeCert(chalInfo.Domain, chalInfo.KeyAuth)
 	if err != nil {
 		return Certificate{}, false, fmt.Errorf("making TLS-ALPN challenge certificate: %v", err)
 	}

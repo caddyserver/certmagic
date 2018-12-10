@@ -21,7 +21,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xenolf/lego/acme"
+	"github.com/xenolf/lego/certcrypto"
+	"github.com/xenolf/lego/challenge"
+	"github.com/xenolf/lego/challenge/tlsalpn01"
+	"github.com/xenolf/lego/lego"
 )
 
 // Config configures a certificate manager instance.
@@ -93,11 +96,11 @@ type Config struct {
 
 	// The DNS provider to use when solving the
 	// ACME DNS challenge
-	DNSProvider acme.ChallengeProvider
+	DNSProvider challenge.Provider
 
 	// The type of key to use when generating
 	// certificates
-	KeyType acme.KeyType
+	KeyType certcrypto.KeyType
 
 	// The state needed to operate on-demand TLS
 	OnDemand *OnDemandConfig
@@ -116,7 +119,7 @@ type Config struct {
 
 	// Map of client config key to ACME clients
 	// so they can be reused
-	acmeClients   map[string]*acme.Client
+	acmeClients   map[string]*lego.Client
 	acmeClientsMu *sync.Mutex
 }
 
@@ -213,7 +216,7 @@ func NewWithCache(certCache *Cache, cfg Config) *Config {
 	// ensure the unexported fields are valid
 	cfg.certificates = make(map[string]string)
 	cfg.certCache = certCache
-	cfg.acmeClients = make(map[string]*acme.Client)
+	cfg.acmeClients = make(map[string]*lego.Client)
 	cfg.acmeClientsMu = new(sync.Mutex)
 
 	return &cfg
@@ -325,7 +328,7 @@ func (cfg *Config) RevokeCert(domain string, interactive bool) error {
 func (cfg *Config) TLSConfig() *tls.Config {
 	return &tls.Config{
 		GetCertificate: cfg.GetCertificate,
-		NextProtos:     []string{"h2", "http/1.1", acme.ACMETLS1Protocol},
+		NextProtos:     []string{"h2", "http/1.1", tlsalpn01.ACMETLS1Protocol},
 	}
 }
 

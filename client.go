@@ -24,7 +24,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xenolf/lego/acme"
+	"github.com/xenolf/lego/certificate"
+	"github.com/xenolf/lego/challenge"
+	"github.com/xenolf/lego/challenge/http01"
+	"github.com/xenolf/lego/challenge/tlsalpn01"
+	"github.com/xenolf/lego/lego"
+	"github.com/xenolf/lego/registration"
 )
 
 // acmeMu ensures that only one ACME challenge occurs at a time.
@@ -35,7 +40,7 @@ var acmeMu sync.Mutex
 // renew, and revoke certificates with ACME.
 type acmeClient struct {
 	config     *Config
-	acmeClient *acme.Client
+	acmeClient *lego.Client
 }
 
 // listenerAddressInUse returns true if a TCP connection
@@ -87,7 +92,10 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 	client, ok := cfg.acmeClients[clientKey]
 	if !ok {
 		// the client facilitates our communication with the CA server
-		client, err = acme.NewClient(caURL, &leUser, keyType)
+		legoCfg := lego.NewConfig(&leUser)
+		legoCfg.CADirURL = caURL
+		legoCfg.KeyType = keyType
+		client, err = lego.NewClient(legoCfg)
 		if err != nil {
 			cfg.acmeClientsMu.Unlock()
 			return nil, err
@@ -109,9 +117,9 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 			}
 		}
 
-		reg, err := client.Register(cfg.Agreed)
+		reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: cfg.Agreed})
 		if err != nil {
-			return nil, errors.New("registration error: " + err.Error())
+			return nil, fmt.Errorf("registration error: %v", err)
 		}
 		leUser.Registration = reg
 
@@ -149,9 +157,9 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 		// the challenge cert to our cert cache and serve it up during the
 		// handshake. As for the default solvers...  we are careful to honor the
 		// listener bind preferences by using cfg.ListenHost.
-		var httpSolver, alpnSolver acme.ChallengeProvider
-		httpSolver = acme.NewHTTPProviderServer(cfg.ListenHost, fmt.Sprintf("%d", useHTTPPort))
-		alpnSolver = acme.NewTLSALPNProviderServer(cfg.ListenHost, fmt.Sprintf("%d", useTLSALPNPort))
+		var httpSolver, alpnSolver challenge.Provider
+		httpSolver = http01.NewProviderServer(cfg.ListenHost, fmt.Sprintf("%d", useHTTPPort))
+		alpnSolver = tlsalpn01.NewProviderServer(cfg.ListenHost, fmt.Sprintf("%d", useTLSALPNPort))
 		if listenerAddressInUse(net.JoinHostPort(cfg.ListenHost, fmt.Sprintf("%d", useHTTPPort))) {
 			httpSolver = nil
 		}
@@ -164,30 +172,30 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 		// in fact, this is required now for successful solving of the HTTP challenge
 		// if the port is already in use, since we must write the challenge info
 		// to storage for the HTTPChallengeHandler to solve it successfully
-		c.acmeClient.SetChallengeProvider(acme.HTTP01, distributedSolver{
+		c.acmeClient.Challenge.SetHTTP01Provider(distributedSolver{
 			config:         cfg,
 			providerServer: httpSolver,
 		})
-		c.acmeClient.SetChallengeProvider(acme.TLSALPN01, distributedSolver{
+		c.acmeClient.Challenge.SetTLSALPN01Provider(distributedSolver{
 			config:         cfg,
 			providerServer: alpnSolver,
 		})
 
 		// disable any challenges that should not be used
-		var disabledChallenges []acme.Challenge
+		var disabledChallenges []challenge.Type
 		if cfg.DisableHTTPChallenge {
-			disabledChallenges = append(disabledChallenges, acme.HTTP01)
+			disabledChallenges = append(disabledChallenges, challenge.HTTP01)
 		}
 		if cfg.DisableTLSALPNChallenge {
-			disabledChallenges = append(disabledChallenges, acme.TLSALPN01)
+			disabledChallenges = append(disabledChallenges, challenge.TLSALPN01)
 		}
 		if len(disabledChallenges) > 0 {
-			c.acmeClient.ExcludeChallenges(disabledChallenges)
+			c.acmeClient.Challenge.Exclude(disabledChallenges)
 		}
 	} else {
 		// Otherwise, use DNS challenge exclusively
-		c.acmeClient.ExcludeChallenges([]acme.Challenge{acme.HTTP01, acme.TLSALPN01})
-		c.acmeClient.SetChallengeProvider(acme.DNS01, cfg.DNSProvider)
+		c.acmeClient.Challenge.Exclude([]challenge.Type{challenge.HTTP01, challenge.TLSALPN01})
+		c.acmeClient.Challenge.SetDNS01Provider(cfg.DNSProvider)
 	}
 
 	return c, nil
@@ -227,25 +235,16 @@ func (c *acmeClient) Obtain(name string) error {
 	}
 
 	for attempts := 0; attempts < 2; attempts++ {
-		namesObtaining.Add([]string{name})
+		request := certificate.ObtainRequest{
+			Domains:    []string{name},
+			Bundle:     true,
+			MustStaple: c.config.MustStaple,
+		}
 		acmeMu.Lock()
-		certificate, err := c.acmeClient.ObtainCertificate([]string{name}, true, nil, c.config.MustStaple)
+		certificate, err := c.acmeClient.Certificate.Obtain(request)
 		acmeMu.Unlock()
-		namesObtaining.Remove([]string{name})
 		if err != nil {
-			// for a certain kind of error, we can enumerate the error per-domain
-			if failures, ok := err.(acme.ObtainError); ok && len(failures) > 0 {
-				var errMsg string // combine all the failures into a single error message
-				for errDomain, obtainErr := range failures {
-					if obtainErr == nil {
-						continue
-					}
-					errMsg += fmt.Sprintf("[%s] failed to get certificate: %v\n", errDomain, obtainErr)
-				}
-				return errors.New(errMsg)
-			}
-
-			return fmt.Errorf("[%s] failed to obtain certificate: %v", name, err)
+			return fmt.Errorf("[%s] failed to obtain certificate: %s", name, err)
 		}
 
 		// double-check that we actually got a certificate, in case there's a bug upstream (see issue mholt/caddy#2121)
@@ -301,14 +300,12 @@ func (c *acmeClient) Renew(name string) error {
 	}
 
 	// Perform renewal and retry if necessary, but not too many times.
-	var newCertMeta *acme.CertificateResource
+	var newCertMeta *certificate.Resource
 	var success bool
 	for attempts := 0; attempts < 2; attempts++ {
-		namesObtaining.Add([]string{name})
 		acmeMu.Lock()
-		newCertMeta, err = c.acmeClient.RenewCertificate(certRes, true, c.config.MustStaple)
+		newCertMeta, err = c.acmeClient.Certificate.Renew(certRes, true, c.config.MustStaple)
 		acmeMu.Unlock()
-		namesObtaining.Remove([]string{name})
 		if err == nil {
 			// double-check that we actually got a certificate; check a couple fields, just in case
 			if newCertMeta == nil || newCertMeta.Domain == "" || newCertMeta.Certificate == nil {
@@ -348,7 +345,7 @@ func (c *acmeClient) Revoke(name string) error {
 		return err
 	}
 
-	err = c.acmeClient.RevokeCertificate(certRes.Certificate)
+	err = c.acmeClient.Certificate.Revoke(certRes.Certificate)
 	if err != nil {
 		return err
 	}
@@ -371,55 +368,4 @@ func (c *acmeClient) Revoke(name string) error {
 	}
 
 	return nil
-}
-
-// namesObtaining is a set of hostnames with thread-safe
-// methods. A name should be in this set only while this
-// package is in the process of obtaining a certificate
-// for the name. ACME challenges that are received for
-// names which are not in this set were not initiated by
-// this package and probably should not be handled by
-// this package.
-var namesObtaining = nameCoordinator{names: make(map[string]struct{})}
-
-type nameCoordinator struct {
-	names map[string]struct{}
-	mu    sync.RWMutex
-}
-
-// Add adds names to c. It is safe for concurrent use.
-func (c *nameCoordinator) Add(names []string) {
-	c.mu.Lock()
-	for _, name := range names {
-		c.names[strings.ToLower(name)] = struct{}{}
-	}
-	c.mu.Unlock()
-}
-
-// Remove removes names from c. It is safe for concurrent use.
-func (c *nameCoordinator) Remove(names []string) {
-	c.mu.Lock()
-	for _, name := range names {
-		delete(c.names, strings.ToLower(name))
-	}
-	c.mu.Unlock()
-}
-
-// Has returns true if c has name. It is safe for concurrent use.
-func (c *nameCoordinator) Has(name string) bool {
-	hostname, _, err := net.SplitHostPort(name)
-	if err != nil {
-		hostname = name
-	}
-	c.mu.RLock()
-	_, ok := c.names[strings.ToLower(hostname)]
-	c.mu.RUnlock()
-	return ok
-}
-
-// KnownACMECAs is a list of ACME directory endpoints of
-// known, public, and trusted ACME-compatible certificate
-// authorities.
-var KnownACMECAs = []string{
-	"https://acme-v02.api.letsencrypt.org/directory",
 }

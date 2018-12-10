@@ -20,7 +20,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/xenolf/lego/acme"
+	"github.com/xenolf/lego/challenge/http01"
 )
 
 // HTTPChallengeHandler wraps h in a handler that can solve the ACME
@@ -95,7 +95,7 @@ func (cfg *Config) distributedHTTPChallengeSolver(w http.ResponseWriter, r *http
 // Most of this code borrowed from xenolf/lego's built-in HTTP-01
 // challenge solver in March 2018.
 func answerHTTPChallenge(w http.ResponseWriter, r *http.Request, chalInfo challengeInfo) bool {
-	challengeReqPath := acme.HTTP01ChallengePath(chalInfo.Token)
+	challengeReqPath := http01.ChallengePath(chalInfo.Token)
 	if r.URL.Path == challengeReqPath &&
 		strings.HasPrefix(r.Host, chalInfo.Domain) &&
 		r.Method == "GET" {

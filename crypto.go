@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"hash/fnv"
 
-	"github.com/xenolf/lego/acme"
+	"github.com/xenolf/lego/certificate"
 )
 
 // encodePrivateKey marshals a EC or RSA private key into a PEM-encoded array of bytes.
@@ -96,7 +96,7 @@ func fastHash(input []byte) string {
 // saveCertResource saves the certificate resource to disk. This
 // includes the certificate file itself, the private key, and the
 // metadata file.
-func (cfg *Config) saveCertResource(cert *acme.CertificateResource) error {
+func (cfg *Config) saveCertResource(cert *certificate.Resource) error {
 	metaBytes, err := json.MarshalIndent(&cert, "", "\t")
 	if err != nil {
 		return fmt.Errorf("encoding certificate metadata: %v", err)
@@ -120,8 +120,8 @@ func (cfg *Config) saveCertResource(cert *acme.CertificateResource) error {
 	return storeTx(cfg.certCache.storage, all)
 }
 
-func (cfg *Config) loadCertResource(domain string) (acme.CertificateResource, error) {
-	var certRes acme.CertificateResource
+func (cfg *Config) loadCertResource(domain string) (certificate.Resource, error) {
+	var certRes certificate.Resource
 	certBytes, err := cfg.certCache.storage.Load(prefixSiteCert(cfg.CA, domain))
 	if err != nil {
 		return certRes, err
