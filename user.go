@@ -79,8 +79,11 @@ func (cfg *Config) newUser(email string) (user, error) {
 // stored in storage according to the email address they
 // provided (which might be blank).
 func (cfg *Config) getEmail(userPresent bool) (string, error) {
-	// First try memory (command line flag or typed by user previously)
+	// First try memory
 	leEmail := cfg.Email
+	if leEmail == "" {
+		leEmail = Email
+	}
 
 	// Then try to get most recent user email from storage
 	if leEmail == "" {
@@ -243,7 +246,7 @@ func (cfg *Config) mostRecentUserEmail() string {
 	sort.Slice(userList, func(i, j int) bool {
 		iInfo, _ := cfg.certCache.storage.Stat(prefixUser(cfg.CA, userList[i]))
 		jInfo, _ := cfg.certCache.storage.Stat(prefixUser(cfg.CA, userList[j]))
-		return iInfo.Modified.Before(jInfo.Modified)
+		return jInfo.Modified.Before(iInfo.Modified)
 	})
 	user, err := cfg.getUser(userList[0])
 	if err != nil {

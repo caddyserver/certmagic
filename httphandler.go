@@ -72,7 +72,7 @@ func (cfg *Config) distributedHTTPChallengeSolver(w http.ResponseWriter, r *http
 		return false
 	}
 
-	tokenKey := distributedSolver{}.challengeTokensKey(r.Host)
+	tokenKey := distributedSolver{config: cfg}.challengeTokensKey(r.Host)
 	chalInfoBytes, err := cfg.certCache.storage.Load(tokenKey)
 	if err != nil {
 		if _, ok := err.(ErrNotExist); !ok {

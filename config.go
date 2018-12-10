@@ -17,7 +17,6 @@ package certmagic
 import (
 	"crypto/tls"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -348,11 +347,6 @@ func (cfg *Config) TLSConfig() *tls.Config {
 func (cfg *Config) preObtainOrRenewChecks(name string, allowPrompts bool) (bool, error) {
 	if !HostQualifies(name) {
 		return true, nil
-	}
-
-	// wildcard certificates require DNS challenge (as of March 2018)
-	if strings.Contains(name, "*") && cfg.DNSProvider == nil {
-		return false, fmt.Errorf("wildcard domain name (%s) requires DNS challenge; use dns subdirective to configure it", name)
 	}
 
 	if cfg.Email == "" {

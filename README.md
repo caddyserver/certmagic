@@ -7,7 +7,7 @@
 	<a href="https://godoc.org/github.com/mholt/certmagic"><img src="https://img.shields.io/badge/godoc-reference-blue.svg"></a>
 	<a href="https://travis-ci.org/mholt/certmagic"><img src="https://img.shields.io/travis/mholt/certmagic.svg?label=linux+build"></a>
 	<a href="https://ci.appveyor.com/project/mholt/certmagic"><img src="https://img.shields.io/appveyor/ci/mholt/certmagic.svg?label=windows+build"></a>
-	<a href="https://sourcegraph.com/github.com/mholt/certmagic?badge" title="certmagic on Sourcegraph"><img src="https://sourcegraph.com/github.com/mholt/certmagic/-/badge.svg" alt="certmagic on Sourcegraph"></a>
+	<!--<a href="https://sourcegraph.com/github.com/mholt/certmagic?badge" title="certmagic on Sourcegraph"><img src="https://sourcegraph.com/github.com/mholt/certmagic/-/badge.svg" alt="certmagic on Sourcegraph"></a>-->
 </p>
 
 
@@ -364,7 +364,13 @@ if err != nil {
 certmagic.DNSProvider = provider
 ```
 
-Then the DNS challenge will be used by default, and I can obtain certificates for wildcard domains now. See the godoc documentation for the provider you're using to learn how to configure it. Most can be configured by env variables or by passing in a config struct.
+Now the DNS challenge will be used by default, and I can obtain certificates for wildcard domains. See the [godoc documentation for the provider you're using](https://godoc.org/github.com/xenolf/lego/providers/dns#pkg-subdirectories) to learn how to configure it. Most can be configured by env variables or by passing in a config struct. If you pass a config struct instead of using env variables, you will probably need to set some other defaults (that's just how lego works, currently):
+
+```go
+PropagationTimeout: dns01.DefaultPollingInterval,
+PollingInterval:    dns01.DefaultPollingInterval,
+TTL:                dns01.DefaultTTL,
+```
 
 Enabling the DNS challenge disables the other challenges for that `certmagic.Config` instance.
 
