@@ -63,16 +63,16 @@ func TestPrefixAndKeyBuilders(t *testing.T) {
 			metaFile: path.Join("acme", "example.com", "sites", "cfoo", "cfoo.json"),
 		},
 	} {
-		if actual := prefixSite(ca, testcase.in); actual != testcase.folder {
+		if actual := StorageKeys.SitePrefix(ca, testcase.in); actual != testcase.folder {
 			t.Errorf("Test %d: site folder: Expected '%s' but got '%s'", i, testcase.folder, actual)
 		}
-		if actual := prefixSiteCert(ca, testcase.in); actual != testcase.certFile {
+		if actual := StorageKeys.SiteCert(ca, testcase.in); actual != testcase.certFile {
 			t.Errorf("Test %d: site cert file: Expected '%s' but got '%s'", i, testcase.certFile, actual)
 		}
-		if actual := prefixSiteKey(ca, testcase.in); actual != testcase.keyFile {
+		if actual := StorageKeys.SitePrivateKey(ca, testcase.in); actual != testcase.keyFile {
 			t.Errorf("Test %d: site key file: Expected '%s' but got '%s'", i, testcase.keyFile, actual)
 		}
-		if actual := prefixSiteMeta(ca, testcase.in); actual != testcase.metaFile {
+		if actual := StorageKeys.SiteMeta(ca, testcase.in); actual != testcase.metaFile {
 			t.Errorf("Test %d: site meta file: Expected '%s' but got '%s'", i, testcase.metaFile, actual)
 		}
 	}

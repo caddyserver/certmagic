@@ -191,7 +191,7 @@ func TestGetEmail(t *testing.T) {
 
 		// Change modified time so they're all different and the test becomes more deterministic
 		fs := testConfig.certCache.storage.(FileStorage)
-		userFolder := filepath.Join(fs.Path, prefixUser(testConfig.CA, eml))
+		userFolder := filepath.Join(fs.Path, StorageKeys.UserPrefix(testConfig.CA, eml))
 		f, err := os.Stat(userFolder)
 		if err != nil {
 			t.Fatalf("Could not access user folder for '%s': %v", eml, err)
