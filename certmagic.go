@@ -16,7 +16,6 @@ package certmagic
 
 import (
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -283,7 +282,7 @@ func (o *OnDemandConfig) checkURLForObtainingNewCerts(name string) error {
 	client := http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return errors.New("following http redirects is not allowed")
+			return fmt.Errorf("following http redirects is not allowed")
 		},
 	}
 

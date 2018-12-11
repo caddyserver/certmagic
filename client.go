@@ -15,7 +15,6 @@
 package certmagic
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -95,6 +94,8 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 		legoCfg := lego.NewConfig(&leUser)
 		legoCfg.CADirURL = caURL
 		legoCfg.KeyType = keyType
+		legoCfg.UserAgent = UserAgent
+		legoCfg.HTTPClient.Timeout = HTTPTimeout
 		client, err = lego.NewClient(legoCfg)
 		if err != nil {
 			cfg.acmeClientsMu.Unlock()
@@ -113,7 +114,7 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 				cfg.Agreed = cfg.askUserAgreement(client.GetToSURL())
 			}
 			if !cfg.Agreed && termsURL != "" {
-				return nil, errors.New("user must agree to CA terms (use -agree flag)")
+				return nil, fmt.Errorf("user must agree to CA terms")
 			}
 		}
 
@@ -126,7 +127,7 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 		// persist the user to storage
 		err = cfg.saveUser(leUser)
 		if err != nil {
-			return nil, errors.New("could not save user: " + err.Error())
+			return nil, fmt.Errorf("could not save user: %v", err)
 		}
 	}
 
@@ -249,7 +250,7 @@ func (c *acmeClient) Obtain(name string) error {
 
 		// double-check that we actually got a certificate, in case there's a bug upstream (see issue mholt/caddy#2121)
 		if certificate.Domain == "" || certificate.Certificate == nil {
-			return errors.New("returned certificate was empty; probably an unchecked error obtaining it")
+			return fmt.Errorf("returned certificate was empty; probably an unchecked error obtaining it")
 		}
 
 		// Success - immediately save the certificate resource
@@ -309,7 +310,7 @@ func (c *acmeClient) Renew(name string) error {
 		if err == nil {
 			// double-check that we actually got a certificate; check a couple fields, just in case
 			if newCertMeta == nil || newCertMeta.Domain == "" || newCertMeta.Certificate == nil {
-				err = errors.New("returned certificate was empty; probably an unchecked error renewing it")
+				err = fmt.Errorf("returned certificate was empty; probably an unchecked error renewing it")
 			} else {
 				success = true
 				break
@@ -323,7 +324,7 @@ func (c *acmeClient) Renew(name string) error {
 	}
 
 	if !success {
-		return errors.New("too many renewal attempts; last error: " + err.Error())
+		return fmt.Errorf("too many renewal attempts; last error: %v", err)
 	}
 
 	if c.config.OnEvent != nil {
@@ -369,3 +370,9 @@ func (c *acmeClient) Revoke(name string) error {
 
 	return nil
 }
+
+// Some default values passed down to the underlying lego client.
+var (
+	UserAgent   string
+	HTTPTimeout = 30 * time.Second
+)

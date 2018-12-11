@@ -17,7 +17,6 @@ package certmagic
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -206,7 +205,7 @@ func (cfg *Config) makeCertificateWithOCSP(certPEMBlock, keyPEMBlock []byte) (Ce
 // fillCertFromLeaf populates metadata fields on cert from tlsCert.
 func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 	if len(tlsCert.Certificate) == 0 {
-		return errors.New("certificate is empty")
+		return fmt.Errorf("certificate is empty")
 	}
 	cert.Certificate = tlsCert
 
@@ -235,7 +234,7 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 		}
 	}
 	if len(cert.Names) == 0 {
-		return errors.New("certificate has no names")
+		return fmt.Errorf("certificate has no names")
 	}
 
 	// save the hash of this certificate (chain) and

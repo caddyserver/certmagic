@@ -113,6 +113,7 @@ func (cfg *Config) getEmail(userPresent bool) (string, error) {
 			}
 			legoConfig := lego.NewConfig(user)
 			legoConfig.CADirURL = caURL
+			legoConfig.UserAgent = UserAgent
 			tempClient, err := lego.NewClient(legoConfig)
 			if err != nil {
 				return "", fmt.Errorf("making ACME client to get ToS URL: %v", err)
