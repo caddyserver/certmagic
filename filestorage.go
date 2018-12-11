@@ -30,7 +30,7 @@ type FileStorage struct {
 
 // Exists returns true if key exists in fs.
 func (fs FileStorage) Exists(key string) bool {
-	_, err := os.Stat(key)
+	_, err := os.Stat(fs.filename(key))
 	return !os.IsNotExist(err)
 }
 

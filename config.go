@@ -264,9 +264,9 @@ func (cfg *Config) Manage(domainNames []string) error {
 	return nil
 }
 
-// ObtainCert obtains a certificate for name using c, as long
+// ObtainCert obtains a certificate for name using cfg, as long
 // as a certificate does not already exist in storage for that
-// name. The name must qualify and c must be flagged as Managed.
+// name. The name must qualify and cfg must be flagged as Managed.
 // This function is a no-op if storage already has a certificate
 // for name.
 //
@@ -282,7 +282,8 @@ func (cfg *Config) ObtainCert(name string, interactive bool) error {
 		return nil
 	}
 
-	// we expect this to be a new site
+	// we expect this to be a new site; if the
+	// cert already exists, then no-op
 	if cfg.certCache.storage.Exists(prefixSiteCert(cfg.CA, name)) {
 		return nil
 	}
@@ -291,6 +292,7 @@ func (cfg *Config) ObtainCert(name string, interactive bool) error {
 	if err != nil {
 		return err
 	}
+
 	return client.Obtain(name)
 }
 
