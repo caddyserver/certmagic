@@ -143,10 +143,6 @@ The `certmagic.Config` struct is how you can wield the power of this fully armed
 For every field in the `Config` struct, there is a corresponding package-level variable you can set as a default value. These defaults will be used when you call any of the high-level convenience functions like `HTTPS()` or `Listen()` or anywhere else a default `Config` is used. They are also used for any `Config` fields that are zero-valued when you call `New()`.
 
 You can set these values easily, for example: `certmagic.Email = ...` sets the email address to use for everything unless you explicitly override it in a Config.
-<!-- 
-#### Convenience or control.
-
-This package exposes high-level functions to make your life super easy (convenience), and many little pieces of configuration to make it customizable (control). To avoid trouble, don't mix their use within your program unless you are experienced with this library. (Even then, it's probably cleaner code to do things just one way consistently!) -->
 
 
 #### Providing an email address
@@ -191,6 +187,8 @@ if err != nil {
 }
 ```
 
+This starts HTTP and HTTPS listeners and redirects HTTP to HTTPS!
+
 #### Starting a TLS listener
 
 ```go
@@ -220,7 +218,7 @@ magic := certmagic.New(certmagic.Config{
 	CA:     certmagic.LetsEncryptStagingCA,
 	Email:  "you@yours.com",
 	Agreed: true,
-	// any other customization you want
+	// plus any other customization you want
 })
 
 // this obtains certificates or renews them if necessary
@@ -242,7 +240,7 @@ myTLSConfig.NextProtos = append(myTLSConfig.NextProtos, tlsalpn01.ACMETLS1Protoc
 // the HTTP challenge has to be handled by your HTTP server;
 // if you don't have one, you should have disabled it earlier
 // when you made the certmagic.Config
-httpMux = magic.HTTPChallengeHandler(mux)
+httpMux = magic.HTTPChallengeHandler(httpMux)
 ```
 
 Great! This example grants you much more flexibility for advanced programs. However, _the vast majority of you will only use the high-level functions described earlier_, especially since you can still customize them by setting the package-level defaults.
@@ -268,13 +266,12 @@ At time of writing (December 2018), Let's Encrypt only issues wildcard certifica
 
 CertMagic runs effectively behind load balancers and/or in cluster/fleet environments. In other words, you can have 10 or 1,000 servers all serving the same domain names, all sharing certificates and OCSP staples.
 
-To do so, simply ensure that each instance is using the same Storage and Sync. That is the sole criteria for determining whether an instance is part of a cluster.
+To do so, simply ensure that each instance is using the same Storage. That is the sole criteria for determining whether an instance is part of a cluster.
 
-The default Storage and Sync are implemented using the file system, so mounting the same shared folder is sufficient! (See [Storage](#storage) for more on that.) If you need an alternate Storage or Sync implementation, feel free to use one, provided that all the instances use the _same_ one. :)
-
-Although Storage and Sync seem closely related, they are, in fact, distinct concepts, although in some cases a Locker may rely on a Storage (such as the default FileSystem ones). Storage is where assets are stored, whereas Sync is what coordinates certificate-related tasks. Storage keeps certificates that are obtained, whereas Sync ensures that a certificate is obtained only once at a time.
+The default Storage is implemented using the file system, so mounting the same shared folder is sufficient (see [Storage](#storage) for more on that)! If you need an alternate Storage implementation, feel free to use one, provided that all the instances use the _same_ one. :)
 
 See [Storage](#storage) and the associated [godoc](https://godoc.org/github.com/mholt/certmagic#Storage) for more information!
+
 
 ## The ACME Challenges
 
@@ -409,11 +406,11 @@ CertMagic relies on storage to store certificates and other TLS assets (OCSP sta
 
 By default, CertMagic stores assets on the local file system in `$HOME/.local/share/certmagic` (and honors `$XDG_CACHE_HOME` if set). CertMagic will create the directory if it does not exist. If writes are denied, things will not be happy, so make sure CertMagic can write to it!
 
-The notion of a "cluster" or "fleet" of instances that may be serving the same site and sharing certificates, etc, is tied to storage. Simply, any instances that use the same storage facilities are considered part of the cluster. So if you deploy 100 instances of CertMagic behind a load balancer, they are all part of the same cluster if they share storage. Sharing storage could be mounting a shared folder, or implementing some other distributed storage such as a database server or KV store.
+The notion of a "cluster" or "fleet" of instances that may be serving the same site and sharing certificates, etc, is tied to storage. Simply, any instances that use the same storage facilities are considered part of the cluster. So if you deploy 100 instances of CertMagic behind a load balancer, they are all part of the same cluster if they share the same storage configuration. Sharing storage could be mounting a shared folder, or implementing some other distributed storage system such as a database server or KV store.
 
-The easiest way to change the storage being used is to set `certmagic.DefaultStorage` to a value that satisfies the [Storage interface](https://godoc.org/github.com/mholt/certmagic#Storage).
+The easiest way to change the storage being used is to set `certmagic.DefaultStorage` to a value that satisfies the [Storage interface](https://godoc.org/github.com/mholt/certmagic#Storage). Keep in mind that a valid `Storage` must be able to implement some operations atomically in order to provide locking and synchronization.
 
-If you write a Storage or Sync implementation, let us know and we'll add it to the project so people can find it!
+If you write a Storage implementation, let us know and we'll add it to the project so people can find it!
 
 
 ## Cache
@@ -434,6 +431,8 @@ Yes, just call the relevant method on the `Config` to add your own certificate t
 - [`CacheUnmanagedCertificatePEMBytes()`](https://godoc.org/github.com/mholt/certmagic#Config.CacheUnmanagedCertificatePEMBytes)
 - [`CacheUnmanagedCertificatePEMFile()`](https://godoc.org/github.com/mholt/certmagic#Config.CacheUnmanagedCertificatePEMFile)
 - [`CacheUnmanagedTLSCertificate()`](https://godoc.org/github.com/mholt/certmagic#Config.CacheUnmanagedTLSCertificate)
+
+Keep in mind that unmanaged certificates are (obviously) not renewed for you, so you'll have to replace them when you do. However, OCSP stapling is performed even for unmanaged certificates that qualify.
 
 
 ### Does CertMagic obtain SAN certificates?

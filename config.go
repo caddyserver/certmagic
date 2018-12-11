@@ -38,15 +38,6 @@ type Config struct {
 	// selecting an existing ACME server account
 	Email string
 
-	// The synchronization implementation - although
-	// it is not strictly required to have a Sync
-	// value in general, all instances running in
-	// in a cluster for the same domain names must
-	// specify a Sync and use the same one, otherwise
-	// some cert operations will not be properly
-	// coordinated
-	Sync Locker
-
 	// Set to true if agreed to the CA's
 	// subscriber agreement
 	Agreed bool
@@ -196,20 +187,6 @@ func NewWithCache(certCache *Cache, cfg Config) *Config {
 	}
 	if !cfg.MustStaple {
 		cfg.MustStaple = MustStaple
-	}
-
-	// if no sync facility is provided, we'll default to
-	// a file system synchronizer backed by the storage
-	// given to certCache (if it is one), or just a simple
-	// in-memory sync facility otherwise (strictly speaking,
-	// a sync is not required; only if running multiple
-	// instances for the same domain names concurrently)
-	if cfg.Sync == nil {
-		if ccfs, ok := certCache.storage.(FileStorage); ok {
-			cfg.Sync = NewFileStorageLocker(ccfs)
-		} else {
-			cfg.Sync = NewMemoryLocker()
-		}
 	}
 
 	// ensure the unexported fields are valid
