@@ -199,7 +199,12 @@ func NewWithCache(certCache *Cache, cfg Config) *Config {
 }
 
 // Manage causes the certificates for domainNames to be managed
-// according to cfg.
+// according to cfg. If cfg is enabled for OnDemand, then this
+// simply whitelists the domain names. Otherwise, the certificate(s)
+// for each name are loaded from storage or obtained from the CA;
+// and if loaded from storage, renewed if they are expiring or
+// expired. It then caches the certificate in memory and is
+// prepared to serve them up during TLS handshakes.
 func (cfg *Config) Manage(domainNames []string) error {
 	for _, domainName := range domainNames {
 		// if on-demand is configured, simply whitelist this name
