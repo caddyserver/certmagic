@@ -229,6 +229,10 @@ func (fs FileStorage) lockDir() string {
 	return filepath.Join(fs.Path, "locks")
 }
 
+func (fs FileStorage) String() string {
+	return "FileStorage:" + fs.Path
+}
+
 // fileStorageWaiter waits for a file to disappear; it
 // polls the file system to check for the existence of
 // a file. It also uses a WaitGroup to optimize the
