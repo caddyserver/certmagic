@@ -28,7 +28,7 @@ Use CertMagic:
 
 ```go
 // encrypted HTTPS with HTTP->HTTPS redirects - yay! 🔒😍
-certmagic.HTTPS("example.com", mux)
+certmagic.HTTPS([]string{"example.com"}, mux)
 ```
 
 That line of code will serve your HTTP router `mux` over HTTPS, complete with HTTP->HTTPS redirects. It obtains and renews the TLS certificates. It staples OCSP responses for greater privacy and security. As long as your domain name points to your server, CertMagic will keep its connections secure.
