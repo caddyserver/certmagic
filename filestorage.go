@@ -278,9 +278,9 @@ func (fs FileStorage) UnlockAllObtained() {
 func (fs FileStorage) lockFileStale(filename string) bool {
 	info, err := os.Stat(filename)
 	if err != nil {
-		return true // no good way to handle this, really; lock is useless?
+		return true // no good way to handle this, really...
 	}
-	return time.Since(info.ModTime()) > staleLockDuration
+	return fileLockIsStale(info)
 }
 
 func (fs FileStorage) lockDir() string {
@@ -304,17 +304,28 @@ type fileStorageWaiter struct {
 	wg       *sync.WaitGroup
 }
 
-// Wait waits until the lock at fw.filename is released.
+// Wait waits until the lock at fw.filename is
+// released or until it becomes stale.
 func (fw *fileStorageWaiter) Wait() {
 	start := time.Now()
 	fw.wg.Wait()
 	for time.Since(start) < staleLockDuration {
-		_, err := os.Stat(fw.filename)
-		if os.IsNotExist(err) {
+		info, err := os.Stat(fw.filename)
+		if err != nil {
+			return
+		}
+		if fileLockIsStale(info) {
 			return
 		}
 		time.Sleep(1 * time.Second)
 	}
+}
+
+func fileLockIsStale(info os.FileInfo) bool {
+	if info == nil {
+		return true
+	}
+	return time.Since(info.ModTime()) > staleLockDuration
 }
 
 var _ Storage = FileStorage{}
