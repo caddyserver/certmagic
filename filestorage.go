@@ -182,11 +182,15 @@ func (fs FileStorage) Lock(key string) error {
 		return err
 	}
 
+	// since there isn't already a waiter for the lock, make one
 	fw = &fileStorageWaiter{
 		key:      key,
 		filename: filepath.Join(lockDir, StorageKeys.safe(key)+".lock"),
 		wg:       new(sync.WaitGroup),
 	}
+	fw.wg.Add(1)
+	fs.fileStorageNameLocks[key] = fw
+	fileStorageNameLocksMu.Unlock()
 
 	var checkedStaleLock bool // sentinel value to avoid infinite goto-ing
 
@@ -210,22 +214,16 @@ createLock:
 			}
 
 			// if lock is not stale, wait upon it
-			fileStorageNameLocksMu.Unlock()
 			fw.Wait()
 			return nil
 		}
 
 		// otherwise, this was some unexpected error
-		fileStorageNameLocksMu.Unlock()
 		return err
 	}
 	lf.Close()
 
-	// looks like we get the lock
-	fw.wg.Add(1)
-	fs.fileStorageNameLocks[key] = fw
-	fileStorageNameLocksMu.Unlock()
-
+	// cool, we got the lock right away
 	return nil
 }
 

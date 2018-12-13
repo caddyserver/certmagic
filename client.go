@@ -234,13 +234,14 @@ func (c *acmeClient) Obtain(name string) error {
 	}
 	defer func() {
 		if err := c.config.certCache.storage.Unlock(lockKey); err != nil {
-			log.Printf("[ERROR] Obtain: Unable to unlock '%s' for '%s': %v", lockKey, name, err)
+			log.Printf("[ERROR][%s] Obtain: Unable to unlock '%s': %v", name, lockKey, err)
 		}
 	}()
 
 	// check if obtain is still needed -- might have
 	// been obtained during lock
 	if c.config.storageHasCertResources(name) {
+		log.Printf("[INFO][%s] Obtain: Certificate already exists in storage", name)
 		return nil
 	}
 
@@ -293,7 +294,7 @@ func (c *acmeClient) Renew(name string) error {
 	}
 	defer func() {
 		if err := c.config.certCache.storage.Unlock(lockKey); err != nil {
-			log.Printf("[ERROR] Renew: Unable to unlock '%s' for '%s': %v", lockKey, name, err)
+			log.Printf("[ERROR][%s] Renew: Unable to unlock '%s': %v", name, lockKey, err)
 		}
 	}()
 
@@ -305,6 +306,7 @@ func (c *acmeClient) Renew(name string) error {
 
 	// Check if renew is still needed - might have been renewed while waiting for lock
 	if !c.config.managedCertNeedsRenewal(certRes) {
+		log.Printf("[INFO][%s] Renew: Certificate appears to have been renewed already", name)
 		return nil
 	}
 
