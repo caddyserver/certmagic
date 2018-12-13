@@ -404,7 +404,7 @@ If `OnDemand` is set and `Manage()` is called, then the names given to `Manage()
 
 CertMagic relies on storage to store certificates and other TLS assets (OCSP staple cache, coordinating locks, etc). Persistent storage is a requirement when using CertMagic: ephemeral storage will likely lead to rate limiting on the CA-side as CertMagic will always have to get new certificates.
 
-By default, CertMagic stores assets on the local file system in `$HOME/.local/share/certmagic` (and honors `$XDG_CACHE_HOME` if set). CertMagic will create the directory if it does not exist. If writes are denied, things will not be happy, so make sure CertMagic can write to it!
+By default, CertMagic stores assets on the local file system in `$HOME/.local/share/certmagic` (and honors `$XDG_DATA_HOME` if set). CertMagic will create the directory if it does not exist. If writes are denied, things will not be happy, so make sure CertMagic can write to it!
 
 The notion of a "cluster" or "fleet" of instances that may be serving the same site and sharing certificates, etc, is tied to storage. Simply, any instances that use the same storage facilities are considered part of the cluster. So if you deploy 100 instances of CertMagic behind a load balancer, they are all part of the same cluster if they share the same storage configuration. Sharing storage could be mounting a shared folder, or implementing some other distributed storage system such as a database server or KV store.
 
