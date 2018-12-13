@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/xenolf/lego/certcrypto"
+	"github.com/xenolf/lego/certificate"
 	"github.com/xenolf/lego/challenge"
 	"github.com/xenolf/lego/challenge/tlsalpn01"
 	"github.com/xenolf/lego/lego"
@@ -277,12 +278,6 @@ func (cfg *Config) ObtainCert(name string, interactive bool) error {
 		return nil
 	}
 
-	// we expect this to be a new site; if the
-	// cert already exists, then no-op
-	if cfg.certCache.storage.Exists(StorageKeys.SiteCert(cfg.CA, name)) {
-		return nil
-	}
-
 	client, err := cfg.newACMEClient(interactive)
 	if err != nil {
 		return err
@@ -328,13 +323,6 @@ func (cfg *Config) TLSConfig() *tls.Config {
 	}
 }
 
-// RenewAllCerts triggers a renewal check of all
-// certificates in the cache. It only renews
-// certificates if they need to be renewed.
-// func (cfg *Config) RenewAllCerts(interactive bool) error {
-// 	return cfg.certCache.RenewManagedCertificates(interactive)
-// }
-
 // preObtainOrRenewChecks perform a few simple checks before
 // obtaining or renewing a certificate with ACME, and returns
 // whether this name should be skipped (like if it's not
@@ -355,4 +343,28 @@ func (cfg *Config) preObtainOrRenewChecks(name string, allowPrompts bool) (bool,
 	}
 
 	return false, nil
+}
+
+// storageHasCertResources returns true if the storage
+// associated with cfg's certificate cache has all the
+// resources related to the certificate for domain: the
+// certificate, the private key, and the metadata.
+func (cfg *Config) storageHasCertResources(domain string) bool {
+	certKey := StorageKeys.SiteCert(cfg.CA, domain)
+	keyKey := StorageKeys.SitePrivateKey(cfg.CA, domain)
+	metaKey := StorageKeys.SiteMeta(cfg.CA, domain)
+	return cfg.certCache.storage.Exists(certKey) &&
+		cfg.certCache.storage.Exists(keyKey) &&
+		cfg.certCache.storage.Exists(metaKey)
+}
+
+// managedCertNeedsRenewal returns true if certRes is
+// expiring soon or already expired, or if the process
+// of checking the expiration returned an error.
+func (cfg *Config) managedCertNeedsRenewal(certRes certificate.Resource) bool {
+	cert, err := cfg.makeCertificate(certRes.Certificate, certRes.PrivateKey)
+	if err != nil {
+		return true
+	}
+	return cert.NeedsRenewal()
 }

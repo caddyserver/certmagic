@@ -31,6 +31,8 @@ import (
 // cross-platform way or persisting ACME assets on the file system.
 type FileStorage struct {
 	Path string
+
+	fileStorageNameLocks map[string]*fileStorageWaiter
 }
 
 // Exists returns true if key exists in fs.
@@ -149,18 +151,26 @@ func dataDir() string {
 	return filepath.Join(baseDir, "certmagic")
 }
 
-// TryLock attempts to get a lock for name, otherwise it returns
-// a Waiter value to wait until the other process is finished.
-func (fs FileStorage) TryLock(key string) (Waiter, error) {
+// Lock obtains a lock named by the given key. It blocks
+// until the lock can be obtained or an error is returned.
+func (fs FileStorage) Lock(key string) error {
+	// can't defer the unlock because we might have
+	// to Wait() for a while before returning, so we're
+	// careful to unlock at all the right places
 	fileStorageNameLocksMu.Lock()
-	defer fileStorageNameLocksMu.Unlock()
+
+	if fs.fileStorageNameLocks == nil {
+		fs.fileStorageNameLocks = make(map[string]*fileStorageWaiter)
+	}
 
 	// see if lock already exists within this process - allows
 	// for faster unlocking since we don't have to poll the disk
-	fw, ok := fileStorageNameLocks[key]
+	fw, ok := fs.fileStorageNameLocks[key]
 	if ok {
 		// lock already created within process, let caller wait on it
-		return fw, nil
+		fileStorageNameLocksMu.Unlock()
+		fw.Wait()
+		return nil
 	}
 
 	// attempt to persist lock to disk by creating lock file
@@ -168,7 +178,8 @@ func (fs FileStorage) TryLock(key string) (Waiter, error) {
 	// parent dir must exist
 	lockDir := fs.lockDir()
 	if err := os.MkdirAll(lockDir, 0700); err != nil {
-		return nil, err
+		fileStorageNameLocksMu.Unlock()
+		return err
 	}
 
 	fw = &fileStorageWaiter{
@@ -199,19 +210,23 @@ createLock:
 			}
 
 			// if lock is not stale, wait upon it
-			return fw, nil
+			fileStorageNameLocksMu.Unlock()
+			fw.Wait()
+			return nil
 		}
 
 		// otherwise, this was some unexpected error
-		return nil, err
+		fileStorageNameLocksMu.Unlock()
+		return err
 	}
 	lf.Close()
 
 	// looks like we get the lock
 	fw.wg.Add(1)
-	fileStorageNameLocks[key] = fw
+	fs.fileStorageNameLocks[key] = fw
+	fileStorageNameLocksMu.Unlock()
 
-	return nil, nil
+	return nil
 }
 
 // Unlock releases the lock for name.
@@ -219,7 +234,11 @@ func (fs FileStorage) Unlock(key string) error {
 	fileStorageNameLocksMu.Lock()
 	defer fileStorageNameLocksMu.Unlock()
 
-	fw, ok := fileStorageNameLocks[key]
+	if fs.fileStorageNameLocks == nil {
+		fs.fileStorageNameLocks = make(map[string]*fileStorageWaiter)
+	}
+
+	fw, ok := fs.fileStorageNameLocks[key]
 	if !ok {
 		return fmt.Errorf("FileStorage: no lock to release for %s", key)
 	}
@@ -239,15 +258,18 @@ func (fs FileStorage) Unlock(key string) error {
 
 	// clean up in memory
 	fw.wg.Done()
-	delete(fileStorageNameLocks, key)
+	delete(fs.fileStorageNameLocks, key)
 
 	return nil
 }
 
-// UnlockAllObtained removes all locks obtained by
-// this instance of fs.
+// UnlockAllObtained removes all locks obtained
+// by this instance of fs.
 func (fs FileStorage) UnlockAllObtained() {
-	for key, fw := range fileStorageNameLocks {
+	if fs.fileStorageNameLocks == nil {
+		fs.fileStorageNameLocks = make(map[string]*fileStorageWaiter)
+	}
+	for key, fw := range fs.fileStorageNameLocks {
 		err := fs.Unlock(fw.key)
 		if err != nil {
 			log.Printf("[ERROR][%s] Releasing obtained lock for %s: %v", fs, key, err)
@@ -284,11 +306,11 @@ type fileStorageWaiter struct {
 	wg       *sync.WaitGroup
 }
 
-// Wait waits until the lock is released.
+// Wait waits until the lock at fw.filename is released.
 func (fw *fileStorageWaiter) Wait() {
 	start := time.Now()
 	fw.wg.Wait()
-	for time.Since(start) < 1*time.Hour {
+	for time.Since(start) < staleLockDuration {
 		_, err := os.Stat(fw.filename)
 		if os.IsNotExist(err) {
 			return
@@ -297,12 +319,12 @@ func (fw *fileStorageWaiter) Wait() {
 	}
 }
 
-var fileStorageNameLocks = make(map[string]*fileStorageWaiter)
-var fileStorageNameLocksMu sync.Mutex
-
 var _ Storage = FileStorage{}
-var _ Waiter = &fileStorageWaiter{}
 
 // staleLockDuration is the length of time
 // before considering a lock to be stale.
 const staleLockDuration = 2 * time.Hour
+
+// fileStorageNameLocksMu guard access to all
+// FileStorage.fileStorageNameLock values.
+var fileStorageNameLocksMu sync.Mutex
