@@ -275,7 +275,7 @@ See [Storage](#storage) and the associated [godoc](https://godoc.org/github.com/
 
 ## The ACME Challenges
 
-This section describes how to solve the ACME challenges.
+This section describes how to solve the ACME challenges. Challenges are how you demonstrate to the certificate authority some control over your domain name, thus authorizing them to grant you a certificate for that name. [The great innovation of ACME](https://www.dotconferences.com/2016/10/matthew-holt-go-with-acme) is that verification by CAs can now be automated, rather than having to click links in emails (who ever thought that was a good idea??).
 
 If you're using the high-level convenience functions like `HTTPS()`, `Listen()`, or `TLS()`, the HTTP and/or TLS-ALPN challenges are solved for you because they also start listeners. However, if you're making a `Config` and you start your own server manually, you'll need to be sure the ACME challenges can be solved so certificates can be renewed.
 
@@ -469,6 +469,11 @@ Caddy is known for its robust HTTPS+ACME features. When ACME certificate authori
 Caddy was also the first to sport "on-demand" issuance technology, which obtains certificates during the first TLS handshake for an allowed SNI name.
 
 Consequently, CertMagic brings all these (and more) features and capabilities right into your own Go programs.
+
+You can [watch a 2016 dotGo talk](https://www.dotconferences.com/2016/10/matthew-holt-go-with-acme) by the author of this library about using ACME to automate certificate management in Go programs:
+
+[![Matthew Holt speaking at dotGo 2016 about ACME in Go](https://user-images.githubusercontent.com/1128849/49921557-2d506780-fe6b-11e8-97bf-6053b6b4eb48.png)](https://www.dotconferences.com/2016/10/matthew-holt-go-with-acme)
+
 
 
 ## Credits and License
