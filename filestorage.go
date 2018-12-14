@@ -175,13 +175,7 @@ func (fs *FileStorage) Lock(key string) error {
 
 	// attempt to persist lock to disk by creating lock file
 
-	// parent dir must exist
 	lockDir := fs.lockDir()
-	if err := os.MkdirAll(lockDir, 0700); err != nil {
-		fileStorageNameLocksMu.Unlock()
-		return err
-	}
-
 	// since there isn't already a waiter for the lock, make one
 	fw = &fileStorageWaiter{
 		key:      key,
@@ -192,39 +186,41 @@ func (fs *FileStorage) Lock(key string) error {
 	fs.fileStorageNameLocks[key] = fw
 	fileStorageNameLocksMu.Unlock()
 
-	var checkedStaleLock bool // sentinel value to avoid infinite goto-ing
-
-createLock:
-	// create the file in a special mode such that an
-	// error is returned if it already exists
-	lf, err := os.OpenFile(fw.filename, os.O_CREATE|os.O_EXCL, 0644)
-	if err != nil {
-		if os.IsExist(err) {
-			// another process has the lock
-
-			// check to see if the lock is stale, if we haven't already
-			if !checkedStaleLock {
-				checkedStaleLock = true
-				if fs.lockFileStale(fw.filename) {
-					log.Printf("[INFO][%s] Lock for '%s' is stale; removing then retrying: %s",
-						fs, key, fw.filename)
-					os.Remove(fw.filename)
-					goto createLock
-				}
-			}
-
-			// if lock is not stale, wait upon it
-			fw.Wait()
-			return nil
+	for {
+		// parent dir must exist
+		if err := os.MkdirAll(lockDir, 0700); err != nil {
+			fileStorageNameLocksMu.Unlock()
+			return err
 		}
 
-		// otherwise, this was some unexpected error
-		return err
-	}
-	lf.Close()
+		// create the file in a special mode such that an
+		// error is returned if it already exists
+		lf, err := os.OpenFile(fw.filename, os.O_CREATE|os.O_EXCL, 0644)
+		switch {
+		case err == nil:
+			// cool, we got the lock right away
+			lf.Close()
+			return nil
+		case os.IsExist(err):
+			// another process has the lock
+			info, err := os.Stat(fw.filename)
+			switch {
+			case err != nil:
+			case fileLockIsStale(info):
+				log.Printf("[INFO][%s] Lock for '%s' is stale; removing then retrying: %s",
+					fs, key, fw.filename)
+				os.Remove(fw.filename)
+			default:
+				time.Sleep(1 * time.Second)
+			}
+		default:
+			// otherwise, this was some unexpected error
 
-	// cool, we got the lock right away
-	return nil
+			// we called wg.Add(1) above but didn't actually acquire the lock
+			fw.wg.Done()
+			return err
+		}
+	}
 }
 
 // Unlock releases the lock for name.
