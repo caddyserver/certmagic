@@ -36,13 +36,13 @@ type FileStorage struct {
 }
 
 // Exists returns true if key exists in fs.
-func (fs FileStorage) Exists(key string) bool {
+func (fs *FileStorage) Exists(key string) bool {
 	_, err := os.Stat(fs.Filename(key))
 	return !os.IsNotExist(err)
 }
 
 // Store saves value at key.
-func (fs FileStorage) Store(key string, value []byte) error {
+func (fs *FileStorage) Store(key string, value []byte) error {
 	filename := fs.Filename(key)
 	err := os.MkdirAll(filepath.Dir(filename), 0700)
 	if err != nil {
@@ -52,7 +52,7 @@ func (fs FileStorage) Store(key string, value []byte) error {
 }
 
 // Load retrieves the value at key.
-func (fs FileStorage) Load(key string) ([]byte, error) {
+func (fs *FileStorage) Load(key string) ([]byte, error) {
 	contents, err := ioutil.ReadFile(fs.Filename(key))
 	if os.IsNotExist(err) {
 		return nil, ErrNotExist(err)
@@ -62,7 +62,7 @@ func (fs FileStorage) Load(key string) ([]byte, error) {
 
 // Delete deletes the value at key.
 // TODO: Delete any empty folders caused by this operation
-func (fs FileStorage) Delete(key string) error {
+func (fs *FileStorage) Delete(key string) error {
 	err := os.Remove(fs.Filename(key))
 	if os.IsNotExist(err) {
 		return ErrNotExist(err)
@@ -71,7 +71,7 @@ func (fs FileStorage) Delete(key string) error {
 }
 
 // List returns all keys that match prefix.
-func (fs FileStorage) List(prefix string, recursive bool) ([]string, error) {
+func (fs *FileStorage) List(prefix string, recursive bool) ([]string, error) {
 	var keys []string
 	walkPrefix := fs.Filename(prefix)
 
@@ -102,7 +102,7 @@ func (fs FileStorage) List(prefix string, recursive bool) ([]string, error) {
 }
 
 // Stat returns information about key.
-func (fs FileStorage) Stat(key string) (KeyInfo, error) {
+func (fs *FileStorage) Stat(key string) (KeyInfo, error) {
 	fi, err := os.Stat(fs.Filename(key))
 	if os.IsNotExist(err) {
 		return KeyInfo{}, ErrNotExist(err)
@@ -120,7 +120,7 @@ func (fs FileStorage) Stat(key string) (KeyInfo, error) {
 
 // Filename returns the key as a path on the file
 // system prefixed by fs.Path.
-func (fs FileStorage) Filename(key string) string {
+func (fs *FileStorage) Filename(key string) string {
 	return filepath.Join(fs.Path, filepath.FromSlash(key))
 }
 
@@ -153,7 +153,7 @@ func dataDir() string {
 
 // Lock obtains a lock named by the given key. It blocks
 // until the lock can be obtained or an error is returned.
-func (fs FileStorage) Lock(key string) error {
+func (fs *FileStorage) Lock(key string) error {
 	// can't defer the unlock because we might have
 	// to Wait() for a while before returning, so we're
 	// careful to unlock at all the right places
@@ -228,7 +228,7 @@ createLock:
 }
 
 // Unlock releases the lock for name.
-func (fs FileStorage) Unlock(key string) error {
+func (fs *FileStorage) Unlock(key string) error {
 	fileStorageNameLocksMu.Lock()
 	defer fileStorageNameLocksMu.Unlock()
 
@@ -249,7 +249,7 @@ func (fs FileStorage) Unlock(key string) error {
 
 // UnlockAllObtained removes all locks obtained
 // by this instance of fs.
-func (fs FileStorage) UnlockAllObtained() {
+func (fs *FileStorage) UnlockAllObtained() {
 	if fs.fileStorageNameLocks == nil {
 		fs.fileStorageNameLocks = make(map[string]*fileStorageWaiter)
 	}
@@ -261,7 +261,7 @@ func (fs FileStorage) UnlockAllObtained() {
 	}
 }
 
-func (fs FileStorage) lockFileStale(filename string) bool {
+func (fs *FileStorage) lockFileStale(filename string) bool {
 	info, err := os.Stat(filename)
 	if err != nil {
 		return true // no good way to handle this, really...
@@ -269,11 +269,11 @@ func (fs FileStorage) lockFileStale(filename string) bool {
 	return fileLockIsStale(info)
 }
 
-func (fs FileStorage) lockDir() string {
+func (fs *FileStorage) lockDir() string {
 	return filepath.Join(fs.Path, "locks")
 }
 
-func (fs FileStorage) String() string {
+func (fs *FileStorage) String() string {
 	return "FileStorage:" + fs.Path
 }
 
@@ -314,7 +314,7 @@ func fileLockIsStale(info os.FileInfo) bool {
 	return time.Since(info.ModTime()) > staleLockDuration
 }
 
-var _ Storage = FileStorage{}
+var _ Storage = (*FileStorage)(nil)
 
 // staleLockDuration is the length of time
 // before considering a lock to be stale.

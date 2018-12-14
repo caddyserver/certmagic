@@ -24,7 +24,7 @@ import (
 
 func TestSaveCertResource(t *testing.T) {
 	defer func() {
-		fs := testConfig.certCache.storage.(FileStorage)
+		fs := testConfig.certCache.storage.(*FileStorage)
 		err := os.RemoveAll(fs.Path)
 		if err != nil {
 			t.Fatalf("Could not remove temporary storage directory (%s): %v", fs.Path, err)
@@ -61,9 +61,9 @@ func TestSaveCertResource(t *testing.T) {
 // and clean up storage more safely than RemoveAll like we do in
 // certain tests, OR use an in-memory storage for tests instead
 
-var testConfig = NewWithCache(NewCache(FileStorage{Path: "./_testdata_tmp"}),
+var testConfig = NewWithCache(NewCache(&FileStorage{Path: "./_testdata_tmp"}),
 	Config{
 		CA: "https://example.com/acme/directory",
 	})
 
-var testStorageDir = testConfig.certCache.storage.(FileStorage).Path
+var testStorageDir = testConfig.certCache.storage.(*FileStorage).Path
