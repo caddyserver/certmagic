@@ -33,7 +33,7 @@ certmagic.HTTPS([]string{"example.com"}, mux)
 
 That line of code will serve your HTTP router `mux` over HTTPS, complete with HTTP->HTTPS redirects. It obtains and renews the TLS certificates. It staples OCSP responses for greater privacy and security. As long as your domain name points to your server, CertMagic will keep its connections secure.
 
-Compared to other ACME client libraries for Go, only CertMagic supports the full suite of ACME features, and no other library will ever match CertMagic's maturity and reliability.
+Compared to other ACME client libraries for Go, only CertMagic supports the full suite of ACME features, and no other library matches CertMagic's maturity and reliability.
 
 
 
