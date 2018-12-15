@@ -232,10 +232,6 @@ func (fs FileStorage) Unlock(key string) error {
 	fileStorageNameLocksMu.Lock()
 	defer fileStorageNameLocksMu.Unlock()
 
-	if fs.fileStorageNameLocks == nil {
-		fs.fileStorageNameLocks = make(map[string]*fileStorageWaiter)
-	}
-
 	fw, ok := fs.fileStorageNameLocks[key]
 	if !ok {
 		return fmt.Errorf("FileStorage: no lock to release for %s", key)
@@ -243,16 +239,6 @@ func (fs FileStorage) Unlock(key string) error {
 
 	// remove lock file
 	os.Remove(fw.filename)
-
-	// if parent folder is now empty, remove it too to keep it tidy
-	dir, err := os.Open(fs.lockDir()) // OK to ignore error here
-	if err == nil {
-		items, _ := dir.Readdirnames(3) // OK to ignore error here
-		if len(items) == 0 {
-			os.Remove(dir.Name())
-		}
-		dir.Close()
-	}
 
 	// clean up in memory
 	fw.wg.Done()
