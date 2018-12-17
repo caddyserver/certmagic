@@ -189,7 +189,6 @@ func (fs *FileStorage) Lock(key string) error {
 	for {
 		// parent dir must exist
 		if err := os.MkdirAll(lockDir, 0700); err != nil {
-			fileStorageNameLocksMu.Unlock()
 			return err
 		}
 
