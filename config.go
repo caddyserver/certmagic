@@ -317,14 +317,34 @@ func (cfg *Config) RevokeCert(domain string, interactive bool) error {
 	return client.Revoke(domain)
 }
 
-// TLSConfig returns a TLS configuration that
-// can be used to configure TLS listeners. It
-// supports the TLS-ALPN challenge and serves
-// up certificates managed by cfg.
+// TLSConfig is an opinionated method that returns a
+// recommended, modern TLS configuration that can be
+// used to configure TLS listeners, which also supports
+// the TLS-ALPN challenge and serves up certificates
+// managed by cfg.
+//
+// Unlike the package TLS() function, this method does
+// not, by itself, enable certificate management for
+// any domain names.
+//
+// Feel free to further customize the returned tls.Config,
+// but do not mess with the GetCertificate or NextProtos
+// fields unless you know what you're doing, as they're
+// necessary to solve the TLS-ALPN challenge.
 func (cfg *Config) TLSConfig() *tls.Config {
 	return &tls.Config{
+		// these two fields necessary for TLS-ALPN challenge
 		GetCertificate: cfg.GetCertificate,
 		NextProtos:     []string{"h2", "http/1.1", tlsalpn01.ACMETLS1Protocol},
+
+		// the rest recommended for modern TLS servers
+		MinVersion: tls.VersionTLS12,
+		CurvePreferences: []tls.CurveID{
+			tls.X25519,
+			tls.CurveP256,
+		},
+		CipherSuites:             preferredDefaultCipherSuites(),
+		PreferServerCipherSuites: true,
 	}
 }
 
