@@ -32,7 +32,8 @@ import (
 type FileStorage struct {
 	Path string
 
-	fileStorageNameLocks map[string]*fileStorageWaiter
+	fileStorageNameLocks   map[string]*fileStorageWaiter
+	fileStorageNameLocksMu sync.Mutex
 }
 
 // Exists returns true if key exists in fs.
@@ -157,7 +158,7 @@ func (fs *FileStorage) Lock(key string) error {
 	// can't defer the unlock because we might have
 	// to Wait() for a while before returning, so we're
 	// careful to unlock at all the right places
-	fileStorageNameLocksMu.Lock()
+	fs.fileStorageNameLocksMu.Lock()
 
 	if fs.fileStorageNameLocks == nil {
 		fs.fileStorageNameLocks = make(map[string]*fileStorageWaiter)
@@ -168,7 +169,7 @@ func (fs *FileStorage) Lock(key string) error {
 	fw, ok := fs.fileStorageNameLocks[key]
 	if ok {
 		// lock already created within process, let caller wait on it
-		fileStorageNameLocksMu.Unlock()
+		fs.fileStorageNameLocksMu.Unlock()
 		fw.Wait()
 		return nil
 	}
@@ -184,7 +185,7 @@ func (fs *FileStorage) Lock(key string) error {
 	}
 	fw.wg.Add(1)
 	fs.fileStorageNameLocks[key] = fw
-	fileStorageNameLocksMu.Unlock()
+	fs.fileStorageNameLocksMu.Unlock()
 
 	for {
 		// parent dir must exist
@@ -224,8 +225,8 @@ func (fs *FileStorage) Lock(key string) error {
 
 // Unlock releases the lock for name.
 func (fs *FileStorage) Unlock(key string) error {
-	fileStorageNameLocksMu.Lock()
-	defer fileStorageNameLocksMu.Unlock()
+	fs.fileStorageNameLocksMu.Lock()
+	defer fs.fileStorageNameLocksMu.Unlock()
 
 	fw, ok := fs.fileStorageNameLocks[key]
 	if !ok {
@@ -314,7 +315,3 @@ var _ Storage = (*FileStorage)(nil)
 // staleLockDuration is the length of time
 // before considering a lock to be stale.
 const staleLockDuration = 2 * time.Hour
-
-// fileStorageNameLocksMu guard access to all
-// FileStorage.fileStorageNameLock values.
-var fileStorageNameLocksMu sync.Mutex
