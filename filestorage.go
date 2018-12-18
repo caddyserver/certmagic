@@ -188,37 +188,26 @@ func (fs *FileStorage) Lock(key string) error {
 	fs.fileStorageNameLocksMu.Unlock()
 
 	for {
-		// parent dir must exist
-		if err := os.MkdirAll(lockDir, 0700); err != nil {
-			return err
-		}
-
-		// create the file in a special mode such that an
-		// error is returned if it already exists
-		lf, err := os.OpenFile(fw.filename, os.O_CREATE|os.O_EXCL, 0644)
-		switch {
-		case err == nil:
-			// cool, we got the lock right away
-			lf.Close()
+		if createLockfile(fw.filename) == nil {
 			return nil
-		case os.IsExist(err):
-			// another process has the lock
-			info, err := os.Stat(fw.filename)
-			switch {
-			case err != nil:
-			case fileLockIsStale(info):
-				log.Printf("[INFO][%s] Lock for '%s' is stale; removing then retrying: %s",
-					fs, key, fw.filename)
-				os.Remove(fw.filename)
-			default:
-				time.Sleep(1 * time.Second)
+		}
+		// we'll just assume the lockfile exists
+		info, err := os.Stat(fw.filename)
+		switch {
+		case err != nil:
+			// we assume the lockfile no longer exists; if we're now able to create it, great!
+			err := createLockfile(fw.filename)
+			if err != nil {
+				// we called wg.Add(1) above but didn't actually acquire the lock
+				fw.wg.Done()
 			}
-		default:
-			// otherwise, this was some unexpected error
-
-			// we called wg.Add(1) above but didn't actually acquire the lock
-			fw.wg.Done()
 			return err
+		case fileLockIsStale(info):
+			log.Printf("[INFO][%s] Lock for '%s' is stale; removing then retrying: %s",
+				fs, key, fw.filename)
+			removeLockfile(fw.filename)
+		default:
+			time.Sleep(1 * time.Second)
 		}
 	}
 }
@@ -233,8 +222,7 @@ func (fs *FileStorage) Unlock(key string) error {
 		return fmt.Errorf("FileStorage: no lock to release for %s", key)
 	}
 
-	// remove lock file
-	os.Remove(fw.filename)
+	removeLockfile(fw.filename)
 
 	// clean up in memory
 	fw.wg.Done()
@@ -308,6 +296,43 @@ func fileLockIsStale(info os.FileInfo) bool {
 		return true
 	}
 	return time.Since(info.ModTime()) > staleLockDuration
+}
+
+// createLockfile atomically creates the lockfile identified by filename.
+// A successfully created lockfile should be removed with removeLockfile.
+func createLockfile(filename string) error {
+	err := atomicallyCreateFile(filename)
+	if err == nil {
+		// if the app crashes in removeLockfile() there is a small chance the .unlock file is left behind.
+		// it's safe to just remove it as it's a guard against double removal of the .lock file.
+		os.Remove(filename + ".unlock")
+	}
+	return err
+}
+
+// removeLockfile removes filename, a lockfile created by createLockfile.
+func removeLockfile(filename string) error {
+	unlockfn := filename + ".unlock"
+	if err := atomicallyCreateFile(unlockfn); err != nil {
+		if os.IsExist(err) {
+			// another process is handling the unlocking
+			return nil
+		}
+		return err
+	}
+	defer os.Remove(unlockfn)
+	return os.Remove(filename)
+}
+
+// atomicallyCreateFile atomically creates the file identified by filename if it doesn't already exist.
+func atomicallyCreateFile(filename string) error {
+	// no need to check this, we only really care about the file creation error
+	os.MkdirAll(filepath.Dir(filename), 0700)
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_EXCL, 0644)
+	if err == nil {
+		f.Close()
+	}
+	return err
 }
 
 var _ Storage = (*FileStorage)(nil)
