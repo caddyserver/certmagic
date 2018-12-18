@@ -177,6 +177,8 @@ certmagic.Email = "you@yours.com"
 certmagic.CA = certmagic.LetsEncryptStagingCA
 ```
 
+For fully-functional program examples, check out [this Twitter thread](https://twitter.com/mholt6/status/1073103805112147968) (or read it [unrolled into a single post](https://threadreaderapp.com/thread/1073103805112147968.html)).
+
 
 #### Serving HTTP handlers with HTTPS
 
