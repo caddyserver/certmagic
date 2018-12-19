@@ -22,7 +22,6 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"sync"
 	"time"
 )
 
@@ -31,9 +30,6 @@ import (
 // cross-platform way or persisting ACME assets on the file system.
 type FileStorage struct {
 	Path string
-
-	lockWaiters   map[string]fileLockWaiter
-	lockWaitersMu sync.Mutex
 }
 
 // Exists returns true if key exists in fs.
@@ -127,25 +123,6 @@ func (fs *FileStorage) Filename(key string) string {
 // Lock obtains a lock named by the given key. It blocks
 // until the lock can be obtained or an error is returned.
 func (fs *FileStorage) Lock(key string) error {
-	// see if this process is already waiting for the same lock;
-	// if so, we might as well borrow the same waiter
-	fs.lockWaitersMu.Lock()
-	if fs.lockWaiters == nil {
-		fs.lockWaiters = make(map[string]fileLockWaiter)
-	}
-	fw, ok := fs.lockWaiters[key]
-	fs.lockWaitersMu.Unlock()
-	if ok {
-		// this process is already waiting for the
-		// lock; wait on the same wait chan to avoid
-		// more polling than is necessary
-		fw.wait()
-	}
-
-	return fs.getLock(key)
-}
-
-func (fs *FileStorage) getLock(key string) error {
 	start := time.Now()
 	filename := fs.lockFilename(key)
 
@@ -185,35 +162,9 @@ func (fs *FileStorage) getLock(key string) error {
 				time.Since(start), key)
 
 		default:
-			// lock file exists and is not stale; wait on it,
-			// and allow other threads in this process to share
-			// our wait logic so we don't excessively poll
-			fs.lockWaitersMu.Lock()
-			fw, ok := fs.lockWaiters[key]
-			if ok {
-				// waiter already exists for this lock; use
-				// it, then try again to obtain the lock
-				fs.lockWaitersMu.Unlock()
-				fw.wait()
-				continue
-			}
-			waitChan := make(chan struct{})
-			fs.lockWaiters[key] = waitChan
-			fs.lockWaitersMu.Unlock()
-
-			// poll until the lock is available; ours should be
-			// the only thread in this process polling the disk
-			for time.Since(start) < staleLockDuration {
-				info, err := os.Stat(filename)
-				if err != nil || fileLockIsStale(info) {
-					fs.lockWaitersMu.Lock()
-					close(waitChan)
-					delete(fs.lockWaiters, key)
-					fs.lockWaitersMu.Unlock()
-					break
-				}
-				time.Sleep(fileLockPollInterval)
-			}
+			// lockfile exists and is not stale;
+			// just wait a moment and try again
+			time.Sleep(fileLockPollInterval)
 		}
 	}
 }
@@ -233,22 +184,6 @@ func (fs *FileStorage) lockFilename(key string) string {
 
 func (fs *FileStorage) lockDir() string {
 	return filepath.Join(fs.Path, "locks")
-}
-
-// fileLockWaiter is used to block until a
-// lock might be available; it is used solely
-// to reduce excessive polling of the file
-// system.
-type fileLockWaiter <-chan struct{}
-
-// wait blocks until w is closed, or
-// until the lock being waited upon
-// would have become stale.
-func (w fileLockWaiter) wait() {
-	select {
-	case <-time.Tick(staleLockDuration):
-	case <-w:
-	}
 }
 
 func fileLockIsStale(info os.FileInfo) bool {
