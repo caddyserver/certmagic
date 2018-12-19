@@ -91,15 +91,6 @@ type Locker interface {
 	// TryLock or if Unlock was not called at all. Unlock should also
 	// clean up any unused resources allocated during TryLock.
 	Unlock(key string) error
-
-	// UnlockAllObtained removes all locks obtained by this process,
-	// upon which others may be waiting. The importer should call
-	// this on shutdowns (and crashes, ideally) to avoid leaving stale
-	// locks, but Locker implementations must NOT rely on this being
-	// the case and should anticipate and handle stale locks. Errors
-	// should be printed or logged, since there could be multiple,
-	// with no good way to handle them anyway.
-	UnlockAllObtained()
 }
 
 // KeyInfo holds information about a key in storage.
