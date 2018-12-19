@@ -17,7 +17,7 @@ package certmagic
 import "testing"
 
 func TestNewCache(t *testing.T) {
-	c := NewCache(FileStorage{Path: "./foo"})
+	c := NewCache(&FileStorage{Path: "./foo"})
 	if c.RenewInterval != DefaultRenewInterval {
 		t.Errorf("Expected RenewInterval to be set to default value, but it wasn't: %s", c.RenewInterval)
 	}
