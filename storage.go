@@ -84,12 +84,9 @@ type Locker interface {
 	Lock(key string) error
 
 	// Unlock releases the lock for key. This method must ONLY be
-	// called after a successful call to TryLock where no Waiter was
-	// returned, and only after the operation requiring the lock is
-	// finished, even if it errored or timed out. It is INCORRECT to
-	// call Unlock if any non-nil value was returned from a call to
-	// TryLock or if Unlock was not called at all. Unlock should also
-	// clean up any unused resources allocated during TryLock.
+	// called after a successful call to Lock, and only after the
+	// critical section is finished, even if it errored or timed
+	// out. Unlock cleans up any resources allocated during Lock.
 	Unlock(key string) error
 }
 
