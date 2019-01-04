@@ -189,19 +189,16 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 		})
 
 		// disable any challenges that should not be used
-		var disabledChallenges []challenge.Type
 		if cfg.DisableHTTPChallenge {
-			disabledChallenges = append(disabledChallenges, challenge.HTTP01)
+			c.acmeClient.Challenge.Remove(challenge.HTTP01)
 		}
 		if cfg.DisableTLSALPNChallenge {
-			disabledChallenges = append(disabledChallenges, challenge.TLSALPN01)
-		}
-		if len(disabledChallenges) > 0 {
-			c.acmeClient.Challenge.Exclude(disabledChallenges)
+			c.acmeClient.Challenge.Remove(challenge.TLSALPN01)
 		}
 	} else {
 		// Otherwise, use DNS challenge exclusively
-		c.acmeClient.Challenge.Exclude([]challenge.Type{challenge.HTTP01, challenge.TLSALPN01})
+		c.acmeClient.Challenge.Remove(challenge.HTTP01)
+		c.acmeClient.Challenge.Remove(challenge.TLSALPN01)
 		c.acmeClient.Challenge.SetDNS01Provider(cfg.DNSProvider)
 	}
 
