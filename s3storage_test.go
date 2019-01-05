@@ -61,7 +61,7 @@ func (m mockedS3) PutObject(input *s3.PutObjectInput) (*s3.PutObjectOutput, erro
 }
 
 func (m mockedS3) DeleteObject(input *s3.DeleteObjectInput) (*s3.DeleteObjectOutput, error) {
-	for k, _ := range m.objectKeys {
+	for k := range m.objectKeys {
 		if *input.Key == k {
 			delete(m.objectKeys, *input.Key)
 			return &s3.DeleteObjectOutput{}, nil
