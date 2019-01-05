@@ -1,24 +1,23 @@
 package certmagic
 
 import (
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"path/filepath"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"bytes"
-	"io/ioutil"
 	"fmt"
-	"time"
-	"log"
-	"strings"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"io/ioutil"
+	"log"
+	"path/filepath"
+	"strings"
+	"time"
 )
 
 const (
 	lockFileExists = "Lock file for already exists"
 )
-
 
 // S3Storage implements the certmagic Storage interface using amazon's
 // s3 storage.  An effort has been made to make the S3Storage implementation
@@ -29,9 +28,9 @@ const (
 // and is safe for concurrent use
 
 type S3Storage struct {
-	Path string
+	Path   string
 	bucket *string
-	svc s3iface.S3API
+	svc    s3iface.S3API
 }
 
 func NewS3Storage(bucketName, aws_region string) *S3Storage {
@@ -44,10 +43,9 @@ func NewS3Storage(bucketName, aws_region string) *S3Storage {
 	svc := s3.New(sess)
 
 	store := &S3Storage{
-		bucket:aws.String(bucketName),
-		svc:svc,
-		Path: "certmagic",
-
+		bucket: aws.String(bucketName),
+		svc:    svc,
+		Path:   "certmagic",
 	}
 
 	return store
@@ -57,9 +55,9 @@ func NewS3Storage(bucketName, aws_region string) *S3Storage {
 func (s *S3Storage) Exists(key string) bool {
 	_, err := s.svc.GetObject(&s3.GetObjectInput{
 		Bucket: s.bucket,
-		Key: aws.String(key),
+		Key:    aws.String(key),
 	})
-	if err ==  nil {
+	if err == nil {
 		return true
 	}
 	aerr, _ := err.(awserr.Error)
@@ -71,8 +69,8 @@ func (s *S3Storage) Store(key string, value []byte) error {
 	filename := s.Filename(key)
 	_, err := s.svc.PutObject(&s3.PutObjectInput{
 		Bucket: s.bucket,
-		Key: aws.String(filename),
-		Body: bytes.NewReader(value),
+		Key:    aws.String(filename),
+		Body:   bytes.NewReader(value),
 	})
 
 	if err != nil {
@@ -85,7 +83,7 @@ func (s *S3Storage) Store(key string, value []byte) error {
 func (s *S3Storage) Load(key string) ([]byte, error) {
 	result, err := s.svc.GetObject(&s3.GetObjectInput{
 		Bucket: s.bucket,
-		Key: aws.String(s.Filename(key)),
+		Key:    aws.String(s.Filename(key)),
 	})
 	if err != nil {
 		return nil, err
@@ -102,7 +100,7 @@ func (s *S3Storage) Load(key string) ([]byte, error) {
 func (s *S3Storage) Delete(key string) error {
 	_, err := s.svc.DeleteObject(&s3.DeleteObjectInput{
 		Bucket: s.bucket,
-		Key: aws.String(s.Filename(key)),
+		Key:    aws.String(s.Filename(key)),
 	})
 	if err != nil {
 		return err
@@ -110,11 +108,10 @@ func (s *S3Storage) Delete(key string) error {
 	return nil
 }
 
-
 // List returns all keys that match prefix.
-// because s3 has no concept of directories, everything is an explict path,
+// because s3 has no concept of directories, everything is an explicit path,
 // there is really no such thing as recursive search. This is simply
-// here to fullfill the interface requirements of the List function
+// here to fulfill the interface requirements of the List function
 func (s *S3Storage) List(prefix string, recursive bool) ([]string, error) {
 	var keys []string
 
@@ -135,13 +132,12 @@ func (s *S3Storage) List(prefix string, recursive bool) ([]string, error) {
 	return keys, nil
 }
 
-
 // Stat returns information about key.
 func (s *S3Storage) Stat(key string) (KeyInfo, error) {
 
 	result, err := s.svc.GetObject(&s3.GetObjectInput{
 		Bucket: s.bucket,
-		Key: aws.String(key),
+		Key:    aws.String(key),
 	})
 
 	if err != nil {
@@ -149,9 +145,9 @@ func (s *S3Storage) Stat(key string) (KeyInfo, error) {
 	}
 
 	return KeyInfo{
-		Key:key,
-		Size: *result.ContentLength,
-		Modified: *result.LastModified,
+		Key:        key,
+		Size:       *result.ContentLength,
+		Modified:   *result.LastModified,
 		IsTerminal: true,
 	}, nil
 }
@@ -186,7 +182,7 @@ func (s *S3Storage) Lock(key string) error {
 
 		info, err := s.Stat(lockFile)
 		switch {
-		case s.errNoSuchKey(err) :
+		case s.errNoSuchKey(err):
 			// must have just been removed; try again to create it
 			continue
 
@@ -243,8 +239,8 @@ func (s *S3Storage) createLockFile(filename string) error {
 	}
 	_, err := s.svc.PutObject(&s3.PutObjectInput{
 		Bucket: s.bucket,
-		Key: aws.String(filename),
-		Body: bytes.NewReader([]byte("lock")),
+		Key:    aws.String(filename),
+		Body:   bytes.NewReader([]byte("lock")),
 	})
 
 	if err != nil {
@@ -256,7 +252,7 @@ func (s *S3Storage) createLockFile(filename string) error {
 func (s *S3Storage) deleteLockFile(keyPath string) error {
 	_, err := s.svc.DeleteObject(&s3.DeleteObjectInput{
 		Bucket: s.bucket,
-		Key: aws.String(keyPath),
+		Key:    aws.String(keyPath),
 	})
 	if err != nil {
 		return err

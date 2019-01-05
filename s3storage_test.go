@@ -1,15 +1,15 @@
 package certmagic
 
 import (
-	"testing"
-	"time"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"bytes"
-	"io/ioutil"
 	"errors"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"io/ioutil"
+	"testing"
+	"time"
 )
 
 type mockedS3 struct {
@@ -18,9 +18,9 @@ type mockedS3 struct {
 }
 
 var (
-	MockStore = &S3Storage{}
+	MockStore    = &S3Storage{}
 	errPutObject = errors.New("could not put object")
-	tstamp = time.Now()
+	tstamp       = time.Now()
 )
 
 func init() {
@@ -40,8 +40,8 @@ func (m mockedS3) GetObject(input *s3.GetObjectInput) (*s3.GetObjectOutput, erro
 		if *input.Key == k {
 			rc := ioutil.NopCloser(bytes.NewReader(v))
 			return &s3.GetObjectOutput{
-				Body:rc,
-				LastModified: aws.Time(tstamp),
+				Body:          rc,
+				LastModified:  aws.Time(tstamp),
 				ContentLength: aws.Int64(int64(len(v))),
 			}, nil
 		}
@@ -70,7 +70,6 @@ func (m mockedS3) DeleteObject(input *s3.DeleteObjectInput) (*s3.DeleteObjectOut
 	return nil, awserr.New(s3.ErrCodeNoSuchKey, *input.Key, nil)
 }
 
-
 var testStore *S3Storage
 
 func init() {
@@ -78,13 +77,12 @@ func init() {
 }
 
 func TestS3Storage_Exists(t *testing.T) {
-	cases := []struct{
-		input string
+	cases := []struct {
+		input    string
 		expected bool
-
 	}{
 		{"existingKey", true},
-		{ "testKey", false},
+		{"testKey", false},
 	}
 	for _, c := range cases {
 		got := MockStore.Exists(c.input)
@@ -95,16 +93,15 @@ func TestS3Storage_Exists(t *testing.T) {
 }
 
 func TestS3Storage_Store(t *testing.T) {
-	cases := []struct{
-		inputKey string
+	cases := []struct {
+		inputKey   string
 		inputValue []byte
-		expected error
-
+		expected   error
 	}{
 		{"a key", []byte("Test"), nil},
-		{ "", nil, errPutObject},
-		{ "test", nil, errPutObject},
-		{ "", []byte("test"), errPutObject},
+		{"", nil, errPutObject},
+		{"test", nil, errPutObject},
+		{"", []byte("test"), errPutObject},
 	}
 	for _, c := range cases {
 		got := MockStore.Store(c.inputKey, c.inputValue)
@@ -115,10 +112,10 @@ func TestS3Storage_Store(t *testing.T) {
 }
 
 func TestS3Storage_Load(t *testing.T) {
-	cases := []struct{
-		input string
+	cases := []struct {
+		input    string
 		expected []byte
-	} {
+	}{
 		{"existingKey", []byte("test")},
 		{"nonExistentKey", nil},
 	}
@@ -144,16 +141,16 @@ func TestS3Storage_Delete(t *testing.T) {
 	input = "nonExistantKey"
 	got = MockStore.Delete(input)
 	if got == nil {
-		t.Errorf("\ninput: %s\nexpected: %+v\n     got: %+v", input, awserr.New(s3.ErrCodeNoSuchKey, MockStore.Filename(input), nil) , got)
+		t.Errorf("\ninput: %s\nexpected: %+v\n     got: %+v", input, awserr.New(s3.ErrCodeNoSuchKey, MockStore.Filename(input), nil), got)
 	}
 }
 
 func TestS3Storage_Stat(t *testing.T) {
-	cases := []struct{
-		input string
+	cases := []struct {
+		input    string
 		expected KeyInfo
-	} {
-		{"existingKey", KeyInfo{Key: "existingKey", Size: 4, Modified: tstamp, IsTerminal:true}},
+	}{
+		{"existingKey", KeyInfo{Key: "existingKey", Size: 4, Modified: tstamp, IsTerminal: true}},
 		{"nonExistentKey", KeyInfo{}},
 	}
 	for _, c := range cases {
@@ -163,7 +160,6 @@ func TestS3Storage_Stat(t *testing.T) {
 		}
 	}
 }
-
 
 func TestS3Storage_LockUnlock(t *testing.T) {
 	lock1 := "testLock1"
@@ -186,14 +182,12 @@ func TestS3Storage_LockUnlock(t *testing.T) {
 
 }
 
-
 func TestS3Storage_String(t *testing.T) {
 	expected := "S3Storage:certmagic"
 	if testStore.String() != expected {
 		t.Errorf("Expected: %s, go %s", expected, testStore.String())
 	}
 }
-
 
 func TestS3Storage_lockDir(t *testing.T) {
 	expected := "certmagic/locks"
@@ -205,8 +199,8 @@ func TestS3Storage_lockDir(t *testing.T) {
 
 func TestS3Storage_fileLockIsStale(t *testing.T) {
 	info := KeyInfo{
-		Key: "key",
-		Modified: time.Now().Add(-time.Hour*999),
+		Key:      "key",
+		Modified: time.Now().Add(-time.Hour * 999),
 	}
 	expected := true
 	got := testStore.fileLockIsStale(info)
