@@ -221,7 +221,7 @@ func (keys KeyBuilder) emailUsername(email string) string {
 	return email[:at]
 }
 
-// safe standardizes and sanitizes str for use as
+// Safe standardizes and sanitizes str for use as
 // a storage key. This method is idempotent.
 func (keys KeyBuilder) Safe(str string) string {
 	str = strings.ToLower(str)
