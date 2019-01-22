@@ -29,9 +29,6 @@ func TestUnexportedGetCertificate(t *testing.T) {
 	firstCert := Certificate{Names: []string{"example.com"}}
 	certCache.cache["0xdeadbeef"] = firstCert
 	cfg.certificates["example.com"] = "0xdeadbeef"
-	if cert, matched, defaulted := cfg.getCertificate("Example.com"); !matched || defaulted || cert.Names[0] != "example.com" {
-		t.Errorf("Didn't get a cert for 'Example.com' or got the wrong one: %v, matched=%v, defaulted=%v", cert, matched, defaulted)
-	}
 	if cert, matched, defaulted := cfg.getCertificate("example.com"); !matched || defaulted || cert.Names[0] != "example.com" {
 		t.Errorf("Didn't get a cert for 'example.com' or got the wrong one: %v, matched=%v, defaulted=%v", cert, matched, defaulted)
 	}
