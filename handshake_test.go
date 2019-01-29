@@ -16,6 +16,7 @@ package certmagic
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"net"
 	"testing"
 )
 
@@ -23,10 +24,19 @@ func TestGetCertificate(t *testing.T) {
 	certCache := &Cache{cache: make(map[string]Certificate)}
 	cfg := &Config{certificates: make(map[string]string), certCache: certCache}
 
-	hello := &tls.ClientHelloInfo{ServerName: "example.com"}
-	helloSub := &tls.ClientHelloInfo{ServerName: "sub.example.com"}
-	helloNoSNI := &tls.ClientHelloInfo{}
-	helloNoMatch := &tls.ClientHelloInfo{ServerName: "nomatch"} // TODO (see below)
+	// create a fake connection to get access to conn.LocalAddr()
+	l, _ := net.Listen("tcp", ":0")
+	defer l.Close()
+	conn, _ := net.Dial("tcp", l.Addr().String())
+	if conn == nil {
+		t.Errorf("failed to create a fake connection")
+	}
+	defer conn.Close()
+
+	hello := &tls.ClientHelloInfo{ServerName: "example.com", Conn: conn}
+	helloSub := &tls.ClientHelloInfo{ServerName: "sub.example.com", Conn: conn}
+	helloNoSNI := &tls.ClientHelloInfo{Conn: conn}
+	helloNoMatch := &tls.ClientHelloInfo{ServerName: "nomatch", Conn: conn} // TODO (see below)
 
 	// When cache is empty
 	if cert, err := cfg.GetCertificate(hello); err == nil {
@@ -44,8 +54,8 @@ func TestGetCertificate(t *testing.T) {
 	} else if cert.Leaf.DNSNames[0] != "example.com" {
 		t.Errorf("Got wrong certificate with exact match; expected 'example.com', got: %v", cert)
 	}
-	if _, err := cfg.GetCertificate(helloNoSNI); err != nil {
-		t.Errorf("Got an error with no SNI but shouldn't have, when cert exists in cache: %v", err)
+	if cert, err := cfg.GetCertificate(helloNoSNI); err == nil {
+		t.Errorf("GetCertificate should return error when cache is not empty and server name is blank, got: %v", cert)
 	}
 
 	// When retrieving wildcard certificate
