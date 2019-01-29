@@ -350,12 +350,12 @@ The DNS challenge is perhaps the most useful challenge because it allows you to 
 
 This challenge works by setting a special record in the domain's zone. To do this automatically, your DNS provider needs to offer an API by which changes can be made to domain names, and the changes need to take effect immediately for best results. CertMagic supports [all of lego's DNS provider implementations](https://github.com/xenolf/lego/tree/master/providers/dns)! All of them clean up the temporary record after the challenge completes.
 
-To enable it, just set the `DNSProvider` field on a `certmagic.Config` struct, or set the default `certmagic.DNSProvider` variable. For example, if my domains' DNS was served by DNSimple (they're great, by the way) and I set my DNSimple API credentials in environment variables:
+To enable it, just set the `DNSProvider` field on a `certmagic.Config` struct, or set the default `certmagic.DNSProvider` variable. For example, if my domains' DNS was served by DNSimple and I set my DNSimple API credentials in environment variables:
 
 ```go
 import "github.com/xenolf/lego/providers/dns/dnsimple"
 
-provider, err := dnsimple.NewProvider()
+provider, err := dnsimple.NewDNSProvider()
 if err != nil {
 	return err
 }
