@@ -69,7 +69,7 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 
 	wrapped := wrappedClientHelloInfo{
 		ClientHelloInfo: clientHello,
-		serverNameOrIP:  CertNameFromClientHello(clientHello),
+		serverNameOrIP:  cfg.certNameFromClientHello(clientHello),
 	}
 
 	// get the certificate and serve it up
@@ -396,18 +396,24 @@ func (cfg *Config) tryDistributedChallengeSolver(clientHello *tls.ClientHelloInf
 	return Certificate{Certificate: *cert}, true, nil
 }
 
-// CertNameFromClientHello returns a normalized name for which to
+// certNameFromClientHello returns a normalized name for which to
 // look up a certificate given this ClientHelloInfo. If the client
 // did not send a ServerName value, the connection's local IP is
 // assumed.
-func CertNameFromClientHello(hello *tls.ClientHelloInfo) string {
+func (cfg *Config) certNameFromClientHello(hello *tls.ClientHelloInfo) string {
 	// Not going to trim trailing dots here since RFC 3546 says,
 	// "The hostname is represented ... without a trailing dot."
 	// Just normalize to lowercase and remove any leading or
 	// trailing whitespace n case the hello was sloppily made
 	name := strings.ToLower(strings.TrimSpace(hello.ServerName))
 
-	// if SNI is not set, assume IP of listener
+	// if SNI is not set, default to configured default server name
+	// if available
+	if name == "" && cfg.DefaultServerName != "" {
+		name = cfg.DefaultServerName
+	}
+
+	// otherwise, assume IP of listener
 	if name == "" && hello.Conn != nil {
 		addr := hello.Conn.LocalAddr().String()
 		ip, _, err := net.SplitHostPort(addr)

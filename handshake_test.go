@@ -58,6 +58,14 @@ func TestGetCertificate(t *testing.T) {
 		t.Errorf("GetCertificate should return error when cache is not empty and server name is blank, got: %v", cert)
 	}
 
+	// With DefaultServerName configured
+	cfg.DefaultServerName = "example.com"
+	if cert, err := cfg.GetCertificate(helloNoSNI); err != nil {
+		t.Errorf("Got an error with no SNI but shouldn't have, when cert exists in cache: %v", err)
+	} else if cert.Leaf.DNSNames[0] != "example.com" {
+		t.Errorf("Got wrong certificate with exact match; expected 'example.com', got: %v", cert)
+	}
+
 	// When retrieving wildcard certificate
 	wildcardCert := Certificate{
 		Names:       []string{"*.example.com"},
