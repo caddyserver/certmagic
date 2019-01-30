@@ -50,6 +50,7 @@ type Config struct {
 	DisableTLSALPNChallenge bool
 
 	// How long before expiration to renew certificates
+	// Setting this to a negative value disables renewal
 	RenewDurationBefore time.Duration
 
 	// How long before expiration to require a renewed

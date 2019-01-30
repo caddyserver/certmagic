@@ -68,6 +68,9 @@ func (c Certificate) NeedsRenewal() bool {
 	if len(c.configs) > 0 && c.configs[0].RenewDurationBefore > 0 {
 		renewDurationBefore = c.configs[0].RenewDurationBefore
 	}
+	if renewDurationBefore < 0 {
+		return false
+	}
 	return time.Until(c.NotAfter) < renewDurationBefore
 }
 
