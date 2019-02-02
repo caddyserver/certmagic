@@ -14,14 +14,17 @@
 
 package certmagic
 
-import "testing"
+import (
+	"crypto/tls"
+	"testing"
+)
 
 func TestUnexportedGetCertificate(t *testing.T) {
 	certCache := &Cache{cache: make(map[string]Certificate)}
 	cfg := &Config{certificates: make(map[string]string), certCache: certCache}
 
 	// When cache is empty
-	if _, matched, defaulted := cfg.getCertificate("example.com"); matched || defaulted {
+	if _, matched, defaulted := cfg.getCertificate(&tls.ClientHelloInfo{ServerName: "example.com"}); matched || defaulted {
 		t.Errorf("Got a certificate when cache was empty; matched=%v, defaulted=%v", matched, defaulted)
 	}
 
@@ -29,19 +32,19 @@ func TestUnexportedGetCertificate(t *testing.T) {
 	firstCert := Certificate{Names: []string{"example.com"}}
 	certCache.cache["0xdeadbeef"] = firstCert
 	cfg.certificates["example.com"] = "0xdeadbeef"
-	if cert, matched, defaulted := cfg.getCertificate("example.com"); !matched || defaulted || cert.Names[0] != "example.com" {
+	if cert, matched, defaulted := cfg.getCertificate(&tls.ClientHelloInfo{ServerName: "example.com"}); !matched || defaulted || cert.Names[0] != "example.com" {
 		t.Errorf("Didn't get a cert for 'example.com' or got the wrong one: %v, matched=%v, defaulted=%v", cert, matched, defaulted)
 	}
 
 	// When retrieving wildcard certificate
 	certCache.cache["0xb01dface"] = Certificate{Names: []string{"*.example.com"}}
 	cfg.certificates["*.example.com"] = "0xb01dface"
-	if cert, matched, defaulted := cfg.getCertificate("sub.example.com"); !matched || defaulted || cert.Names[0] != "*.example.com" {
+	if cert, matched, defaulted := cfg.getCertificate(&tls.ClientHelloInfo{ServerName: "sub.example.com"}); !matched || defaulted || cert.Names[0] != "*.example.com" {
 		t.Errorf("Didn't get wildcard cert for 'sub.example.com' or got the wrong one: %v, matched=%v, defaulted=%v", cert, matched, defaulted)
 	}
 
 	// When no certificate matches and SNI is provided, return no certificate (should be TLS alert)
-	if cert, matched, defaulted := cfg.getCertificate("nomatch"); matched || defaulted {
+	if cert, matched, defaulted := cfg.getCertificate(&tls.ClientHelloInfo{ServerName: "nomatch"}); matched || defaulted {
 		t.Errorf("Expected matched=false, defaulted=false; but got matched=%v, defaulted=%v (cert: %v)", matched, defaulted, cert)
 	}
 }

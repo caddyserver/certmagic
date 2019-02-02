@@ -16,6 +16,7 @@ package certmagic
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"net"
 	"testing"
 )
 
@@ -23,10 +24,19 @@ func TestGetCertificate(t *testing.T) {
 	certCache := &Cache{cache: make(map[string]Certificate)}
 	cfg := &Config{certificates: make(map[string]string), certCache: certCache}
 
-	hello := &tls.ClientHelloInfo{ServerName: "example.com"}
-	helloSub := &tls.ClientHelloInfo{ServerName: "sub.example.com"}
-	helloNoSNI := &tls.ClientHelloInfo{}
-	helloNoMatch := &tls.ClientHelloInfo{ServerName: "nomatch"} // TODO (see below)
+	// create a test connection for conn.LocalAddr()
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer l.Close()
+	conn, _ := net.Dial("tcp", l.Addr().String())
+	if conn == nil {
+		t.Errorf("failed to create a test connection")
+	}
+	defer conn.Close()
+
+	hello := &tls.ClientHelloInfo{ServerName: "example.com", Conn: conn}
+	helloSub := &tls.ClientHelloInfo{ServerName: "sub.example.com", Conn: conn}
+	helloNoSNI := &tls.ClientHelloInfo{Conn: conn}
+	helloNoMatch := &tls.ClientHelloInfo{ServerName: "nomatch", Conn: conn}
 
 	// When cache is empty
 	if cert, err := cfg.GetCertificate(hello); err == nil {
@@ -44,8 +54,8 @@ func TestGetCertificate(t *testing.T) {
 	} else if cert.Leaf.DNSNames[0] != "example.com" {
 		t.Errorf("Got wrong certificate with exact match; expected 'example.com', got: %v", cert)
 	}
-	if _, err := cfg.GetCertificate(helloNoSNI); err != nil {
-		t.Errorf("Got an error with no SNI but shouldn't have, when cert exists in cache: %v", err)
+	if _, err := cfg.GetCertificate(helloNoSNI); err == nil {
+		t.Errorf("Did not get an error with no SNI and no DefaultServerName, but should have: %v", err)
 	}
 
 	// When retrieving wildcard certificate
@@ -62,14 +72,33 @@ func TestGetCertificate(t *testing.T) {
 	}
 
 	// When cache is NOT empty but there's no SNI
-	if cert, err := cfg.GetCertificate(helloNoSNI); err != nil {
-		t.Errorf("Expected random certificate with no error when no SNI, got err: %v", err)
-	} else if cert == nil || len(cert.Leaf.DNSNames) == 0 {
-		t.Errorf("Expected random cert with no matches, got: %v", cert)
+	if _, err := cfg.GetCertificate(helloNoSNI); err == nil {
+		t.Errorf("Expected TLS allert when no SNI and no DefaultServerName, but got: %v", err)
 	}
 
 	// When no certificate matches, raise an alert
 	if _, err := cfg.GetCertificate(helloNoMatch); err == nil {
 		t.Errorf("Expected an error when no certificate matched the SNI, got: %v", err)
+	}
+
+	// When default SNI is set and SNI is missing, retrieve default cert
+	cfg.DefaultServerName = "example.com"
+	if cert, err := cfg.GetCertificate(helloNoSNI); err != nil {
+		t.Errorf("Got an error with no SNI with DefaultServerName, but shouldn't have: %v", err)
+	} else if cert == nil || cert.Leaf.DNSNames[0] != "example.com" {
+		t.Errorf("Expected default cert, got: %v", cert)
+	}
+
+	// When default SNI is set and SNI is missing but IP address matches, retrieve IP cert
+	ipCert := Certificate{
+		Names:       []string{"127.0.0.1"},
+		Certificate: tls.Certificate{Leaf: &x509.Certificate{IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}}},
+		Hash:        "(don't overwrite the first or second one)",
+	}
+	cfg.cacheCertificate(ipCert)
+	if cert, err := cfg.GetCertificate(helloNoSNI); err != nil {
+		t.Errorf("Got an error with no SNI but matching IP, but shouldn't have: %v", err)
+	} else if cert == nil || len(cert.Leaf.IPAddresses) == 0 {
+		t.Errorf("Expected IP cert, got: %v", cert)
 	}
 }
