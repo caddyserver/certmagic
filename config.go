@@ -240,6 +240,10 @@ func NewWithCache(certCache *Cache, cfg Config) *Config {
 // prepared to serve them up during TLS handshakes.
 func (cfg *Config) Manage(domainNames []string) error {
 	for _, domainName := range domainNames {
+		if !HostQualifies(domainName) {
+			return fmt.Errorf("name does not qualify for automatic certificate management: %s", domainName)
+		}
+
 		// if on-demand is configured, simply whitelist this name
 		if cfg.OnDemand != nil {
 			if !cfg.OnDemand.whitelistContains(domainName) {
