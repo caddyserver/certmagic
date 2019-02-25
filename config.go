@@ -293,6 +293,9 @@ func (cfg *Config) Manage(domainNames []string) error {
 // it does not load them into memory. If interactive is true,
 // the user may be shown a prompt.
 func (cfg *Config) ObtainCert(name string, interactive bool) error {
+	if cfg.storageHasCertResources(name) {
+		return nil
+	}
 	skip, err := cfg.preObtainOrRenewChecks(name, interactive)
 	if err != nil {
 		return err
@@ -300,16 +303,10 @@ func (cfg *Config) ObtainCert(name string, interactive bool) error {
 	if skip {
 		return nil
 	}
-
-	if cfg.storageHasCertResources(name) {
-		return nil
-	}
-
 	client, err := cfg.newACMEClient(interactive)
 	if err != nil {
 		return err
 	}
-
 	return client.Obtain(name)
 }
 

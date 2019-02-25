@@ -178,6 +178,7 @@ func TestGetEmailFromUserInput(t *testing.T) {
 func TestGetEmailFromRecent(t *testing.T) {
 	defer os.RemoveAll(testStorageDir)
 	testConfig.Email = ""
+	Email = ""
 	for i, eml := range []string{
 		"test4-1@foo.com",
 		"test4-2@foo.com",
