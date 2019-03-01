@@ -134,6 +134,94 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 	return httpsServer.Serve(hsln)
 }
 
+// HTTPSWithSelfSigned is basicly the same as HTTPS() but instead of Letsencrypt
+// it creates and serves selfsinged Certificate for domainNames
+func HTTPSWithSelfSigned(domainNames []string, mux http.Handler) error {
+	if mux == nil {
+		mux = http.DefaultServeMux
+	}
+
+	cfg, err := manageWithDefaultConfig([]string{}, false)
+	if err != nil {
+		return err
+	}
+
+	for _, domainName := range domainNames {
+		tlscert, err := newSelfSignedCertificate(
+			selfSignedConfig{
+				SAN:     []string{domainName},
+				KeyType: certcrypto.RSA4096,
+				Expire:  time.Now().AddDate(10, 0, 0),
+			})
+		if err != nil {
+			return err
+		}
+		err = cfg.CacheUnmanagedTLSCertificate(tlscert)
+		if err != nil {
+			return err
+		}
+	}
+
+	httpWg.Add(1)
+	defer httpWg.Done()
+
+	// if we haven't made listeners yet, do so now,
+	// and clean them up when all servers are done
+	lnMu.Lock()
+	if httpLn == nil && httpsLn == nil {
+		httpLn, err = net.Listen("tcp", fmt.Sprintf(":%d", HTTPPort))
+		if err != nil {
+			lnMu.Unlock()
+			return err
+		}
+
+		httpsLn, err = tls.Listen("tcp", fmt.Sprintf(":%d", HTTPSPort), cfg.TLSConfig())
+		if err != nil {
+			httpLn.Close()
+			httpLn = nil
+			lnMu.Unlock()
+			return err
+		}
+
+		go func() {
+			httpWg.Wait()
+			lnMu.Lock()
+			httpLn.Close()
+			httpsLn.Close()
+			lnMu.Unlock()
+		}()
+	}
+	hln, hsln := httpLn, httpsLn
+	lnMu.Unlock()
+
+	// create HTTP/S servers that are configured
+	// with sane default timeouts and appropriate
+	// handlers (the HTTP server solves the HTTP
+	// challenge and issues redirects to HTTPS,
+	// while the HTTPS server simply serves the
+	// user's handler)
+	httpServer := &http.Server{
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      5 * time.Second,
+		IdleTimeout:       5 * time.Second,
+		Handler:           cfg.HTTPChallengeHandler(http.HandlerFunc(httpRedirectHandler)),
+	}
+	httpsServer := &http.Server{
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       5 * time.Minute,
+		Handler:           mux,
+	}
+
+	log.Printf("Serving HTTP->HTTPS on %s and %s",
+		hln.Addr(), hsln.Addr())
+
+	go httpServer.Serve(hln)
+	return httpsServer.Serve(hsln)
+}
+
 func httpRedirectHandler(w http.ResponseWriter, r *http.Request) {
 	toURL := "https://"
 
