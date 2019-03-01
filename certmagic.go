@@ -68,10 +68,38 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 	if mux == nil {
 		mux = http.DefaultServeMux
 	}
+	var selfsigned bool
 
-	cfg, err := manageWithDefaultConfig(domainNames, false)
+	cfg := NewDefault()
+	cfg.DisableHTTPChallenge = false
+	domainsToManage := domainNames
+
+	if cfg.CA == SelfSignedCA {
+		domainsToManage = []string{}
+		selfsigned = true
+	}
+
+	err := cfg.Manage(domainsToManage)
 	if err != nil {
 		return err
+	}
+
+	if selfsigned {
+		for _, domainName := range domainNames {
+			tlscert, err := newSelfSignedCertificate(
+				selfSignedConfig{
+					SAN:     []string{domainName},
+					KeyType: certcrypto.RSA4096,
+					Expire:  time.Now().AddDate(10, 0, 0),
+				})
+			if err != nil {
+				return err
+			}
+			err = cfg.CacheUnmanagedTLSCertificate(tlscert)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	httpWg.Add(1)
@@ -512,6 +540,7 @@ const (
 const (
 	LetsEncryptStagingCA    = "https://acme-staging-v02.api.letsencrypt.org/directory"
 	LetsEncryptProductionCA = "https://acme-v02.api.letsencrypt.org/directory"
+	SelfSignedCA            = "self-signed"
 )
 
 // Port variables must remain their defaults unless you
