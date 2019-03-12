@@ -84,7 +84,7 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 - Full control over almost every aspect of the system
 - HTTP->HTTPS redirects (for HTTP applications)
 - Solves all 3 ACME challenges: HTTP, TLS-ALPN, and DNS
-- Over 50 DNS providers work out-of-the-box (powered by [lego](https://github.com/xenolf/lego)!)
+- Over 50 DNS providers work out-of-the-box (powered by [lego](https://github.com/go-acme/lego)!)
 - Pluggable storage implementations (default: file system)
 - Wildcard certificates (requires DNS challenge)
 - OCSP stapling for each qualifying certificate ([done right](https://gist.github.com/sleevi/5efe9ef98961ecfb4da8#gistcomment-2336055))
@@ -348,12 +348,12 @@ ln, err := tls.Listen("tcp", ":443", myTLSConfig)
 
 The DNS challenge is perhaps the most useful challenge because it allows you to obtain certificates without your server needing to be publicly accessible on the Internet, and it's the only challenge by which Let's Encrypt will issue wildcard certificates.
 
-This challenge works by setting a special record in the domain's zone. To do this automatically, your DNS provider needs to offer an API by which changes can be made to domain names, and the changes need to take effect immediately for best results. CertMagic supports [all of lego's DNS provider implementations](https://github.com/xenolf/lego/tree/master/providers/dns)! All of them clean up the temporary record after the challenge completes.
+This challenge works by setting a special record in the domain's zone. To do this automatically, your DNS provider needs to offer an API by which changes can be made to domain names, and the changes need to take effect immediately for best results. CertMagic supports [all of lego's DNS provider implementations](https://github.com/go-acme/lego/tree/master/providers/dns)! All of them clean up the temporary record after the challenge completes.
 
 To enable it, just set the `DNSProvider` field on a `certmagic.Config` struct, or set the default `certmagic.DNSProvider` variable. For example, if my domains' DNS was served by DNSimple and I set my DNSimple API credentials in environment variables:
 
 ```go
-import "github.com/xenolf/lego/providers/dns/dnsimple"
+import "github.com/go-acme/lego/providers/dns/dnsimple"
 
 provider, err := dnsimple.NewDNSProvider()
 if err != nil {
@@ -363,7 +363,7 @@ if err != nil {
 certmagic.DNSProvider = provider
 ```
 
-Now the DNS challenge will be used by default, and I can obtain certificates for wildcard domains. See the [godoc documentation for the provider you're using](https://godoc.org/github.com/xenolf/lego/providers/dns#pkg-subdirectories) to learn how to configure it. Most can be configured by env variables or by passing in a config struct. If you pass a config struct instead of using env variables, you will probably need to set some other defaults (that's just how lego works, currently):
+Now the DNS challenge will be used by default, and I can obtain certificates for wildcard domains. See the [godoc documentation for the provider you're using](https://godoc.org/github.com/go-acme/lego/providers/dns#pkg-subdirectories) to learn how to configure it. Most can be configured by env variables or by passing in a config struct. If you pass a config struct instead of using env variables, you will probably need to set some other defaults (that's just how lego works, currently):
 
 ```go
 PropagationTimeout: dns01.DefaultPollingInterval,
@@ -460,7 +460,7 @@ We welcome your contributions! Please see our **[contributing guidelines](https:
 
 ## Project History
 
-CertMagic is the core of Caddy's advanced TLS automation code, extracted into a library. The underlying ACME client implementation is [lego](https://github.com/xenolf/lego), which was originally developed for use in Caddy even before Let's Encrypt entered public beta in 2015.
+CertMagic is the core of Caddy's advanced TLS automation code, extracted into a library. The underlying ACME client implementation is [lego](https://github.com/go-acme/lego), which was originally developed for use in Caddy even before Let's Encrypt entered public beta in 2015.
 
 In the years since then, Caddy's TLS automation techniques have been widely adopted, tried and tested in production, and served millions of sites and secured trillions of connections.
 

@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xenolf/lego/registration"
+	"github.com/go-acme/lego/registration"
 )
 
 func TestUser(t *testing.T) {

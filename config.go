@@ -20,11 +20,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xenolf/lego/certcrypto"
-	"github.com/xenolf/lego/certificate"
-	"github.com/xenolf/lego/challenge"
-	"github.com/xenolf/lego/challenge/tlsalpn01"
-	"github.com/xenolf/lego/lego"
+	"github.com/go-acme/lego/certcrypto"
+	"github.com/go-acme/lego/certificate"
+	"github.com/go-acme/lego/challenge"
+	"github.com/go-acme/lego/challenge/tlsalpn01"
+	"github.com/go-acme/lego/lego"
 )
 
 // Config configures a certificate manager instance.
