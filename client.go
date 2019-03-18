@@ -23,12 +23,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xenolf/lego/certificate"
-	"github.com/xenolf/lego/challenge"
-	"github.com/xenolf/lego/challenge/http01"
-	"github.com/xenolf/lego/challenge/tlsalpn01"
-	"github.com/xenolf/lego/lego"
-	"github.com/xenolf/lego/registration"
+	"github.com/go-acme/lego/certificate"
+	"github.com/go-acme/lego/challenge"
+	"github.com/go-acme/lego/challenge/http01"
+	"github.com/go-acme/lego/challenge/tlsalpn01"
+	"github.com/go-acme/lego/lego"
+	"github.com/go-acme/lego/registration"
 )
 
 // acmeMu ensures that only one ACME challenge occurs at a time.

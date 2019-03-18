@@ -25,7 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xenolf/lego/challenge/tlsalpn01"
+	"github.com/go-acme/lego/challenge/tlsalpn01"
 )
 
 // GetCertificate gets a certificate to satisfy clientHello. In getting
