@@ -21,8 +21,6 @@ before_test:
   - go env
 
 test_script:
-  - wget -O - -q https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s v1.15.0
-  - golangci-lint run  --disable-all -E vet -E gofmt -E misspell -E ineffassign -E goimports -E deadcode --tests
   - go test -race ./...
 
 after_test:
