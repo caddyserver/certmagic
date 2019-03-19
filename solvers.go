@@ -20,8 +20,8 @@ import (
 	"log"
 	"path/filepath"
 
-	"github.com/xenolf/lego/challenge"
-	"github.com/xenolf/lego/challenge/tlsalpn01"
+	"github.com/go-acme/lego/challenge"
+	"github.com/go-acme/lego/challenge/tlsalpn01"
 )
 
 // tlsALPNSolver is a type that can solve TLS-ALPN challenges using

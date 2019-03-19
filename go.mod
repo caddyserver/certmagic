@@ -1,10 +1,11 @@
 module github.com/mholt/certmagic
 
 require (
+	github.com/cenkalti/backoff v2.1.1+incompatible // indirect
+	github.com/go-acme/lego v2.3.1-0.20190318164254-3684cc738d37+incompatible
 	github.com/klauspost/cpuid v1.2.0
 	github.com/miekg/dns v1.1.3 // indirect
 	github.com/stretchr/testify v1.3.0 // indirect
-	github.com/xenolf/lego v2.1.0+incompatible
 	golang.org/x/crypto v0.0.0-20190123085648-057139ce5d2b
 	golang.org/x/net v0.0.0-20190125091013-d26f9f9a57f3 // indirect
 	golang.org/x/sync v0.0.0-20181221193216-37e7f081c4d4 // indirect

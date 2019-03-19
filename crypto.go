@@ -26,8 +26,8 @@ import (
 	"fmt"
 	"hash/fnv"
 
+	"github.com/go-acme/lego/certificate"
 	"github.com/klauspost/cpuid"
-	"github.com/xenolf/lego/certificate"
 )
 
 // encodePrivateKey marshals a EC or RSA private key into a PEM-encoded array of bytes.

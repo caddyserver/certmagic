@@ -45,8 +45,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xenolf/lego/certcrypto"
-	"github.com/xenolf/lego/challenge"
+	"github.com/go-acme/lego/certcrypto"
+	"github.com/go-acme/lego/challenge"
 )
 
 // HTTPS serves mux for all domainNames using the HTTP
