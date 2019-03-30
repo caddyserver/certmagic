@@ -412,7 +412,7 @@ The notion of a "cluster" or "fleet" of instances that may be serving the same s
 
 The easiest way to change the storage being used is to set `certmagic.DefaultStorage` to a value that satisfies the [Storage interface](https://godoc.org/github.com/mholt/certmagic#Storage). Keep in mind that a valid `Storage` must be able to implement some operations atomically in order to provide locking and synchronization.
 
-If you write a Storage implementation, let us know and we'll add it to the project so people can find it!
+If you write a Storage implementation, please add it to the [project wiki](https://github.com/mholt/certmagic/wiki/Storage-Implementations) so people can find it!
 
 
 ## Cache
