@@ -474,7 +474,7 @@ var (
 
 	// The type of key to use when generating
 	// certificates
-	KeyType = certcrypto.RSA2048
+	KeyType = certcrypto.EC256
 
 	// The maximum amount of time to allow for
 	// obtaining a certificate. If empty, the
