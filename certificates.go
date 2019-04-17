@@ -118,7 +118,7 @@ func (cfg *Config) CacheUnmanagedCertificatePEMFile(certFile, keyFile string) er
 // It staples OCSP if possible.
 //
 // This method is safe for concurrent use.
-func (cfg *Config) CacheUnmanagedTLSCertificate(certCache *Cache, tlsCert tls.Certificate) error {
+func (cfg *Config) CacheUnmanagedTLSCertificate(tlsCert tls.Certificate) error {
 	var cert Certificate
 	err := fillCertFromLeaf(&cert, tlsCert)
 	if err != nil {
@@ -131,7 +131,7 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(certCache *Cache, tlsCert tls.Ce
 	if cfg.OnEvent != nil {
 		cfg.OnEvent("cached_unmanaged_cert", cert.Names)
 	}
-	certCache.cacheCertificate(cert)
+	cfg.certCache.cacheCertificate(cert)
 	return nil
 }
 

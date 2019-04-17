@@ -164,7 +164,7 @@ func (certCache *Cache) RenewManagedCertificates(interactive bool) error {
 				// Certificate renewal failed and the operator is present. See a discussion about
 				// this in issue mholt/caddy#642. For a while, we only stopped if the certificate
 				// was expired, but in reality, there is no difference between reporting it now
-				// versus later, except that there's somebody present to deal withit right now.
+				// versus later, except that there's somebody present to deal with it right now.
 				// Follow-up: See issue mholt/caddy#1680. Only fail in this case if the certificate
 				// is dangerously close to expiration.
 				timeLeft := oldCert.NotAfter.Sub(time.Now().UTC())

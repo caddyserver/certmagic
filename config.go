@@ -74,7 +74,7 @@ type Config struct {
 	ListenHost string
 
 	// The alternate port to use for the ACME HTTP
-	// challenge; if non-empty,  this port will be
+	// challenge; if non-empty, this port will be
 	// used instead of HTTPChallengePort to spin up
 	// a listener for the HTTP challenge
 	AltHTTPPort int
