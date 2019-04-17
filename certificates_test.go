@@ -16,12 +16,13 @@ package certmagic
 
 import (
 	"crypto/tls"
+	"reflect"
 	"testing"
 )
 
 func TestUnexportedGetCertificate(t *testing.T) {
-	certCache := &Cache{cache: make(map[string]Certificate)}
-	cfg := &Config{certificates: make(map[string]string), certCache: certCache}
+	certCache := &Cache{cache: make(map[string]Certificate), cacheIndex: make(map[string][]string)}
+	cfg := &Config{certCache: certCache}
 
 	// When cache is empty
 	if _, matched, defaulted := cfg.getCertificate(&tls.ClientHelloInfo{ServerName: "example.com"}); matched || defaulted {
@@ -31,14 +32,14 @@ func TestUnexportedGetCertificate(t *testing.T) {
 	// When cache has one certificate in it
 	firstCert := Certificate{Names: []string{"example.com"}}
 	certCache.cache["0xdeadbeef"] = firstCert
-	cfg.certificates["example.com"] = "0xdeadbeef"
+	certCache.cacheIndex["example.com"] = []string{"0xdeadbeef"}
 	if cert, matched, defaulted := cfg.getCertificate(&tls.ClientHelloInfo{ServerName: "example.com"}); !matched || defaulted || cert.Names[0] != "example.com" {
 		t.Errorf("Didn't get a cert for 'example.com' or got the wrong one: %v, matched=%v, defaulted=%v", cert, matched, defaulted)
 	}
 
 	// When retrieving wildcard certificate
 	certCache.cache["0xb01dface"] = Certificate{Names: []string{"*.example.com"}}
-	cfg.certificates["*.example.com"] = "0xb01dface"
+	certCache.cacheIndex["*.example.com"] = []string{"0xb01dface"}
 	if cert, matched, defaulted := cfg.getCertificate(&tls.ClientHelloInfo{ServerName: "sub.example.com"}); !matched || defaulted || cert.Names[0] != "*.example.com" {
 		t.Errorf("Didn't get wildcard cert for 'sub.example.com' or got the wrong one: %v, matched=%v, defaulted=%v", cert, matched, defaulted)
 	}
@@ -50,34 +51,31 @@ func TestUnexportedGetCertificate(t *testing.T) {
 }
 
 func TestCacheCertificate(t *testing.T) {
-	certCache := &Cache{cache: make(map[string]Certificate)}
-	cfg := &Config{certificates: make(map[string]string), certCache: certCache}
+	certCache := &Cache{cache: make(map[string]Certificate), cacheIndex: make(map[string][]string)}
 
-	cfg.cacheCertificate(Certificate{Names: []string{"example.com", "sub.example.com"}, Hash: "foobar"})
+	certCache.cacheCertificate(Certificate{Names: []string{"example.com", "sub.example.com"}, Hash: "foobar"})
 	if len(certCache.cache) != 1 {
 		t.Errorf("Expected length of certificate cache to be 1")
 	}
 	if _, ok := certCache.cache["foobar"]; !ok {
 		t.Error("Expected first cert to be cached by key 'foobar', but it wasn't")
 	}
-	if _, ok := cfg.certificates["example.com"]; !ok {
+	if _, ok := certCache.cacheIndex["example.com"]; !ok {
 		t.Error("Expected first cert to be keyed by 'example.com', but it wasn't")
 	}
-	if _, ok := cfg.certificates["sub.example.com"]; !ok {
+	if _, ok := certCache.cacheIndex["sub.example.com"]; !ok {
 		t.Error("Expected first cert to be keyed by 'sub.example.com', but it wasn't")
 	}
 
-	// different config, but using same cache; and has cert with overlapping name,
-	// but different hash
-	cfg2 := &Config{certificates: make(map[string]string), certCache: certCache}
-	cfg2.cacheCertificate(Certificate{Names: []string{"example.com"}, Hash: "barbaz"})
+	// using same cache; and has cert with overlapping name, but different hash
+	certCache.cacheCertificate(Certificate{Names: []string{"example.com"}, Hash: "barbaz"})
 	if _, ok := certCache.cache["barbaz"]; !ok {
 		t.Error("Expected second cert to be cached by key 'barbaz.com', but it wasn't")
 	}
-	if hash, ok := cfg2.certificates["example.com"]; !ok {
+	if hashes, ok := certCache.cacheIndex["example.com"]; !ok {
 		t.Error("Expected second cert to be keyed by 'example.com', but it wasn't")
-	} else if hash != "barbaz" {
-		t.Errorf("Expected second cert to map to 'barbaz' but it was %s instead", hash)
+	} else if !reflect.DeepEqual(hashes, []string{"foobar", "barbaz"}) {
+		t.Errorf("Expected second cert to map to 'barbaz' but it was %v instead", hashes)
 	}
 }
 

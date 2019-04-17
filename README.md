@@ -136,18 +136,20 @@ This library uses Let's Encrypt by default, but you can use any certificate auth
 
 #### The `Config` type
 
-The `certmagic.Config` struct is how you can wield the power of this fully armed and operational battle station. However, an empty config is _not_ a valid one! In time, you will learn to use the force of `certmagic.New(certmagic.Config{...})` as I have.
+The `certmagic.Config` struct is how you can wield the power of this fully armed and operational battle station. However, an empty/uninitialized `Config` is _not_ a valid one! In time, you will learn to use the force of `certmagic.NewDefault()` as I have.
 
 #### Defaults
 
-For every field in the `Config` struct, there is a corresponding package-level variable you can set as a default value. These defaults will be used when you call any of the high-level convenience functions like `HTTPS()` or `Listen()` or anywhere else a default `Config` is used. They are also used for any `Config` fields that are zero-valued when you call `New()`.
+The default `Config` value is called `certmagic.Default`. Change its fields to suit your needs, then call `certmagic.NewDefault()` when you need a valid `Config` value. In other words, `certmagic.Default` is a template and is not valid for use directly.
 
-You can set these values easily, for example: `certmagic.Email = ...` sets the email address to use for everything unless you explicitly override it in a Config.
+You can set the default values easily, for example: `certmagic.Default.Email = ...`.
+
+The high-level functions in this package (`HTTPS()`, `Listen()`, and `Manage()`) use the default config exclusively. This is how most of you will interact with the package. This is suitable when all your certificates are managed the same way. However, if you need to manage certificates differently depending on their name, you will need to make your own cache and configs (keep reading).
 
 
 #### Providing an email address
 
-Although not strictly required, this is highly recommended best practice. It allows you to receive expiration emails if your certificates are expiring for some reason, and also allows the CA's engineers to potentially get in touch with you if something is wrong. I recommend setting `certmagic.Email` or always setting the `Email` field of the `Config` struct.
+Although not strictly required, this is highly recommended best practice. It allows you to receive expiration emails if your certificates are expiring for some reason, and also allows the CA's engineers to potentially get in touch with you if something is wrong. I recommend setting `certmagic.Default.Email` or always setting the `Email` field of a new `Config` struct.
 
 
 ### Development and Testing
@@ -156,7 +158,7 @@ Note that Let's Encrypt imposes [strict rate limits](https://letsencrypt.org/doc
 
 While developing your application and testing it, use [their staging endpoint](https://letsencrypt.org/docs/staging-environment/) which has much higher rate limits. Even then, don't hammer it: but it's much safer for when you're testing. When deploying, though, use their production CA because their staging CA doesn't issue trusted certificates.
 
-To use staging, set `certmagic.CA = certmagic.LetsEncryptStagingCA` or set `CA` of every `Config` struct.
+To use staging, set `certmagic.Default.CA = certmagic.LetsEncryptStagingCA` or set `CA` of every `Config` struct.
 
 
 
@@ -164,20 +166,22 @@ To use staging, set `certmagic.CA = certmagic.LetsEncryptStagingCA` or set `CA` 
 
 There are many ways to use this library. We'll start with the highest-level (simplest) and work down (more control).
 
+All these high-level examples use `certmagic.Default` for the config and the default cache and storage for serving up certificates.
+
 First, we'll follow best practices and do the following:
 
 ```go
 // read and agree to your CA's legal documents
-certmagic.Agreed = true
+certmagic.Default.Agreed = true
 
 // provide an email address
-certmagic.Email = "you@yours.com"
+certmagic.Default.Email = "you@yours.com"
 
 // use the staging endpoint while we're developing
-certmagic.CA = certmagic.LetsEncryptStagingCA
+certmagic.Default.CA = certmagic.LetsEncryptStagingCA
 ```
 
-For fully-functional program examples, check out [this Twitter thread](https://twitter.com/mholt6/status/1073103805112147968) (or read it [unrolled into a single post](https://threadreaderapp.com/thread/1073103805112147968.html)).
+For fully-functional program examples, check out [this Twitter thread](https://twitter.com/mholt6/status/1073103805112147968) (or read it [unrolled into a single post](https://threadreaderapp.com/thread/1073103805112147968.html)). (Note that the package API has changed slightly since these posts.)
 
 
 #### Serving HTTP handlers with HTTPS
@@ -213,10 +217,24 @@ if err != nil {
 
 #### Advanced use
 
-For more control, you'll make and use a `Config` like so:
+For more control (particularly, if you need a different way of managing each certificate), you'll make and use a `Cache` and a `Config` like so:
 
 ```go
-magic := certmagic.New(certmagic.Config{
+cache := certmagic.NewCache(certmagic.CacheOptions{
+	GetConfigForCert: func(cert certmagic.Certificate) (*certmagic.Config, error) {
+		// do whatever you need to do to get the right
+		// configuration for this certificate; keep in
+		// mind that this config value is used as a
+		// template, and will be completed with any
+		// defaults that are set in the Default config
+		return certmagic.Config{
+			// ...
+		}), nil
+	},
+	...
+})
+
+magic := certmagic.New(cache, certmagic.Config{
 	CA:     certmagic.LetsEncryptStagingCA,
 	Email:  "you@yours.com",
 	Agreed: true,
@@ -233,6 +251,8 @@ if err != nil {
 // you can get a TLS config to use in a TLS listener!
 tlsConfig := magic.TLSConfig()
 
+//// OR ////
+
 // if you already have a TLS config you don't want to replace,
 // we can simply set its GetCertificate field and append the
 // TLS-ALPN challenge protocol to the NextProtos
@@ -245,23 +265,12 @@ myTLSConfig.NextProtos = append(myTLSConfig.NextProtos, tlsalpn01.ACMETLS1Protoc
 httpMux = magic.HTTPChallengeHandler(httpMux)
 ```
 
-Great! This example grants you much more flexibility for advanced programs. However, _the vast majority of you will only use the high-level functions described earlier_, especially since you can still customize them by setting the package-level defaults.
-
-If you want to use the default configuration but you still need a `certmagic.Config`, you can call `certmagic.Manage()` directly to get one:
-
-```go
-magic, err := certmagic.Manage([]string{"example.com"})
-if err != nil {
-	return err
-}
-```
-
-And then it's the same as above, as if you had made the `Config` yourself.
+Great! This example grants you much more flexibility for advanced programs. However, _the vast majority of you will only use the high-level functions described earlier_, especially since you can still customize them by setting the package-level `Default` config.
 
 
 ### Wildcard certificates
 
-At time of writing (December 2018), Let's Encrypt only issues wildcard certificates with the DNS challenge.
+At time of writing (December 2018), Let's Encrypt only issues wildcard certificates with the DNS challenge. You can easily enable the DNS challenge with CertMagic for numerous providers (see the relevant section in the docs).
 
 
 ### Behind a load balancer (or in a cluster)
@@ -360,7 +369,7 @@ if err != nil {
 	return err
 }
 
-certmagic.DNSProvider = provider
+certmagic.Default.DNSProvider = provider
 ```
 
 Now the DNS challenge will be used by default, and I can obtain certificates for wildcard domains. See the [godoc documentation for the provider you're using](https://godoc.org/github.com/go-acme/lego/providers/dns#pkg-subdirectories) to learn how to configure it. Most can be configured by env variables or by passing in a config struct. If you pass a config struct instead of using env variables, you will probably need to set some other defaults (that's just how lego works, currently):
@@ -392,7 +401,7 @@ CertMagic provides several ways to enforce decision policies for On-Demand TLS, 
 The simplest way to enable On-Demand issuance is to set the OnDemand field of a Config (or the default package-level value):
 
 ```go
-certmagic.OnDemand = &certmagic.OnDemandConfig{MaxObtain: 5}
+certmagic.Default.OnDemand = &certmagic.OnDemandConfig{MaxObtain: 5}
 ```
 
 This allows only 5 certificates to be requested and is the simplest way to enable On-Demand TLS, but is the least recommended. It prevents abuse, but only in the least helpful way.
