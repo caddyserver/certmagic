@@ -21,8 +21,11 @@ import (
 )
 
 func TestGetCertificate(t *testing.T) {
-	certCache := &Cache{cache: make(map[string]Certificate)}
-	cfg := &Config{certificates: make(map[string]string), certCache: certCache}
+	c := &Cache{
+		cache:      make(map[string]Certificate),
+		cacheIndex: make(map[string][]string),
+	}
+	cfg := &Config{certCache: c}
 
 	// create a test connection for conn.LocalAddr()
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
@@ -48,7 +51,7 @@ func TestGetCertificate(t *testing.T) {
 
 	// When cache has one certificate in it
 	firstCert := Certificate{Names: []string{"example.com"}, Certificate: tls.Certificate{Leaf: &x509.Certificate{DNSNames: []string{"example.com"}}}}
-	cfg.cacheCertificate(firstCert)
+	c.cacheCertificate(firstCert)
 	if cert, err := cfg.GetCertificate(hello); err != nil {
 		t.Errorf("Got an error but shouldn't have, when cert exists in cache: %v", err)
 	} else if cert.Leaf.DNSNames[0] != "example.com" {
@@ -64,7 +67,7 @@ func TestGetCertificate(t *testing.T) {
 		Certificate: tls.Certificate{Leaf: &x509.Certificate{DNSNames: []string{"*.example.com"}}},
 		Hash:        "(don't overwrite the first one)",
 	}
-	cfg.cacheCertificate(wildcardCert)
+	c.cacheCertificate(wildcardCert)
 	if cert, err := cfg.GetCertificate(helloSub); err != nil {
 		t.Errorf("Didn't get wildcard cert, got: cert=%v, err=%v ", cert, err)
 	} else if cert.Leaf.DNSNames[0] != "*.example.com" {
@@ -95,7 +98,7 @@ func TestGetCertificate(t *testing.T) {
 		Certificate: tls.Certificate{Leaf: &x509.Certificate{IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}}},
 		Hash:        "(don't overwrite the first or second one)",
 	}
-	cfg.cacheCertificate(ipCert)
+	c.cacheCertificate(ipCert)
 	if cert, err := cfg.GetCertificate(helloNoSNI); err != nil {
 		t.Errorf("Got an error with no SNI but matching IP, but shouldn't have: %v", err)
 	} else if cert == nil || len(cert.Leaf.IPAddresses) == 0 {

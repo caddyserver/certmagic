@@ -29,8 +29,6 @@ import (
 )
 
 func TestUser(t *testing.T) {
-	defer os.RemoveAll(testStorageDir)
-
 	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {
 		t.Fatalf("Could not generate test private key: %v", err)
@@ -51,8 +49,13 @@ func TestUser(t *testing.T) {
 		t.Errorf("Expected the private key at address %p but got one at %p instead ", expected, actual)
 	}
 }
-
 func TestNewUser(t *testing.T) {
+	testConfig := &Config{
+		CA:        "https://example.com/acme/directory",
+		Storage:   &FileStorage{Path: "./_testdata_tmp"},
+		certCache: new(Cache),
+	}
+
 	email := "me@foobar.com"
 	user, err := testConfig.newUser(email)
 	if err != nil {
@@ -70,6 +73,12 @@ func TestNewUser(t *testing.T) {
 }
 
 func TestSaveUser(t *testing.T) {
+	testConfig := &Config{
+		CA:        "https://example.com/acme/directory",
+		Storage:   &FileStorage{Path: "./_testdata1_tmp"},
+		certCache: new(Cache),
+	}
+	testStorageDir := testConfig.Storage.(*FileStorage).Path
 	defer os.RemoveAll(testStorageDir)
 
 	email := "me@foobar.com"
@@ -89,7 +98,11 @@ func TestSaveUser(t *testing.T) {
 }
 
 func TestGetUserDoesNotAlreadyExist(t *testing.T) {
-	defer os.RemoveAll(testStorageDir)
+	testConfig := &Config{
+		CA:        "https://example.com/acme/directory",
+		Storage:   &FileStorage{Path: "./_testdata_tmp"},
+		certCache: new(Cache),
+	}
 
 	user, err := testConfig.getUser("user_does_not_exist@foobar.com")
 	if err != nil {
@@ -102,6 +115,12 @@ func TestGetUserDoesNotAlreadyExist(t *testing.T) {
 }
 
 func TestGetUserAlreadyExists(t *testing.T) {
+	testConfig := &Config{
+		CA:        "https://example.com/acme/directory",
+		Storage:   &FileStorage{Path: "./_testdata2_tmp"},
+		certCache: new(Cache),
+	}
+	testStorageDir := testConfig.Storage.(*FileStorage).Path
 	defer os.RemoveAll(testStorageDir)
 
 	email := "me@foobar.com"
@@ -134,23 +153,35 @@ func TestGetUserAlreadyExists(t *testing.T) {
 }
 
 func TestGetEmailFromPackageDefault(t *testing.T) {
-	Email = "tEsT2@foo.com"
+	Default.Email = "tEsT2@foo.com"
 	defer func() {
-		Email = ""
+		Default.Email = ""
 	}()
-	testConfig.Email = ""
+
+	testConfig := &Config{
+		CA:        "https://example.com/acme/directory",
+		Storage:   &FileStorage{Path: "./_testdata_tmp"},
+		certCache: new(Cache),
+	}
+
 	err := testConfig.getEmail(true)
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}
-	lowerEmail := strings.ToLower(Email)
+	lowerEmail := strings.ToLower(Default.Email)
 	if testConfig.Email != lowerEmail {
 		t.Errorf("Did not get correct email from memory; expected '%s' but got '%s'", lowerEmail, testConfig.Email)
 	}
 }
 
 func TestGetEmailFromUserInput(t *testing.T) {
-	//let's not clutter up the output
+	testConfig := &Config{
+		CA:        "https://example.com/acme/directory",
+		Storage:   &FileStorage{Path: "./_testdata3_tmp"},
+		certCache: new(Cache),
+	}
+
+	// let's not clutter up the output
 	origStdout := os.Stdout
 	os.Stdout = nil
 	agreementTestURL = "(none - testing)"
@@ -158,8 +189,6 @@ func TestGetEmailFromUserInput(t *testing.T) {
 		os.Stdout = origStdout
 		agreementTestURL = ""
 	}()
-	testConfig.Email = ""
-	testConfig.Agreed = false
 
 	email := "test3@foo.com"
 	stdin = bytes.NewBufferString(email + "\n")
@@ -176,9 +205,16 @@ func TestGetEmailFromUserInput(t *testing.T) {
 }
 
 func TestGetEmailFromRecent(t *testing.T) {
+	testConfig := &Config{
+		CA:        "https://example.com/acme/directory",
+		Storage:   &FileStorage{Path: "./_testdata4_tmp"},
+		certCache: new(Cache),
+	}
+	testStorageDir := testConfig.Storage.(*FileStorage).Path
 	defer os.RemoveAll(testStorageDir)
-	testConfig.Email = ""
-	Email = ""
+
+	Default.Email = ""
+
 	for i, eml := range []string{
 		"test4-1@foo.com",
 		"test4-2@foo.com",
@@ -194,7 +230,7 @@ func TestGetEmailFromRecent(t *testing.T) {
 		}
 
 		// Change modified time so they're all different and the test becomes more deterministic
-		fs := testConfig.certCache.storage.(*FileStorage)
+		fs := testConfig.Storage.(*FileStorage)
 		userFolder := filepath.Join(fs.Path, StorageKeys.UserPrefix(testConfig.CA, eml))
 		f, err := os.Stat(userFolder)
 		if err != nil {

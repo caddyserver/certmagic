@@ -17,15 +17,18 @@ package certmagic
 import "testing"
 
 func TestNewCache(t *testing.T) {
-	c := NewCache(&FileStorage{Path: "./foo"})
-	if c.RenewInterval != DefaultRenewInterval {
-		t.Errorf("Expected RenewInterval to be set to default value, but it wasn't: %s", c.RenewInterval)
+	noop := func(Certificate) (Config, error) { return Config{}, nil }
+	c := NewCache(CacheOptions{GetConfigForCert: noop})
+	defer c.Stop()
+
+	if c.options.RenewCheckInterval != DefaultRenewCheckInterval {
+		t.Errorf("Expected RenewCheckInterval to be set to default value, but it wasn't: %s", c.options.RenewCheckInterval)
 	}
-	if c.OCSPInterval != DefaultOCSPInterval {
-		t.Errorf("Expected OCSPInterval to be set to default value, but it wasn't: %s", c.OCSPInterval)
+	if c.options.OCSPCheckInterval != DefaultOCSPCheckInterval {
+		t.Errorf("Expected OCSPCheckInterval to be set to default value, but it wasn't: %s", c.options.OCSPCheckInterval)
 	}
-	if c.storage == nil {
-		t.Error("Expected storage to be set, but it was nil")
+	if c.options.GetConfigForCert == nil {
+		t.Error("Expected GetConfigForCert to be set, but it was nil")
 	}
 	if c.cache == nil {
 		t.Error("Expected cache to be set, but it was nil")

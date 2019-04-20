@@ -17,10 +17,18 @@ package certmagic
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 )
 
 func TestHTTPChallengeHandlerNoOp(t *testing.T) {
+	testConfig := &Config{
+		CA:      "https://example.com/acme/directory",
+		Storage: &FileStorage{Path: "./_testdata_tmp"},
+	}
+	testStorageDir := testConfig.Storage.(*FileStorage).Path
+	defer os.RemoveAll(testStorageDir)
+
 	// try base paths and host names that aren't
 	// handled by this handler
 	for _, url := range []string{
