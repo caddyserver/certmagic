@@ -225,7 +225,10 @@ func Manage(domainNames []string) error {
 }
 
 // OnDemandConfig contains some state relevant for providing
-// on-demand TLS.
+// on-demand TLS. Important note: If you are using the
+// MaxObtain property to limit the maximum number of certs
+// to be issued, the count of how many certs were issued
+// will be reset if this struct gets garbage-collected.
 type OnDemandConfig struct {
 	// If set, this function will be the absolute
 	// authority on whether the hostname (according
@@ -256,6 +259,8 @@ type OnDemandConfig struct {
 	// The number of certificates that have been issued on-demand
 	// by this config. It is only safe to modify this count atomically.
 	// If it reaches MaxObtain, on-demand issuances must fail.
+	// Note that this will necessarily be reset to 0 if the
+	// struct leaves scope and/or gets garbage-collected.
 	obtainedCount int32
 }
 

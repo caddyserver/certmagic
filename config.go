@@ -117,7 +117,11 @@ type Config struct {
 	// loading TLS assets
 	Storage Storage
 
-	// Pointer to the certificate store to use
+	// NewManager returns a new Manager. If nil,
+	// an ACME client will be created and used.
+	NewManager func(interactive bool) (Manager, error)
+
+	// Pointer to the in-memory certificate cache
 	certCache *Cache
 
 	// Map of client config key to ACME clients
@@ -258,6 +262,9 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	if cfg.Storage == nil {
 		cfg.Storage = Default.Storage
 	}
+	if cfg.NewManager == nil {
+		cfg.NewManager = Default.NewManager
+	}
 
 	// absolutely don't allow a nil storage,
 	// because that would make almost anything
@@ -346,11 +353,11 @@ func (cfg *Config) ObtainCert(name string, interactive bool) error {
 	if skip {
 		return nil
 	}
-	client, err := cfg.newACMEClient(interactive)
+	manager, err := cfg.newManager(interactive)
 	if err != nil {
 		return err
 	}
-	return client.Obtain(name)
+	return manager.Obtain(name)
 }
 
 // RenewCert renews the certificate for name using cfg. It stows the
@@ -363,20 +370,20 @@ func (cfg *Config) RenewCert(name string, interactive bool) error {
 	if skip {
 		return nil
 	}
-	client, err := cfg.newACMEClient(interactive)
+	manager, err := cfg.newManager(interactive)
 	if err != nil {
 		return err
 	}
-	return client.Renew(name)
+	return manager.Renew(name)
 }
 
 // RevokeCert revokes the certificate for domain via ACME protocol.
 func (cfg *Config) RevokeCert(domain string, interactive bool) error {
-	client, err := cfg.newACMEClient(interactive)
+	manager, err := cfg.newManager(interactive)
 	if err != nil {
 		return err
 	}
-	return client.Revoke(domain)
+	return manager.Revoke(domain)
 }
 
 // TLSConfig is an opinionated method that returns a
@@ -451,4 +458,12 @@ func (cfg *Config) managedCertNeedsRenewal(certRes certificate.Resource) bool {
 		return true
 	}
 	return cert.NeedsRenewal(cfg)
+}
+
+// Manager is a type that can manage a certificate.
+// They are usually very short-lived.
+type Manager interface {
+	Obtain(name string) error
+	Renew(name string) error
+	Revoke(name string) error
 }

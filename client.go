@@ -52,6 +52,13 @@ func listenerAddressInUse(addr string) bool {
 	return err == nil
 }
 
+func (cfg *Config) newManager(interactive bool) (Manager, error) {
+	if cfg.NewManager != nil {
+		return cfg.NewManager(interactive)
+	}
+	return cfg.newACMEClient(interactive)
+}
+
 func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 	// look up or create the user account
 	leUser, err := cfg.getUser(cfg.Email)
@@ -399,3 +406,6 @@ var (
 	UserAgent   string
 	HTTPTimeout = 30 * time.Second
 )
+
+// Interface guard
+var _ Manager = (*acmeClient)(nil)
