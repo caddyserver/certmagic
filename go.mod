@@ -2,7 +2,7 @@ module github.com/mholt/certmagic
 
 require (
 	github.com/cenkalti/backoff v2.1.1+incompatible // indirect
-	github.com/go-acme/lego v2.3.1-0.20190318164254-3684cc738d37+incompatible
+	github.com/go-acme/lego v2.5.0+incompatible
 	github.com/klauspost/cpuid v1.2.0
 	github.com/miekg/dns v1.1.3 // indirect
 	github.com/stretchr/testify v1.3.0 // indirect
