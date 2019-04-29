@@ -57,7 +57,7 @@ func (cfg *Config) HandleHTTPChallenge(w http.ResponseWriter, r *http.Request) b
 	if cfg.DisableHTTPChallenge {
 		return false
 	}
-	if !strings.HasPrefix(r.URL.Path, challengeBasePath) {
+	if !LooksLikeHTTPChallenge(r) {
 		return false
 	}
 	return cfg.distributedHTTPChallengeSolver(w, r)
@@ -106,6 +106,12 @@ func answerHTTPChallenge(w http.ResponseWriter, r *http.Request, chalInfo challe
 		return true
 	}
 	return false
+}
+
+// LooksLikeHTTPChallenge returns true if r looks like an ACME
+// HTTP challenge request from an ACME server.
+func LooksLikeHTTPChallenge(r *http.Request) bool {
+	return r.Method == "GET" && strings.HasPrefix(r.URL.Path, challengeBasePath)
 }
 
 const challengeBasePath = "/.well-known/acme-challenge"

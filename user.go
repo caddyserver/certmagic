@@ -79,10 +79,12 @@ func (cfg *Config) newUser(email string) (user, error) {
 // will NOT be prompted and an empty email may be returned.
 func (cfg *Config) getEmail(allowPrompts bool) error {
 	leEmail := cfg.Email
+
 	// First try package default email
 	if leEmail == "" {
 		leEmail = Default.Email
 	}
+
 	// Then try to get most recent user email from storage
 	var gotRecentEmail bool
 	if leEmail == "" {
@@ -96,13 +98,15 @@ func (cfg *Config) getEmail(allowPrompts bool) error {
 		if err != nil {
 			return err
 		}
+
+		// User might have just signified their agreement
+		cfg.Agreed = Default.Agreed
 	}
 
 	// save the email for later and ensure it is consistent
-	// for repeated use; then update cfg with our new defaults
+	// for repeated use; then update cfg with the email
 	Default.Email = strings.TrimSpace(strings.ToLower(leEmail))
 	cfg.Email = Default.Email
-	cfg.Agreed = Default.Agreed
 
 	return nil
 }
