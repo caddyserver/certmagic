@@ -17,9 +17,11 @@ package certmagic
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/big"
 	"net"
 	"strings"
 	"time"
@@ -29,7 +31,8 @@ import (
 
 // Certificate is a tls.Certificate with associated metadata tacked on.
 // Even if the metadata can be obtained by parsing the certificate,
-// we are more efficient by extracting the metadata onto this struct.
+// we are more efficient by extracting the metadata onto this struct,
+// but at the cost of slightly higher memory use.
 type Certificate struct {
 	tls.Certificate
 
@@ -48,6 +51,14 @@ type Certificate struct {
 
 	// Whether this certificate is under our management
 	managed bool
+
+	// These fields are extracted to here mainly for custom
+	// selection logic, which is optional; callers may wish
+	// to use this information to choose a certificate when
+	// more than one match the ClientHello
+	Subject            pkix.Name
+	SerialNumber       *big.Int
+	PublicKeyAlgorithm x509.PublicKeyAlgorithm
 }
 
 // NeedsRenewal returns true if the certificate is
@@ -243,6 +254,15 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 	// expiration date, for necessity and efficiency
 	cert.Hash = hashCertificateChain(cert.Certificate.Certificate)
 	cert.NotAfter = leaf.NotAfter
+
+	// these other fields are strictly optional to
+	// store in their decoded forms, but they are
+	// here for convenience in case the caller wishes
+	// to select certificates using custom logic when
+	// more than one may complete a handshake
+	cert.Subject = leaf.Subject
+	cert.SerialNumber = leaf.SerialNumber
+	cert.PublicKeyAlgorithm = leaf.PublicKeyAlgorithm
 
 	return nil
 }

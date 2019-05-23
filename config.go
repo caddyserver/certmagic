@@ -121,6 +121,12 @@ type Config struct {
 	// an ACME client will be created and used.
 	NewManager func(interactive bool) (Manager, error)
 
+	// CertSelector uses hello to choose one of the
+	// certificates in choices with which the ClientHello
+	// will be completed. By default, the first matching
+	// certificate will be used.
+	CertSelector func(hello *tls.ClientHelloInfo, choices []Certificate) (Certificate, error)
+
 	// Pointer to the in-memory certificate cache
 	certCache *Cache
 

@@ -94,8 +94,6 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate, matched, defaulted bool) {
 	name := NormalizedName(hello.ServerName)
 
-	var ok bool
-
 	if name == "" {
 		// if SNI is empty, prefer matching IP address
 		if hello.Conn != nil {
@@ -104,8 +102,8 @@ func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate,
 			if err == nil {
 				addr = ip
 			}
-			if cert, ok = cfg.certCache.getFirstMatchingCert(addr); ok {
-				matched = true
+			cert, matched = cfg.selectCert(hello, addr)
+			if matched {
 				return
 			}
 		}
@@ -113,15 +111,15 @@ func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate,
 		// fall back to a "default" certificate, if specified
 		if cfg.DefaultServerName != "" {
 			normDefault := NormalizedName(cfg.DefaultServerName)
-			if cert, ok = cfg.certCache.getFirstMatchingCert(normDefault); ok {
-				defaulted = true
+			cert, defaulted = cfg.selectCert(hello, normDefault)
+			if defaulted {
 				return
 			}
 		}
 	} else {
 		// if SNI is specified, try an exact match first
-		if cert, ok = cfg.certCache.getFirstMatchingCert(name); ok {
-			matched = true
+		cert, matched = cfg.selectCert(hello, name)
+		if matched {
 			return
 		}
 
@@ -131,8 +129,8 @@ func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate,
 		for i := range labels {
 			labels[i] = "*"
 			candidate := strings.Join(labels, ".")
-			if cert, ok = cfg.certCache.getFirstMatchingCert(candidate); ok {
-				matched = true
+			cert, matched = cfg.selectCert(hello, candidate)
+			if matched {
 				return
 			}
 		}
@@ -163,6 +161,22 @@ func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate,
 	// "0.0.0.0:443")
 
 	return
+}
+
+// selectCert uses hello to select a certificate from the
+// cache for name. If cfg.CertSelector is set, it will be
+// used to make the decision. Otherwise, the first matching
+// cert is returned.
+func (cfg *Config) selectCert(hello *tls.ClientHelloInfo, name string) (Certificate, bool) {
+	choices := cfg.certCache.getAllMatchingCerts(name)
+	if len(choices) == 0 {
+		return Certificate{}, false
+	}
+	if cfg.CertSelector == nil {
+		return choices[0], true
+	}
+	cert, err := cfg.CertSelector(hello, choices)
+	return cert, err == nil
 }
 
 // getCertDuringHandshake will get a certificate for hello. It first tries
