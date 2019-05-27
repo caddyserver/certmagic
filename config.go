@@ -121,11 +121,11 @@ type Config struct {
 	// an ACME client will be created and used.
 	NewManager func(interactive bool) (Manager, error)
 
-	// CertSelector uses hello to choose one of the
-	// certificates in choices with which the ClientHello
-	// will be completed. By default, the first matching
-	// certificate will be used.
-	CertSelector func(hello *tls.ClientHelloInfo, choices []Certificate) (Certificate, error)
+	// CertSelection chooses one of the certificates
+	// with which the ClientHello will be completed.
+	// If not set, the first matching certificate
+	// will be used.
+	CertSelection CertificateSelector
 
 	// Pointer to the in-memory certificate cache
 	certCache *Cache
@@ -472,4 +472,9 @@ type Manager interface {
 	Obtain(name string) error
 	Renew(name string) error
 	Revoke(name string) error
+}
+
+// CertificateSelector is a type which can select a certificate to use given multiple choices.
+type CertificateSelector interface {
+	SelectCertificate(*tls.ClientHelloInfo, []Certificate) (Certificate, error)
 }

@@ -56,9 +56,7 @@ type Certificate struct {
 	// selection logic, which is optional; callers may wish
 	// to use this information to choose a certificate when
 	// more than one match the ClientHello
-	Subject            pkix.Name
-	SerialNumber       *big.Int
-	PublicKeyAlgorithm x509.PublicKeyAlgorithm
+	CertMetadata
 }
 
 // NeedsRenewal returns true if the certificate is
@@ -72,6 +70,19 @@ func (cert Certificate) NeedsRenewal(cfg *Config) bool {
 		renewDurationBefore = cfg.RenewDurationBefore
 	}
 	return time.Until(cert.NotAfter) < renewDurationBefore
+}
+
+// CertMetadata is data extracted from a parsed x509
+// certificate which is purely optional but can be
+// useful when selecting which certificate to use
+// if multiple match a ClientHello's ServerName.
+// The more fields we add to this struct, the more
+// memory use will increase at scale with large
+// numbers of certificates in the cache.
+type CertMetadata struct {
+	Subject            pkix.Name
+	SerialNumber       *big.Int
+	PublicKeyAlgorithm x509.PublicKeyAlgorithm
 }
 
 // CacheManagedCertificate loads the certificate for domain into the

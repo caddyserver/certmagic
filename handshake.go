@@ -164,7 +164,7 @@ func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate,
 }
 
 // selectCert uses hello to select a certificate from the
-// cache for name. If cfg.CertSelector is set, it will be
+// cache for name. If cfg.CertSelection is set, it will be
 // used to make the decision. Otherwise, the first matching
 // cert is returned.
 func (cfg *Config) selectCert(hello *tls.ClientHelloInfo, name string) (Certificate, bool) {
@@ -172,10 +172,10 @@ func (cfg *Config) selectCert(hello *tls.ClientHelloInfo, name string) (Certific
 	if len(choices) == 0 {
 		return Certificate{}, false
 	}
-	if cfg.CertSelector == nil {
+	if cfg.CertSelection == nil {
 		return choices[0], true
 	}
-	cert, err := cfg.CertSelector(hello, choices)
+	cert, err := cfg.CertSelection.SelectCertificate(hello, choices)
 	return cert, err == nil
 }
 
