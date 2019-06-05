@@ -17,6 +17,7 @@ package certmagic
 import (
 	"crypto/tls"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -363,6 +364,7 @@ func (cfg *Config) ObtainCert(name string, interactive bool) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("[INFO][%s] Obtain certificate", name)
 	return manager.Obtain(name)
 }
 
@@ -380,6 +382,7 @@ func (cfg *Config) RenewCert(name string, interactive bool) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("[INFO][%s] Renew certificate", name)
 	return manager.Renew(name)
 }
 

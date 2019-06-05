@@ -17,6 +17,7 @@ package certmagic
 import (
 	"fmt"
 	"log"
+	weakrand "math/rand"
 	"net"
 	"net/url"
 	"strings"
@@ -31,6 +32,10 @@ import (
 	"github.com/go-acme/lego/registration"
 )
 
+func init() {
+	weakrand.Seed(time.Now().UnixNano())
+}
+
 // acmeMu ensures that only one ACME challenge occurs at a time.
 var acmeMu sync.Mutex
 
@@ -40,6 +45,7 @@ var acmeMu sync.Mutex
 type acmeClient struct {
 	config     *Config
 	acmeClient *lego.Client
+	challenges []challenge.Type
 }
 
 // listenerAddressInUse returns true if a TCP connection
@@ -50,6 +56,12 @@ func listenerAddressInUse(addr string) bool {
 		conn.Close()
 	}
 	return err == nil
+}
+
+// lockKey returns a key for a lock that is specific to the operation
+// named op being performed related to domainName and this config's CA.
+func (cfg *Config) lockKey(op, domainName string) string {
+	return fmt.Sprintf("%s_%s_%s", op, domainName, cfg.CA)
 }
 
 func (cfg *Config) newManager(interactive bool) (Manager, error) {
@@ -151,79 +163,7 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 		acmeClient: client,
 	}
 
-	if cfg.DNSProvider == nil {
-		// Use HTTP and TLS-ALPN challenges by default
-
-		// figure out which ports we'll be serving the challenges on
-		useHTTPPort := HTTPChallengePort
-		useTLSALPNPort := TLSALPNChallengePort
-		if HTTPPort > 0 && HTTPPort != HTTPChallengePort {
-			useHTTPPort = HTTPPort
-		}
-		if HTTPSPort > 0 && HTTPSPort != TLSALPNChallengePort {
-			useTLSALPNPort = HTTPSPort
-		}
-		if cfg.AltHTTPPort > 0 {
-			useHTTPPort = cfg.AltHTTPPort
-		}
-		if cfg.AltTLSALPNPort > 0 {
-			useTLSALPNPort = cfg.AltTLSALPNPort
-		}
-
-		// If this machine is already listening on the HTTP or TLS-ALPN port
-		// designated for the challenges, then we need to handle the challenges
-		// a little differently: for HTTP, we will answer the challenge request
-		// using our own HTTP handler (the HandleHTTPChallenge function - this
-		// works only because challenge info is written to storage associated
-		// with cfg when the challenge is initiated); for TLS-ALPN, we will add
-		// the challenge cert to our cert cache and serve it up during the
-		// handshake. As for the default solvers...  we are careful to honor the
-		// listener bind preferences by using cfg.ListenHost.
-		var httpSolver, alpnSolver challenge.Provider
-		httpSolver = http01.NewProviderServer(cfg.ListenHost, fmt.Sprintf("%d", useHTTPPort))
-		alpnSolver = tlsalpn01.NewProviderServer(cfg.ListenHost, fmt.Sprintf("%d", useTLSALPNPort))
-		if listenerAddressInUse(net.JoinHostPort(cfg.ListenHost, fmt.Sprintf("%d", useHTTPPort))) {
-			httpSolver = nil
-		}
-		if listenerAddressInUse(net.JoinHostPort(cfg.ListenHost, fmt.Sprintf("%d", useTLSALPNPort))) {
-			alpnSolver = tlsALPNSolver{certCache: cfg.certCache}
-		}
-
-		// because of our nifty Storage interface, we can distribute the HTTP and
-		// TLS-ALPN challenges across all instances that share the same storage -
-		// in fact, this is required now for successful solving of the HTTP challenge
-		// if the port is already in use, since we must write the challenge info
-		// to storage for the HTTPChallengeHandler to solve it successfully
-		c.acmeClient.Challenge.SetHTTP01Provider(distributedSolver{
-			config:         cfg,
-			providerServer: httpSolver,
-		})
-		c.acmeClient.Challenge.SetTLSALPN01Provider(distributedSolver{
-			config:         cfg,
-			providerServer: alpnSolver,
-		})
-
-		// disable any challenges that should not be used
-		if cfg.DisableHTTPChallenge {
-			c.acmeClient.Challenge.Remove(challenge.HTTP01)
-		}
-		if cfg.DisableTLSALPNChallenge {
-			c.acmeClient.Challenge.Remove(challenge.TLSALPN01)
-		}
-	} else {
-		// Otherwise, use DNS challenge exclusively
-		c.acmeClient.Challenge.Remove(challenge.HTTP01)
-		c.acmeClient.Challenge.Remove(challenge.TLSALPN01)
-		c.acmeClient.Challenge.SetDNS01Provider(cfg.DNSProvider)
-	}
-
 	return c, nil
-}
-
-// lockKey returns a key for a lock that is specific to the operation
-// named op being performed related to domainName and this config's CA.
-func (cfg *Config) lockKey(op, domainName string) string {
-	return fmt.Sprintf("%s_%s_%s", op, domainName, cfg.CA)
 }
 
 // Obtain obtains a single certificate for name. It stores the certificate
@@ -233,7 +173,9 @@ func (cfg *Config) lockKey(op, domainName string) string {
 // function (along with Renew and Revoke) only accepts one domain as input.
 // It could be easily modified to support SAN certificates if our storage
 // mechanism is upgraded later, but that will increase logical complexity
-// in other areas.
+// in other areas and is not recommended at scale (even Cloudflare now
+// utilizes fewer-or-single-SAN certificates at their scale: see
+// https://twitter.com/epatryk/status/1135615936176775174).
 //
 // Callers who have access to a Config value should use the ObtainCert
 // method on that instead of this lower-level method.
@@ -250,42 +192,69 @@ func (c *acmeClient) Obtain(name string) error {
 		}
 	}()
 
-	// check if obtain is still needed -- might have
-	// been obtained during lock
+	// check if obtain is still needed -- might have been obtained during lock
 	if c.config.storageHasCertResources(name) {
 		log.Printf("[INFO][%s] Obtain: Certificate already exists in storage", name)
 		return nil
 	}
 
-	for attempts := 0; attempts < 2; attempts++ {
-		request := certificate.ObtainRequest{
-			Domains:    []string{name},
-			Bundle:     true,
-			MustStaple: c.config.MustStaple,
-		}
-		acmeMu.Lock()
-		certificate, err := c.acmeClient.Certificate.Obtain(request)
-		acmeMu.Unlock()
-		if err != nil {
-			return fmt.Errorf("[%s] failed to obtain certificate: %s", name, err)
-		}
+	challenges := c.initialChallenges()
+	var chosenChallenge challenge.Type
 
-		// double-check that we actually got a certificate, in case there's a bug upstream (see issue mholt/caddy#2121)
-		if certificate.Domain == "" || certificate.Certificate == nil {
-			return fmt.Errorf("returned certificate was empty; probably an unchecked error obtaining it")
+	// try while a challenge type is still available;
+	// and for each challenge, retry a few times
+challengeLoop:
+	for len(challenges) > 0 {
+		chosenChallenge, challenges = c.nextChallenge(challenges)
+		const maxAttempts = 3
+		for attempts := 0; attempts < maxAttempts; attempts++ {
+			err = c.tryObtain(name)
+			if err == nil {
+				break challengeLoop
+			}
+			log.Printf("[ERROR][%s] %v (attempt %d/%d; challenge=%s)",
+				name, err, attempts+1, maxAttempts, chosenChallenge)
+			time.Sleep(1 * time.Second)
 		}
-
-		// Success - immediately save the certificate resource
-		err = c.config.saveCertResource(certificate)
-		if err != nil {
-			return fmt.Errorf("error saving assets for %v: %v", name, err)
-		}
-
-		break
+	}
+	if err != nil {
+		return err
 	}
 
 	if c.config.OnEvent != nil {
 		c.config.OnEvent("acme_cert_obtained", name)
+	}
+
+	return nil
+}
+
+// tryObtain uses the underlying ACME client to obtain a
+// certificate for name and puts the result in storage if
+// it succeeds. There are no retries here and c must be
+// fully configured already.
+func (c *acmeClient) tryObtain(name string) error {
+	request := certificate.ObtainRequest{
+		Domains:    []string{name},
+		Bundle:     true,
+		MustStaple: c.config.MustStaple,
+	}
+	acmeMu.Lock()
+	certificate, err := c.acmeClient.Certificate.Obtain(request)
+	acmeMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("failed to obtain certificate: %v", err)
+	}
+
+	// double-check that we actually got a certificate, in case there's a bug upstream
+	// (see issue mholt/caddy#2121)
+	if certificate.Domain == "" || certificate.Certificate == nil {
+		return fmt.Errorf("returned certificate was empty; probably an unchecked error obtaining it")
+	}
+
+	// Success - immediately save the certificate resource
+	err = c.config.saveCertResource(certificate)
+	if err != nil {
+		return fmt.Errorf("saving assets: %v", err)
 	}
 
 	return nil
@@ -322,42 +291,64 @@ func (c *acmeClient) Renew(name string) error {
 		return nil
 	}
 
-	// Perform renewal and retry if necessary, but not too many times.
-	var newCertMeta *certificate.Resource
-	var success bool
-	for attempts := 0; attempts < 2; attempts++ {
-		acmeMu.Lock()
-		newCertMeta, err = c.acmeClient.Certificate.Renew(certRes, true, c.config.MustStaple)
-		acmeMu.Unlock()
-		if err == nil {
-			// double-check that we actually got a certificate; check a couple fields, just in case
-			if newCertMeta == nil || newCertMeta.Domain == "" || newCertMeta.Certificate == nil {
-				err = fmt.Errorf("returned certificate was empty; probably an unchecked error renewing it")
-			} else {
-				success = true
-				break
+	challenges := c.initialChallenges()
+	var chosenChallenge challenge.Type
+
+	// try while a challenge type is still available;
+	// and for each challenge, retry a few times
+challengeLoop:
+	for len(challenges) > 0 {
+		chosenChallenge, challenges = c.nextChallenge(challenges)
+		const maxAttempts = 3
+		for attempts := 0; attempts < maxAttempts; attempts++ {
+			err = c.tryRenew(certRes)
+			if err == nil {
+				break challengeLoop
 			}
+			log.Printf("[ERROR][%s] %v (attempt %d/%d; challenge=%s)",
+				name, err, attempts+1, maxAttempts, chosenChallenge)
+			time.Sleep(1 * time.Second)
 		}
-
-		// wait a little bit and try again
-		wait := 10 * time.Second
-		log.Printf("[ERROR] Renewing [%v]: %v; trying again in %s", name, err, wait)
-		time.Sleep(wait)
 	}
-
-	if !success {
-		return fmt.Errorf("too many renewal attempts; last error: %v", err)
+	if err != nil {
+		return err
 	}
 
 	if c.config.OnEvent != nil {
 		c.config.OnEvent("acme_cert_renewed", name)
 	}
 
-	return c.config.saveCertResource(newCertMeta)
+	return nil
 }
 
-// Revoke revokes the certificate for name and deletes
-// it from storage.
+// tryRenew uses the underlying ACME client to renew the
+// certificate represented by certRes and puts the result
+// in storage if it succeeds. There are no retries here
+// and c must be fully configured already.
+func (c *acmeClient) tryRenew(certRes certificate.Resource) error {
+	acmeMu.Lock()
+	newCertMeta, err := c.acmeClient.Certificate.Renew(certRes, true, c.config.MustStaple)
+	acmeMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("failed to renew certificate: %v", err)
+	}
+
+	// double-check that we actually got a certificate, in case there's a bug upstream
+	// (see issue mholt/caddy#2121)
+	if newCertMeta == nil || newCertMeta.Domain == "" || newCertMeta.Certificate == nil {
+		return fmt.Errorf("returned certificate was empty; probably an unchecked error renewing it")
+	}
+
+	// Success - immediately save the renewed certificate resource
+	err = c.config.saveCertResource(newCertMeta)
+	if err != nil {
+		return fmt.Errorf("saving assets: %v", err)
+	}
+
+	return nil
+}
+
+// Revoke revokes the certificate for name and deletes it from storage.
 func (c *acmeClient) Revoke(name string) error {
 	if !c.config.Storage.Exists(StorageKeys.SitePrivateKey(c.config.CA, name)) {
 		return fmt.Errorf("private key not found for %s", name)
@@ -391,6 +382,126 @@ func (c *acmeClient) Revoke(name string) error {
 	}
 
 	return nil
+}
+
+// initialChallenges returns the initial set of challenges
+// to try using c.config as a basis.
+func (c *acmeClient) initialChallenges() []challenge.Type {
+	// if configured, use DNS challenge exclusively
+	if c.config.DNSProvider != nil {
+		return []challenge.Type{challenge.DNS01}
+	}
+
+	// otherwise, use HTTP and TLS-ALPN challenges if enabled
+	var chal []challenge.Type
+	if !c.config.DisableHTTPChallenge {
+		chal = append(chal, challenge.HTTP01)
+	}
+	if !c.config.DisableTLSALPNChallenge {
+		chal = append(chal, challenge.TLSALPN01)
+	}
+	return chal
+}
+
+// nextChallenge chooses a challenge randomly from the given list of
+// available challenges and configures c.acmeClient to use that challenge
+// according to c.config. It pops the chosen challenge from the list and
+// returns that challenge along with the new list without that challenge.
+// If len(available) == 0, this is a no-op.
+//
+// Don't even get me started on how dumb it is we need to do this here
+// instead of the upstream lego library doing it for us. Lego used to
+// randomize the challenge order, thus allowing another one to be used
+// if the first one failed. https://github.com/go-acme/lego/issues/842
+// (It also has an awkward API for adjusting the available challenges.)
+// At time of writing, lego doesn't try anything other than the TLS-ALPN
+// challenge, even if the HTTP challenge is also enabled. So we take
+// matters into our own hands and enable only one challenge at a time
+// in the underlying client, randomly selected by us.
+func (c *acmeClient) nextChallenge(available []challenge.Type) (challenge.Type, []challenge.Type) {
+	if len(available) == 0 {
+		return "", available
+	}
+
+	// make sure we choose a challenge randomly, which lego used to do but
+	// the critical feature was surreptitiously removed in ~2018 in a commit
+	// too large to review, oh well - choose one, then remove it from the
+	// list of available challenges so it doesn't get retried
+	randIdx := weakrand.Intn(len(available))
+	randomChallenge := available[randIdx]
+	available = append(available[:randIdx], available[randIdx+1:]...)
+
+	// clean the slate, since we reuse clients
+	c.acmeClient.Challenge.Remove(challenge.HTTP01)
+	c.acmeClient.Challenge.Remove(challenge.TLSALPN01)
+	c.acmeClient.Challenge.Remove(challenge.DNS01)
+
+	switch randomChallenge {
+	case challenge.HTTP01:
+		// figure out which ports we'll be serving the challenge on
+		useHTTPPort := HTTPChallengePort
+		if HTTPPort > 0 && HTTPPort != HTTPChallengePort {
+			useHTTPPort = HTTPPort
+		}
+		if c.config.AltHTTPPort > 0 {
+			useHTTPPort = c.config.AltHTTPPort
+		}
+
+		// If this machine is already listening on the HTTP or TLS-ALPN port
+		// designated for the challenges, then we need to handle the challenges
+		// a little differently: for HTTP, we will answer the challenge request
+		// using our own HTTP handler (the HandleHTTPChallenge function - this
+		// works only because challenge info is written to storage associated
+		// with c.config when the challenge is initiated); for TLS-ALPN, we will
+		// add the challenge cert to our cert cache and serve it up during the
+		// handshake. As for the default solvers...  we are careful to honor the
+		// listener bind preferences by using c.config.ListenHost.
+		var httpSolver challenge.Provider
+		if listenerAddressInUse(net.JoinHostPort(c.config.ListenHost, fmt.Sprintf("%d", useHTTPPort))) {
+			httpSolver = nil // assume that whatever's listening can solve the HTTP challenge
+		} else {
+			httpSolver = http01.NewProviderServer(c.config.ListenHost, fmt.Sprintf("%d", useHTTPPort))
+		}
+
+		// because of our nifty Storage interface, we can distribute the HTTP and
+		// TLS-ALPN challenges across all instances that share the same storage -
+		// in fact, this is required now for successful solving of the HTTP challenge
+		// if the port is already in use, since we must write the challenge info
+		// to storage for the HTTPChallengeHandler to solve it successfully
+		c.acmeClient.Challenge.SetHTTP01Provider(distributedSolver{
+			config:         c.config,
+			providerServer: httpSolver,
+		})
+
+	case challenge.TLSALPN01:
+		// figure out which ports we'll be serving the challenge on
+		useTLSALPNPort := TLSALPNChallengePort
+		if HTTPSPort > 0 && HTTPSPort != TLSALPNChallengePort {
+			useTLSALPNPort = HTTPSPort
+		}
+		if c.config.AltTLSALPNPort > 0 {
+			useTLSALPNPort = c.config.AltTLSALPNPort
+		}
+
+		// (see comments above for the HTTP challenge to gain an understanding of this chunk)
+		var alpnSolver challenge.Provider
+		if listenerAddressInUse(net.JoinHostPort(c.config.ListenHost, fmt.Sprintf("%d", useTLSALPNPort))) {
+			alpnSolver = tlsALPNSolver{certCache: c.config.certCache} // assume that our process is listening
+		} else {
+			alpnSolver = tlsalpn01.NewProviderServer(c.config.ListenHost, fmt.Sprintf("%d", useTLSALPNPort))
+		}
+
+		// (see comments above for the HTTP challenge to gain an understanding of this chunk)
+		c.acmeClient.Challenge.SetTLSALPN01Provider(distributedSolver{
+			config:         c.config,
+			providerServer: alpnSolver,
+		})
+
+	case challenge.DNS01:
+		c.acmeClient.Challenge.SetDNS01Provider(c.config.DNSProvider)
+	}
+
+	return randomChallenge, available
 }
 
 func buildUAString() string {
