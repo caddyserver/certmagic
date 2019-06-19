@@ -193,12 +193,12 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 func (c *acmeClient) Obtain(name string) error {
 	// ensure idempotency of the obtain operation for this name
 	lockKey := c.config.lockKey("cert_acme", name)
-	err := c.config.Storage.Lock(lockKey)
+	err := obtainLock(c.config.Storage, lockKey)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if err := c.config.Storage.Unlock(lockKey); err != nil {
+		if err := releaseLock(c.config.Storage, lockKey); err != nil {
 			log.Printf("[ERROR][%s] Obtain: Unable to unlock '%s': %v", name, lockKey, err)
 		}
 	}()
@@ -280,12 +280,12 @@ func (c *acmeClient) tryObtain(name string) error {
 func (c *acmeClient) Renew(name string) error {
 	// ensure idempotency of the renew operation for this name
 	lockKey := c.config.lockKey("cert_acme", name)
-	err := c.config.Storage.Lock(lockKey)
+	err := obtainLock(c.config.Storage, lockKey)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if err := c.config.Storage.Unlock(lockKey); err != nil {
+		if err := releaseLock(c.config.Storage, lockKey); err != nil {
 			log.Printf("[ERROR][%s] Renew: Unable to unlock '%s': %v", name, lockKey, err)
 		}
 	}()
