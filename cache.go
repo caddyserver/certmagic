@@ -231,9 +231,6 @@ func (certCache *Cache) getFirstMatchingCert(name string) (Certificate, bool) {
 	return Certificate{}, false
 }
 
-// TODO: This seems unused (but could be useful if TLS
-// handshakes serve up different certs for a single
-// name depending on other properties such as key type)
 func (certCache *Cache) getAllMatchingCerts(name string) []Certificate {
 	certCache.mu.RLock()
 	defer certCache.mu.RUnlock()

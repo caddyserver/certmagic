@@ -65,10 +65,21 @@ func (cfg *Config) lockKey(op, domainName string) string {
 }
 
 func (cfg *Config) newManager(interactive bool) (Manager, error) {
-	if cfg.NewManager != nil {
-		return cfg.NewManager(interactive)
+	const maxTries = 3
+	var mgr Manager
+	var err error
+	for i := 0; i < maxTries; i++ {
+		if cfg.NewManager != nil {
+			mgr, err = cfg.NewManager(interactive)
+		} else {
+			mgr, err = cfg.newACMEClient(interactive)
+		}
+		if err == nil {
+			break
+		}
+		log.Printf("[ERROR] Making new certificate manager: %v (attempt %d/%d)", err, i+1, maxTries)
 	}
-	return cfg.newACMEClient(interactive)
+	return mgr, err
 }
 
 func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
