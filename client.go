@@ -210,6 +210,9 @@ func (c *acmeClient) Obtain(name string) error {
 	}
 
 	challenges := c.initialChallenges()
+	if len(challenges) == 0 {
+		log.Printf("[ERROR][%s] No challenge types enabled; obtain is doomed", name)
+	}
 	var chosenChallenge challenge.Type
 
 	// try while a challenge type is still available;
@@ -303,6 +306,9 @@ func (c *acmeClient) Renew(name string) error {
 	}
 
 	challenges := c.initialChallenges()
+	if len(challenges) == 0 {
+		log.Printf("[ERROR][%s] No challenge types enabled; renew is doomed", name)
+	}
 	var chosenChallenge challenge.Type
 
 	// try while a challenge type is still available;

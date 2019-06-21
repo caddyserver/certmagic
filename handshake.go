@@ -22,7 +22,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/go-acme/lego/challenge/tlsalpn01"
@@ -238,14 +237,21 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	return Certificate{}, fmt.Errorf("no certificate available for '%s'", name)
 }
 
-// checkIfCertShouldBeObtained checks to see if an on-demand tls certificate
-// should be obtained for a given domain based upon the config settings.  If
+// checkIfCertShouldBeObtained checks to see if an on-demand TLS certificate
+// should be obtained for a given domain based upon the config settings. If
 // a non-nil error is returned, do not issue a new certificate for name.
 func (cfg *Config) checkIfCertShouldBeObtained(name string) error {
 	if cfg.OnDemand == nil {
 		return fmt.Errorf("not configured for on-demand certificate issuance")
 	}
-	return cfg.OnDemand.Allowed(name)
+	if cfg.OnDemand.DecisionFunc != nil {
+		return cfg.OnDemand.DecisionFunc(name)
+	}
+	if len(cfg.OnDemand.hostWhitelist) > 0 &&
+		!cfg.OnDemand.whitelistContains(name) {
+		return fmt.Errorf("certificate for '%s' is not managed", name)
+	}
+	return nil
 }
 
 // obtainOnDemandCertificate obtains a certificate for hello.
@@ -286,27 +292,12 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 	obtainCertWaitChansMu.Unlock()
 
 	if err != nil {
-		// Failed to solve challenge, so don't allow another on-demand
-		// issue for this name to be attempted for a little while.
-		failedIssuanceMu.Lock()
-		failedIssuance[name] = time.Now()
-		go func(name string) {
-			time.Sleep(5 * time.Minute)
-			failedIssuanceMu.Lock()
-			delete(failedIssuance, name)
-			failedIssuanceMu.Unlock()
-		}(name)
-		failedIssuanceMu.Unlock()
+		// shucks; failed to solve challenge on-demand
 		return Certificate{}, err
 	}
 
-	// Success - update counters and stuff
-	atomic.AddInt32(&cfg.OnDemand.obtainedCount, 1)
-	lastIssueTimeMu.Lock()
-	lastIssueTime = time.Now()
-	lastIssueTimeMu.Unlock()
-
-	// certificate is already on disk; now just start over to load it and serve it
+	// success; certificate was just placed on disk, so
+	// we need only restart serving the certificate
 	return cfg.getCertDuringHandshake(hello, true, false)
 }
 

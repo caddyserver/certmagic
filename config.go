@@ -107,7 +107,10 @@ type Config struct {
 	// ClientHello's ServerName field is empty
 	DefaultServerName string
 
-	// The state needed to operate on-demand TLS
+	// The state needed to operate on-demand TLS;
+	// if non-nil, on-demand TLS is enabled and
+	// certificate operations are deferred to
+	// TLS handshakes (or as-needed)
 	OnDemand *OnDemandConfig
 
 	// Add the must staple TLS extension to the
@@ -289,22 +292,29 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 }
 
 // Manage causes the certificates for domainNames to be managed
-// according to cfg. If cfg is enabled for OnDemand, then this
-// simply whitelists the domain names. Otherwise, the certificate(s)
-// for each name are loaded from storage or obtained from the CA;
-// and if loaded from storage, renewed if they are expiring or
-// expired. It then caches the certificate in memory and is
-// prepared to serve them up during TLS handshakes.
+// according to cfg. If cfg.OnDemand is not nil, then this simply
+// whitelists the domain names and defers the certificate operations
+// to when they are needed. Otherwise, the certificates for each
+// name are loaded from storage or obtained from the CA. If loaded
+// from storage, they are renewed if they are expiring or expired.
+// It then caches the certificate in memory and is prepared to serve
+// them up during TLS handshakes.
+//
+// Note that name whitelisting for on-demand management only takes
+// effect if cfg.OnDemand.DecisionFunc is not set (is nil); it will
+// not overwrite an existing DecisionFunc, nor will it overwrite
+// its decision; i.e. the implicit whitelist is only used if no
+// DecisionFunc is set.
 func (cfg *Config) Manage(domainNames []string) error {
 	for _, domainName := range domainNames {
 		if !HostQualifies(domainName) {
 			return fmt.Errorf("name does not qualify for automatic certificate management: %s", domainName)
 		}
 
-		// if on-demand is configured, simply whitelist this name
+		// if on-demand is configured, defer obtain and renew operations
 		if cfg.OnDemand != nil {
 			if !cfg.OnDemand.whitelistContains(domainName) {
-				cfg.OnDemand.HostWhitelist = append(cfg.OnDemand.HostWhitelist, domainName)
+				cfg.OnDemand.hostWhitelist = append(cfg.OnDemand.hostWhitelist, domainName)
 			}
 			continue
 		}
