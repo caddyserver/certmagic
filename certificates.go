@@ -44,10 +44,10 @@ type Certificate struct {
 	NotAfter time.Time
 
 	// OCSP contains the certificate's parsed OCSP response.
-	OCSP *ocsp.Response
+	ocsp *ocsp.Response
 
 	// The hex-encoded hash of this cert's chain's bytes.
-	Hash string
+	hash string
 
 	// Whether this certificate is under our management
 	managed bool
@@ -80,9 +80,20 @@ func (cert Certificate) NeedsRenewal(cfg *Config) bool {
 // memory use will increase at scale with large
 // numbers of certificates in the cache.
 type CertMetadata struct {
+	Tags               []string // user-provided and arbitrary
 	Subject            pkix.Name
 	SerialNumber       *big.Int
 	PublicKeyAlgorithm x509.PublicKeyAlgorithm
+}
+
+// HasTag returns true if cm.Tags has tag.
+func (cm CertMetadata) HasTag(tag string) bool {
+	for _, t := range cm.Tags {
+		if t == tag {
+			return true
+		}
+	}
+	return false
 }
 
 // CacheManagedCertificate loads the certificate for domain into the
@@ -124,11 +135,12 @@ func (cfg *Config) loadManagedCertificate(domain string) (Certificate, error) {
 // the in-memory cache.
 //
 // This method is safe for concurrent use.
-func (cfg *Config) CacheUnmanagedCertificatePEMFile(certFile, keyFile string) error {
+func (cfg *Config) CacheUnmanagedCertificatePEMFile(certFile, keyFile string, tags []string) error {
 	cert, err := makeCertificateFromDiskWithOCSP(cfg.Storage, certFile, keyFile)
 	if err != nil {
 		return err
 	}
+	cert.CertMetadata.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
 	if cfg.OnEvent != nil {
 		cfg.OnEvent("cached_unmanaged_cert", cert.Names)
@@ -140,7 +152,7 @@ func (cfg *Config) CacheUnmanagedCertificatePEMFile(certFile, keyFile string) er
 // It staples OCSP if possible.
 //
 // This method is safe for concurrent use.
-func (cfg *Config) CacheUnmanagedTLSCertificate(tlsCert tls.Certificate) error {
+func (cfg *Config) CacheUnmanagedTLSCertificate(tlsCert tls.Certificate, tags []string) error {
 	var cert Certificate
 	err := fillCertFromLeaf(&cert, tlsCert)
 	if err != nil {
@@ -153,6 +165,7 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(tlsCert tls.Certificate) error {
 	if cfg.OnEvent != nil {
 		cfg.OnEvent("cached_unmanaged_cert", cert.Names)
 	}
+	cert.CertMetadata.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
 	return nil
 }
@@ -161,11 +174,12 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(tlsCert tls.Certificate) error {
 // of the certificate and key, then caches it in memory.
 //
 // This method is safe for concurrent use.
-func (cfg *Config) CacheUnmanagedCertificatePEMBytes(certBytes, keyBytes []byte) error {
+func (cfg *Config) CacheUnmanagedCertificatePEMBytes(certBytes, keyBytes []byte, tags []string) error {
 	cert, err := makeCertificateWithOCSP(cfg.Storage, certBytes, keyBytes)
 	if err != nil {
 		return err
 	}
+	cert.CertMetadata.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
 	if cfg.OnEvent != nil {
 		cfg.OnEvent("cached_unmanaged_cert", cert.Names)
@@ -263,7 +277,7 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 
 	// save the hash of this certificate (chain) and
 	// expiration date, for necessity and efficiency
-	cert.Hash = hashCertificateChain(cert.Certificate.Certificate)
+	cert.hash = hashCertificateChain(cert.Certificate.Certificate)
 	cert.NotAfter = leaf.NotAfter
 
 	// these other fields are strictly optional to
@@ -307,7 +321,8 @@ func (cfg *Config) managedCertInStorageExpiresSoon(cert Certificate) (bool, erro
 // reloadManagedCertificate reloads the certificate corresponding to the name(s)
 // on oldCert into the cache, from storage. This also replaces the old certificate
 // with the new one, so that all configurations that used the old cert now point
-// to the new cert.
+// to the new cert. It assumes that the new certificate for oldCert.Names[0] is
+// already in storage.
 func (cfg *Config) reloadManagedCertificate(oldCert Certificate) error {
 	newCert, err := cfg.loadManagedCertificate(oldCert.Names[0])
 	if err != nil {

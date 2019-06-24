@@ -192,9 +192,11 @@ func (certCache *Cache) RenewManagedCertificates(interactive bool) error {
 	}
 
 	// Deletion queue
+	certCache.mu.Lock()
 	for _, cert := range deleteQueue {
 		certCache.removeCertificate(cert)
 	}
+	certCache.mu.Unlock()
 
 	return nil
 }
@@ -224,9 +226,9 @@ func (certCache *Cache) updateOCSPStaples() {
 		}
 
 		var lastNextUpdate time.Time
-		if cert.OCSP != nil {
-			lastNextUpdate = cert.OCSP.NextUpdate
-			if freshOCSP(cert.OCSP) {
+		if cert.ocsp != nil {
+			lastNextUpdate = cert.ocsp.NextUpdate
+			if freshOCSP(cert.ocsp) {
 				continue // no need to update staple if ours is still fresh
 			}
 		}
@@ -244,7 +246,7 @@ func (certCache *Cache) updateOCSPStaples() {
 
 		err = stapleOCSP(cfg.Storage, &cert, nil)
 		if err != nil {
-			if cert.OCSP != nil {
+			if cert.ocsp != nil {
 				// if there was no staple before, that's fine; otherwise we should log the error
 				log.Printf("[ERROR] Checking OCSP: %v", err)
 			}
@@ -254,10 +256,10 @@ func (certCache *Cache) updateOCSPStaples() {
 		// By this point, we've obtained the latest OCSP response.
 		// If there was no staple before, or if the response is updated, make
 		// sure we apply the update to all names on the certificate.
-		if cert.OCSP != nil && (lastNextUpdate.IsZero() || lastNextUpdate != cert.OCSP.NextUpdate) {
+		if cert.ocsp != nil && (lastNextUpdate.IsZero() || lastNextUpdate != cert.ocsp.NextUpdate) {
 			log.Printf("[INFO] Advancing OCSP staple for %v from %s to %s",
-				cert.Names, lastNextUpdate, cert.OCSP.NextUpdate)
-			updated[certHash] = ocspUpdate{rawBytes: cert.Certificate.OCSPStaple, parsed: cert.OCSP}
+				cert.Names, lastNextUpdate, cert.ocsp.NextUpdate)
+			updated[certHash] = ocspUpdate{rawBytes: cert.Certificate.OCSPStaple, parsed: cert.ocsp}
 		}
 	}
 	certCache.mu.RUnlock()
@@ -266,7 +268,7 @@ func (certCache *Cache) updateOCSPStaples() {
 	for certKey, update := range updated {
 		certCache.mu.Lock()
 		cert := certCache.cache[certKey]
-		cert.OCSP = update.parsed
+		cert.ocsp = update.parsed
 		cert.Certificate.OCSPStaple = update.rawBytes
 		certCache.cache[certKey] = cert
 		certCache.mu.Unlock()

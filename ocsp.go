@@ -102,7 +102,7 @@ func stapleOCSP(storage Storage, cert *Certificate, pemBundle []byte) error {
 				cert.Names, cert.NotAfter.Sub(ocspResp.NextUpdate))
 		}
 		cert.Certificate.OCSPStaple = ocspBytes
-		cert.OCSP = ocspResp
+		cert.ocsp = ocspResp
 		if gotNewOCSP {
 			err := storage.Store(ocspStapleKey, ocspBytes)
 			if err != nil {

@@ -53,7 +53,7 @@ func TestUnexportedGetCertificate(t *testing.T) {
 func TestCacheCertificate(t *testing.T) {
 	certCache := &Cache{cache: make(map[string]Certificate), cacheIndex: make(map[string][]string)}
 
-	certCache.cacheCertificate(Certificate{Names: []string{"example.com", "sub.example.com"}, Hash: "foobar"})
+	certCache.cacheCertificate(Certificate{Names: []string{"example.com", "sub.example.com"}, hash: "foobar"})
 	if len(certCache.cache) != 1 {
 		t.Errorf("Expected length of certificate cache to be 1")
 	}
@@ -68,7 +68,7 @@ func TestCacheCertificate(t *testing.T) {
 	}
 
 	// using same cache; and has cert with overlapping name, but different hash
-	certCache.cacheCertificate(Certificate{Names: []string{"example.com"}, Hash: "barbaz"})
+	certCache.cacheCertificate(Certificate{Names: []string{"example.com"}, hash: "barbaz"})
 	if _, ok := certCache.cache["barbaz"]; !ok {
 		t.Error("Expected second cert to be cached by key 'barbaz.com', but it wasn't")
 	}

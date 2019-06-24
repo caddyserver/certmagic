@@ -41,7 +41,7 @@ func (s tlsALPNSolver) Present(domain, token, keyAuth string) error {
 	s.certCache.cache[tlsALPNCertKeyName(domain)] = Certificate{
 		Certificate: *cert,
 		Names:       []string{domain},
-		Hash:        certHash, // perhaps not necesssary
+		hash:        certHash, // perhaps not necesssary
 	}
 	s.certCache.mu.Unlock()
 	return nil

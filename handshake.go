@@ -313,8 +313,8 @@ func (cfg *Config) handshakeMaintenance(hello *tls.ClientHelloInfo, cert Certifi
 	}
 
 	// Check OCSP staple validity
-	if cert.OCSP != nil {
-		refreshTime := cert.OCSP.ThisUpdate.Add(cert.OCSP.NextUpdate.Sub(cert.OCSP.ThisUpdate) / 2)
+	if cert.ocsp != nil {
+		refreshTime := cert.ocsp.ThisUpdate.Add(cert.ocsp.NextUpdate.Sub(cert.ocsp.ThisUpdate) / 2)
 		if time.Now().After(refreshTime) {
 			err := stapleOCSP(cfg.Storage, &cert, nil)
 			if err != nil {
@@ -323,7 +323,7 @@ func (cfg *Config) handshakeMaintenance(hello *tls.ClientHelloInfo, cert Certifi
 				log.Printf("[ERROR] Getting OCSP for %s: %v", hello.ServerName, err)
 			}
 			cfg.certCache.mu.Lock()
-			cfg.certCache.cache[cert.Hash] = cert
+			cfg.certCache.cache[cert.hash] = cert
 			cfg.certCache.mu.Unlock()
 		}
 	}

@@ -175,16 +175,16 @@ func (certCache *Cache) cacheCertificate(cert Certificate) {
 // a write lock on certCache.mu first.
 func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 	// no-op if this certificate already exists in the cache
-	if _, ok := certCache.cache[cert.Hash]; ok {
+	if _, ok := certCache.cache[cert.hash]; ok {
 		return
 	}
 
 	// store the certificate
-	certCache.cache[cert.Hash] = cert
+	certCache.cache[cert.hash] = cert
 
 	// update the index so we can access it by name
 	for _, name := range cert.Names {
-		certCache.cacheIndex[name] = append(certCache.cacheIndex[name], cert.Hash)
+		certCache.cacheIndex[name] = append(certCache.cacheIndex[name], cert.hash)
 	}
 }
 
@@ -197,7 +197,7 @@ func (certCache *Cache) removeCertificate(cert Certificate) {
 	for _, name := range cert.Names {
 		keyList := certCache.cacheIndex[name]
 		for i, cacheKey := range keyList {
-			if cacheKey == cert.Hash {
+			if cacheKey == cert.hash {
 				keyList = append(keyList[:i], keyList[i+1:]...)
 			}
 		}
@@ -209,7 +209,7 @@ func (certCache *Cache) removeCertificate(cert Certificate) {
 	}
 
 	// delete the actual cert from the cache
-	delete(certCache.cache, cert.Hash)
+	delete(certCache.cache, cert.hash)
 }
 
 // replaceCertificate atomically replaces oldCert with newCert in

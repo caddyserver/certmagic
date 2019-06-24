@@ -65,7 +65,7 @@ func TestGetCertificate(t *testing.T) {
 	wildcardCert := Certificate{
 		Names:       []string{"*.example.com"},
 		Certificate: tls.Certificate{Leaf: &x509.Certificate{DNSNames: []string{"*.example.com"}}},
-		Hash:        "(don't overwrite the first one)",
+		hash:        "(don't overwrite the first one)",
 	}
 	c.cacheCertificate(wildcardCert)
 	if cert, err := cfg.GetCertificate(helloSub); err != nil {
@@ -96,7 +96,7 @@ func TestGetCertificate(t *testing.T) {
 	ipCert := Certificate{
 		Names:       []string{"127.0.0.1"},
 		Certificate: tls.Certificate{Leaf: &x509.Certificate{IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}}},
-		Hash:        "(don't overwrite the first or second one)",
+		hash:        "(don't overwrite the first or second one)",
 	}
 	c.cacheCertificate(ipCert)
 	if cert, err := cfg.GetCertificate(helloNoSNI); err != nil {
