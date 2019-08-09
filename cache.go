@@ -257,6 +257,12 @@ func (certCache *Cache) getConfig(cert Certificate) (*Config, error) {
 	return New(certCache, cfg), nil
 }
 
+// CertificatesWithSAN gets all certificates
+// in certCache matching the given SAN.
+func (certCache *Cache) CertificatesWithSAN(san string) []Certificate {
+	return certCache.getAllMatchingCerts(san)
+}
+
 var (
 	defaultCache   *Cache
 	defaultCacheMu sync.Mutex
