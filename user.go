@@ -29,8 +29,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/go-acme/lego/acme"
-	"github.com/go-acme/lego/registration"
+	"github.com/go-acme/lego/v3/acme"
+	"github.com/go-acme/lego/v3/registration"
 )
 
 // user represents a Let's Encrypt user account.

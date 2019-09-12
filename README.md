@@ -121,7 +121,7 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 ## Installation
 
 ```bash
-$ go get -u github.com/mholt/certmagic
+$ go get github.com/mholt/certmagic
 ```
 
 
@@ -361,7 +361,7 @@ This challenge works by setting a special record in the domain's zone. To do thi
 To enable it, just set the `DNSProvider` field on a `certmagic.Config` struct, or set the default `certmagic.DNSProvider` variable. For example, if my domains' DNS was served by DNSimple and I set my DNSimple API credentials in environment variables:
 
 ```go
-import "github.com/go-acme/lego/providers/dns/dnsimple"
+import "github.com/go-acme/lego/v3/providers/dns/dnsimple"
 
 provider, err := dnsimple.NewDNSProvider()
 if err != nil {
