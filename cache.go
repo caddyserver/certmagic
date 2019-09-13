@@ -16,6 +16,7 @@ package certmagic
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -257,10 +258,23 @@ func (certCache *Cache) getConfig(cert Certificate) (*Config, error) {
 	return New(certCache, cfg), nil
 }
 
-// CertificatesWithSAN gets all certificates
-// in certCache matching the given SAN.
-func (certCache *Cache) CertificatesWithSAN(san string) []Certificate {
-	return certCache.getAllMatchingCerts(san)
+// AllMatchingCertificates returns a list of all certificates that could
+// be used to serve the given SNI name, including exact SAN matches and
+// wildcard matches.
+func (certCache *Cache) AllMatchingCertificates(name string) []Certificate {
+	// get exact matches first
+	certs := certCache.getAllMatchingCerts(name)
+
+	// then look for wildcard matches by replacing each
+	// label of the domain name with wildcards
+	labels := strings.Split(name, ".")
+	for i := range labels {
+		labels[i] = "*"
+		candidate := strings.Join(labels, ".")
+		certs = append(certs, certCache.getAllMatchingCerts(candidate)...)
+	}
+
+	return certs
 }
 
 var (
