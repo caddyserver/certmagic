@@ -16,6 +16,7 @@ package certmagic
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log"
 	"sync"
@@ -130,6 +131,11 @@ type Config struct {
 	// If not set, the first matching certificate
 	// will be used.
 	CertSelection CertificateSelector
+
+	// TrustedRoots specifies a pool of root CA
+	// certificates to trust when communicating
+	// over a network to a peer.
+	TrustedRoots *x509.CertPool
 
 	// Pointer to the in-memory certificate cache
 	certCache *Cache

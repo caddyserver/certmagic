@@ -15,10 +15,12 @@
 package certmagic
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
 	weakrand "math/rand"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -133,6 +135,15 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 		legoCfg.Certificate = lego.CertificateConfig{
 			KeyType: keyType,
 			Timeout: certObtainTimeout,
+		}
+		if cfg.TrustedRoots != nil {
+			if ht, ok := legoCfg.HTTPClient.Transport.(*http.Transport); ok {
+				if ht.TLSClientConfig == nil {
+					ht.TLSClientConfig = new(tls.Config)
+					ht.ForceAttemptHTTP2 = true
+				}
+				ht.TLSClientConfig.RootCAs = cfg.TrustedRoots
+			}
 		}
 		client, err = lego.NewClient(legoCfg)
 		if err != nil {
