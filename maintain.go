@@ -15,7 +15,12 @@
 package certmagic
 
 import (
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
 	"log"
+	"path"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ocsp"
@@ -44,7 +49,6 @@ func (certCache *Cache) maintainAssets() {
 		case <-ocspTicker.C:
 			log.Printf("[INFO][cache:%p] Scanning for stale OCSP staples", certCache)
 			certCache.updateOCSPStaples()
-			// certCache.deleteOldStapleFiles()
 			log.Printf("[INFO][cache:%p] Done checking OCSP staples", certCache)
 		case <-certCache.stopChan:
 			renewalTicker.Stop()
@@ -277,18 +281,24 @@ func (certCache *Cache) updateOCSPStaples() {
 
 // CleanStorageOptions specifies how to clean up a storage unit.
 type CleanStorageOptions struct {
-	OCSPStaples bool
-	// TODO: long-expired certificates
+	OCSPStaples            bool
+	ExpiredCerts           bool
+	ExpiredCertGracePeriod time.Duration
 }
 
-// CleanStorage tidies up the given storage according to opts; this
-// generally involves deleting assets which are no longer required.
-// TODO: We should do this for long-expired certificates, too.
+// CleanStorage removes assets which are no longer useful,
+// according to opts.
 func CleanStorage(storage Storage, opts CleanStorageOptions) {
 	if opts.OCSPStaples {
 		err := deleteOldOCSPStaples(storage)
 		if err != nil {
 			log.Printf("[ERROR] Deleting old OCSP staples: %v", err)
+		}
+	}
+	if opts.ExpiredCerts {
+		err := deleteExpiredCerts(storage, opts.ExpiredCertGracePeriod)
+		if err != nil {
+			log.Printf("[ERROR] Deleting expired certificates: %v", err)
 		}
 	}
 }
@@ -319,6 +329,79 @@ func deleteOldOCSPStaples(storage Storage) error {
 			err = storage.Delete(key)
 			if err != nil {
 				log.Printf("[ERROR] Purging expired staple file %s: %v", key, err)
+			}
+		}
+	}
+	return nil
+}
+
+func deleteExpiredCerts(storage Storage, gracePeriod time.Duration) error {
+	acmeKeys, err := storage.List(prefixACME, false)
+	if err != nil {
+		// maybe just hasn't been created yet; no big deal
+		return nil
+	}
+
+	for _, acmeKey := range acmeKeys {
+		siteKeys, err := storage.List(path.Join(acmeKey, "sites"), false)
+		if err != nil {
+			continue
+		}
+
+		for _, siteKey := range siteKeys {
+			siteAssets, err := storage.List(siteKey, false)
+			if err != nil {
+				log.Printf("[INFO] Listing contents of %s: %v", siteKey, err)
+				continue
+			}
+
+			for _, assetKey := range siteAssets {
+				if path.Ext(assetKey) != ".crt" {
+					continue
+				}
+
+				certFile, err := storage.Load(assetKey)
+				if err != nil {
+					return fmt.Errorf("loading certificate file %s: %v", assetKey, err)
+				}
+				block, _ := pem.Decode(certFile)
+				if block == nil || block.Type != "CERTIFICATE" {
+					return fmt.Errorf("certificate file %s does not contain PEM-encoded certificate", assetKey)
+				}
+				cert, err := x509.ParseCertificate(block.Bytes)
+				if err != nil {
+					return fmt.Errorf("certificate file %s is malformed; error parsing PEM: %v", assetKey, err)
+				}
+
+				if expiredTime := time.Since(cert.NotAfter); expiredTime >= gracePeriod {
+					log.Printf("[INFO] Certificate %s expired %s ago; cleaning up", assetKey, expiredTime)
+					baseName := strings.TrimSuffix(assetKey, ".crt")
+					for _, relatedAsset := range []string{
+						assetKey,
+						baseName + ".key",
+						baseName + ".json",
+					} {
+						log.Printf("[INFO] Deleting %s because resource expired", relatedAsset)
+						err := storage.Delete(relatedAsset)
+						if err != nil {
+							log.Printf("[ERROR] Cleaning up asset related to expired certificate for %s: %s: %v",
+								baseName, relatedAsset, err)
+						}
+					}
+				}
+			}
+
+			// update listing; if folder is empty, delete it
+			siteAssets, err = storage.List(siteKey, false)
+			if err != nil {
+				continue
+			}
+			if len(siteAssets) == 0 {
+				log.Printf("[INFO] Deleting %s because key is empty", siteKey)
+				err := storage.Delete(siteKey)
+				if err != nil {
+					return fmt.Errorf("deleting empty site folder %s: %v", siteKey, err)
+				}
 			}
 		}
 	}
