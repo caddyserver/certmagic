@@ -300,7 +300,11 @@ func (certCache *Cache) updateOCSPStaples() {
 
 		err := cfg.RenewCert(renewName, false)
 		if err != nil {
-			log.Printf("[ERROR] Obtaining new certificate for %v due to OCSP status of revoked: %v", oldCert.Names, err)
+			// probably better to not serve a revoked certificate at all
+			log.Printf("[ERROR] Obtaining new certificate for %v due to OCSP status of revoked: %v; removing from cache", oldCert.Names, err)
+			certCache.mu.Lock()
+			certCache.removeCertificate(oldCert)
+			certCache.mu.Unlock()
 			continue
 		}
 
