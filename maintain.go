@@ -140,6 +140,7 @@ func (certCache *Cache) RenewManagedCertificates(interactive bool) error {
 
 		cfg := configs[oldCert.Names[0]]
 
+		// crucially, this happens OUTSIDE a lock on the certCache
 		err := cfg.reloadManagedCertificate(oldCert)
 		if err != nil {
 			if interactive {
@@ -161,7 +162,7 @@ func (certCache *Cache) RenewManagedCertificates(interactive bool) error {
 		// so this should be easy.
 		renewName := oldCert.Names[0]
 
-		// perform renewal
+		// perform renewal - crucially, this happens OUTSIDE a lock on certCache
 		err := cfg.RenewCert(renewName, interactive)
 		if err != nil {
 			if interactive {
@@ -221,6 +222,8 @@ func (certCache *Cache) updateOCSPStaples() {
 		parsed   *ocsp.Response
 	}
 	updated := make(map[string]ocspUpdate)
+	var renewQueue []Certificate
+	configs := make(map[string]*Config)
 
 	certCache.mu.RLock()
 	for certHash, cert := range certCache.cache {
@@ -248,7 +251,7 @@ func (certCache *Cache) updateOCSPStaples() {
 			continue
 		}
 
-		err = stapleOCSP(cfg.Storage, &cert, nil)
+		ocspResp, err := stapleOCSP(cfg.Storage, &cert, nil)
 		if err != nil {
 			if cert.ocsp != nil {
 				// if there was no staple before, that's fine; otherwise we should log the error
@@ -265,6 +268,14 @@ func (certCache *Cache) updateOCSPStaples() {
 				cert.Names, lastNextUpdate, cert.ocsp.NextUpdate)
 			updated[certHash] = ocspUpdate{rawBytes: cert.Certificate.OCSPStaple, parsed: cert.ocsp}
 		}
+
+		// If a managed certificate was revoked, we should attempt
+		// to replace it with a new one. If that fails, oh well;
+		// but it's better than serving a cert we know is revoked.
+		if cert.managed && ocspResp.Status == ocsp.Revoked && len(cert.Names) > 0 {
+			renewQueue = append(renewQueue, cert)
+			configs[cert.Names[0]] = cfg
+		}
 	}
 	certCache.mu.RUnlock()
 
@@ -276,6 +287,28 @@ func (certCache *Cache) updateOCSPStaples() {
 		cert.Certificate.OCSPStaple = update.rawBytes
 		certCache.cache[certKey] = cert
 		certCache.mu.Unlock()
+	}
+
+	// We attempt to replace any certificates that were revoked.
+	// Crucially, this happens OUTSIDE a lock on the certCache.
+	for _, oldCert := range renewQueue {
+		log.Printf("[INFO] OCSP status for managed certificate %v (expiration=%s) is REVOKED; attempting to replace with new certificate",
+			oldCert.Names, oldCert.NotAfter)
+
+		renewName := oldCert.Names[0]
+		cfg := configs[renewName]
+
+		err := cfg.RenewCert(renewName, false)
+		if err != nil {
+			log.Printf("[ERROR] Obtaining new certificate for %v due to OCSP status of revoked: %v", oldCert.Names, err)
+			continue
+		}
+
+		err = cfg.reloadManagedCertificate(oldCert)
+		if err != nil {
+			log.Printf("[ERROR] After obtaining new certificate due to OCSP status of revoked: %v", err)
+			continue
+		}
 	}
 }
 
