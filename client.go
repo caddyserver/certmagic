@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-acme/lego/v3/acme"
 	"github.com/go-acme/lego/v3/certificate"
 	"github.com/go-acme/lego/v3/challenge"
 	"github.com/go-acme/lego/v3/challenge/http01"
@@ -79,7 +80,14 @@ func (cfg *Config) newManager(interactive bool) (Manager, error) {
 		if err == nil {
 			break
 		}
+		if acmeErr, ok := err.(acme.ProblemDetails); ok {
+			if acmeErr.HTTPStatus == http.StatusTooManyRequests {
+				log.Printf("[ERROR] Too many requests when making new ACME client: %+v - aborting", acmeErr)
+				return nil, err
+			}
+		}
 		log.Printf("[ERROR] Making new certificate manager: %v (attempt %d/%d)", err, i+1, maxTries)
+		time.Sleep(1 * time.Second)
 	}
 	return mgr, err
 }
@@ -169,7 +177,7 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 
 		reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: cfg.Agreed})
 		if err != nil {
-			return nil, fmt.Errorf("registration error: %v", err)
+			return nil, err
 		}
 		leUser.Registration = reg
 
