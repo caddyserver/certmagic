@@ -15,6 +15,7 @@
 package certmagic
 
 import (
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -67,10 +68,54 @@ func (cfg *Config) lockKey(op, domainName string) string {
 	return fmt.Sprintf("%s_%s_%s", op, domainName, cfg.CA)
 }
 
+// checkStorage tests the storage by writing random bytes
+// to a random key, and then loading those bytes and
+// comparing the loaded value. If this fails, the provided
+// cfg.Storage mechanism should not be used.
+func (cfg *Config) checkStorage() error {
+	key := fmt.Sprintf("rw_test_%d", weakrand.Int())
+	contents := make([]byte, 1024*10) // size sufficient for one or two ACME resources
+	_, err := weakrand.Read(contents)
+	if err != nil {
+		return err
+	}
+	err = cfg.Storage.Store(key, contents)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		deleteErr := cfg.Storage.Delete(key)
+		if deleteErr != nil {
+			log.Printf("[ERROR] Deleting test key %s from storage: %v", key, err)
+		}
+		// if there was no other error, make sure
+		// to return any error returned from Delete
+		if err == nil {
+			err = deleteErr
+		}
+	}()
+	loaded, err := cfg.Storage.Load(key)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(contents, loaded) {
+		return fmt.Errorf("load yielded different value than was stored; expected %d bytes, got %d bytes of differing elements", len(contents), len(loaded))
+	}
+	return nil
+}
+
 func (cfg *Config) newManager(interactive bool) (Manager, error) {
+	// ensure storage is writeable and readable
+	// TODO: this is not necessary every time; should only
+	// perform check once every so often for each storage,
+	// which may require some global state...
+	err := cfg.checkStorage()
+	if err != nil {
+		return nil, fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
+	}
+
 	const maxTries = 3
 	var mgr Manager
-	var err error
 	for i := 0; i < maxTries; i++ {
 		if cfg.NewManager != nil {
 			mgr, err = cfg.NewManager(interactive)
