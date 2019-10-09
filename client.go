@@ -181,7 +181,7 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 	client, ok := cfg.acmeClients[clientKey]
 	if !ok {
 		// the client facilitates our communication with the CA server
-		legoCfg := lego.NewConfig(&leUser)
+		legoCfg := lego.NewConfig(leUser)
 		legoCfg.CADirURL = caURL
 		legoCfg.UserAgent = buildUAString()
 		legoCfg.HTTPClient.Timeout = HTTPTimeout
