@@ -338,7 +338,9 @@ func (cfg *Config) reloadManagedCertificate(oldCert Certificate) error {
 // not eligible because we cannot obtain certificates
 // for those names. Wildcard names are allowed, as long
 // as they conform to CABF requirements (only one wildcard
-// label, and it must be the left-most label).
+// label, and it must be the left-most label). Names with
+// certain special characters that are commonly accidental
+// are also rejected.
 func HostQualifies(hostname string) bool {
 	return hostname != "localhost" && // localhost is ineligible
 
@@ -353,6 +355,9 @@ func HostQualifies(hostname string) bool {
 		// must not start or end with a dot
 		!strings.HasPrefix(hostname, ".") &&
 		!strings.HasSuffix(hostname, ".") &&
+
+		// must not contain other common special characters
+		!strings.ContainsAny(hostname, "()[]{}<>\\/!@#$%^&|:;+='\"") &&
 
 		// cannot be an IP address, see
 		// https://community.letsencrypt.org/t/certificate-for-static-ip/84/2?u=mholt

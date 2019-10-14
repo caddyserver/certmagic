@@ -84,6 +84,7 @@ func TestHostQualifies(t *testing.T) {
 		host   string
 		expect bool
 	}{
+		{"hostname", true},
 		{"example.com", true},
 		{"sub.example.com", true},
 		{"Sub.Example.COM", true},
@@ -103,10 +104,20 @@ func TestHostQualifies(t *testing.T) {
 		{"example.com.", false},
 		{"localhost", false},
 		{"local", true},
-		{"devsite", true},
 		{"192.168.1.3", false},
 		{"10.0.2.1", false},
 		{"169.112.53.4", false},
+		{"$hostname", false},
+		{"%HOSTNAME%", false},
+		{"{hostname}", false},
+		{"hostname!", false},
+		{"<hostname>", false},
+		{"# hostname", false},
+		{"// hostname", false},
+		{"user@hostname", false},
+		{"hostname;", false},
+		{`"hostname"`, false},
+		{"hostname:", false},
 	} {
 		actual := HostQualifies(test.host)
 		if actual != test.expect {
