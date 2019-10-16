@@ -54,16 +54,6 @@ type Config struct {
 	// How long before expiration to renew certificates
 	RenewDurationBefore time.Duration
 
-	// How long before expiration to require a renewed
-	// certificate when in interactive mode, like when
-	// the program is first starting up (see
-	// mholt/caddy#1680). A wider window between
-	// RenewDurationBefore and this value will suppress
-	// errors under duress (bad) but hopefully this duration
-	// will give it enough time for the blockage to be
-	// relieved.
-	RenewDurationBeforeAtStartup time.Duration
-
 	// An optional event callback clients can set
 	// to subscribe to certain things happening
 	// internally by this config; invocations are
@@ -242,9 +232,6 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	if cfg.RenewDurationBefore == 0 {
 		cfg.RenewDurationBefore = Default.RenewDurationBefore
 	}
-	if cfg.RenewDurationBeforeAtStartup == 0 {
-		cfg.RenewDurationBeforeAtStartup = Default.RenewDurationBeforeAtStartup
-	}
 	if cfg.OnEvent == nil {
 		cfg.OnEvent = Default.OnEvent
 	}
@@ -297,7 +284,7 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	return &cfg
 }
 
-// Manage causes the certificates for domainNames to be managed
+// ManageSync causes the certificates for domainNames to be managed
 // according to cfg. If cfg.OnDemand is not nil, then this simply
 // whitelists the domain names and defers the certificate operations
 // to when they are needed. Otherwise, the certificates for each
@@ -311,12 +298,40 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 // not overwrite an existing DecisionFunc, nor will it overwrite
 // its decision; i.e. the implicit whitelist is only used if no
 // DecisionFunc is set.
-func (cfg *Config) Manage(domainNames []string) error {
+//
+// This method is synchronous, meaning that certificates for all
+// domainNames must be successfully obtained (or renewed) before
+// it returns. It returns immediately on the first error for any
+// of the given domainNames. This behavior is recommended for
+// interactive use (i.e. when an administrator is present) so
+// that errors can be reported and fixed immediately.
+func (cfg *Config) ManageSync(domainNames []string) error {
+	return cfg.manageAll(domainNames, false)
+}
+
+// ManageAsync is the same as ManageSync, except that ACME
+// operations are performed asynchronously (in the background).
+// This method returns before certificates are ready. It is
+// crucial that the administrator monitors the logs and is
+// notified of any errors so that corrective action can be
+// taken as soon as possible. Any errors returned from this
+// method occurred before ACME transactions started.
+//
+// As long as logs are monitored, this method is typically
+// recommended for non-interactive environments.
+func (cfg *Config) ManageAsync(domainNames []string) error {
+	return cfg.manageAll(domainNames, true)
+}
+
+func (cfg *Config) manageAll(domainNames []string, async bool) error {
+	// first, check all domains for validity
 	for _, domainName := range domainNames {
 		if !HostQualifies(domainName) {
 			return fmt.Errorf("name does not qualify for automatic certificate management: %s", domainName)
 		}
+	}
 
+	for _, domainName := range domainNames {
 		// if on-demand is configured, defer obtain and renew operations
 		if cfg.OnDemand != nil {
 			if !cfg.OnDemand.whitelistContains(domainName) {
@@ -324,32 +339,49 @@ func (cfg *Config) Manage(domainNames []string) error {
 			}
 			continue
 		}
-
-		// try loading an existing certificate; if it doesn't
-		// exist yet, obtain one and try loading it again
-		cert, err := cfg.CacheManagedCertificate(domainName)
-		if err != nil {
-			if _, ok := err.(ErrNotExist); ok {
-				// if it doesn't exist, get it, then try loading it again
-				err := cfg.ObtainCert(domainName, false)
+		if async {
+			go func(domainName string) {
+				err := cfg.manageOne(domainName)
 				if err != nil {
-					return fmt.Errorf("%s: obtaining certificate: %v", domainName, err)
+					log.Printf("[ERROR] %v", err)
 				}
-				cert, err = cfg.CacheManagedCertificate(domainName)
-				if err != nil {
-					return fmt.Errorf("%s: caching certificate after obtaining it: %v", domainName, err)
-				}
-				continue
-			}
-			return fmt.Errorf("%s: caching certificate: %v", domainName, err)
-		}
-
-		// for existing certificates, make sure it is renewed
-		if cert.NeedsRenewal(cfg) {
-			err := cfg.RenewCert(domainName, false)
+			}(domainName)
+		} else {
+			err := cfg.manageOne(domainName)
 			if err != nil {
-				return fmt.Errorf("%s: renewing certificate: %v", domainName, err)
+				return err
 			}
+		}
+	}
+
+	return nil
+}
+
+func (cfg *Config) manageOne(domainName string) error {
+	// try loading an existing certificate; if it doesn't
+	// exist yet, obtain one and try loading it again
+	cert, err := cfg.CacheManagedCertificate(domainName)
+	if err != nil {
+		if _, ok := err.(ErrNotExist); ok {
+			// if it doesn't exist, get it, then try loading it again
+			err := cfg.ObtainCert(domainName, false)
+			if err != nil {
+				return fmt.Errorf("%s: obtaining certificate: %v", domainName, err)
+			}
+			cert, err = cfg.CacheManagedCertificate(domainName)
+			if err != nil {
+				return fmt.Errorf("%s: caching certificate after obtaining it: %v", domainName, err)
+			}
+			return nil
+		}
+		return fmt.Errorf("%s: caching certificate: %v", domainName, err)
+	}
+
+	// for existing certificates, make sure it is renewed
+	if cert.NeedsRenewal(cfg) {
+		err := cfg.RenewCert(domainName, false)
+		if err != nil {
+			return fmt.Errorf("%s: renewing certificate: %v", domainName, err)
 		}
 	}
 

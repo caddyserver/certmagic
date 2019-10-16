@@ -143,7 +143,7 @@ The default `Config` value is called `certmagic.Default`. Change its fields to s
 
 You can set the default values easily, for example: `certmagic.Default.Email = ...`.
 
-The high-level functions in this package (`HTTPS()`, `Listen()`, and `Manage()`) use the default config exclusively. This is how most of you will interact with the package. This is suitable when all your certificates are managed the same way. However, if you need to manage certificates differently depending on their name, you will need to make your own cache and configs (keep reading).
+The high-level functions in this package (`HTTPS()`, `Listen()`, `ManageSync()`, and `ManageAsync()`) use the default config exclusively. This is how most of you will interact with the package. This is suitable when all your certificates are managed the same way. However, if you need to manage certificates differently depending on their name, you will need to make your own cache and configs (keep reading).
 
 
 #### Providing an email address
@@ -241,7 +241,7 @@ magic := certmagic.New(cache, certmagic.Config{
 })
 
 // this obtains certificates or renews them if necessary
-err := magic.Manage([]string{"example.com", "sub.example.com"})
+err := magic.ManageSync([]string{"example.com", "sub.example.com"})
 if err != nil {
 	return err
 }
@@ -396,7 +396,7 @@ The simplest way to enable on-demand issuance is to set the OnDemand field of a 
 certmagic.Default.OnDemand = new(certmagic.OnDemandConfig)
 ```
 
-By setting this to a non-nil value, on-demand TLS is enabled for that config. For convenient security, CertMagic's high-level abstraction functions such as `HTTPS(), TLS(), Manage(), and Listen()` (which all accept a list of domain names) will whitelist those names automatically so only certificates for those names can be obtained when using the Default config. Usually this is sufficient for most users.
+By setting this to a non-nil value, on-demand TLS is enabled for that config. For convenient security, CertMagic's high-level abstraction functions such as `HTTPS()`, `TLS()`, `ManageSync()`, `ManageAsync()`, and `Listen()` (which all accept a list of domain names) will whitelist those names automatically so only certificates for those names can be obtained when using the Default config. Usually this is sufficient for most users.
 
 However, if you require advanced control over which domains can be issued certificates on-demand (for example, if you do not know which domain names you are managing, or just need to defer their operations until later), you should implement your own DecisionFunc:
 

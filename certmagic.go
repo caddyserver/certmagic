@@ -71,7 +71,7 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 	Default.Agreed = true
 	cfg := NewDefault()
 
-	err := cfg.Manage(domainNames)
+	err := cfg.ManageSync(domainNames)
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func TLS(domainNames []string) (*tls.Config, error) {
 	Default.Agreed = true
 	Default.DisableHTTPChallenge = true
 	cfg := NewDefault()
-	return cfg.TLSConfig(), cfg.Manage(domainNames)
+	return cfg.TLSConfig(), cfg.ManageSync(domainNames)
 }
 
 // Listen manages certificates for domainName and returns a
@@ -189,14 +189,14 @@ func Listen(domainNames []string) (net.Listener, error) {
 	Default.Agreed = true
 	Default.DisableHTTPChallenge = true
 	cfg := NewDefault()
-	err := cfg.Manage(domainNames)
+	err := cfg.ManageSync(domainNames)
 	if err != nil {
 		return nil, err
 	}
 	return tls.Listen("tcp", fmt.Sprintf(":%d", HTTPSPort), cfg.TLSConfig())
 }
 
-// Manage obtains certificates for domainNames and keeps them
+// ManageSync obtains certificates for domainNames and keeps them
 // renewed using the Default config.
 //
 // This is a slightly lower-level function; you will need to
@@ -217,9 +217,22 @@ func Listen(domainNames []string) (net.Listener, error) {
 //
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
-func Manage(domainNames []string) error {
+func ManageSync(domainNames []string) error {
 	Default.Agreed = true
-	return NewDefault().Manage(domainNames)
+	return NewDefault().ManageSync(domainNames)
+}
+
+// ManageAsync is the same as ManageSync, except that
+// certificates are managed asynchronously. This means
+// that the function will return before certificates
+// are ready, and errors that occur during certificate
+// obtain or renew operations are only logged. It is
+// vital that you monitor the logs if using this method,
+// which is only recommended for automated/non-interactive
+// environments.
+func ManageAsync(domainNames []string) error {
+	Default.Agreed = true
+	return NewDefault().ManageAsync(domainNames)
 }
 
 // OnDemandConfig configures on-demand TLS (certificate
@@ -331,11 +344,10 @@ func isInternal(addr string) bool {
 // cache). This is the only Config which can access
 // the default certificate cache.
 var Default = Config{
-	CA:                           LetsEncryptProductionCA,
-	RenewDurationBefore:          DefaultRenewDurationBefore,
-	RenewDurationBeforeAtStartup: DefaultRenewDurationBeforeAtStartup,
-	KeyType:                      certcrypto.EC256,
-	Storage:                      defaultFileStorage,
+	CA:                  LetsEncryptProductionCA,
+	RenewDurationBefore: DefaultRenewDurationBefore,
+	KeyType:             certcrypto.EC256,
+	Storage:             defaultFileStorage,
 }
 
 const (

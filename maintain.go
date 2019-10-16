@@ -41,7 +41,7 @@ func (certCache *Cache) maintainAssets() {
 		select {
 		case <-renewalTicker.C:
 			log.Printf("[INFO][cache:%p] Scanning for expiring certificates", certCache)
-			err := certCache.RenewManagedCertificates(false)
+			err := certCache.RenewManagedCertificates()
 			if err != nil {
 				log.Printf("[ERROR][cache:%p] Renewing managed certificates: %v", certCache, err)
 			}
@@ -64,8 +64,9 @@ func (certCache *Cache) maintainAssets() {
 // RenewManagedCertificates renews managed certificates,
 // including ones loaded on-demand. Note that this is done
 // automatically on a regular basis; normally you will not
-// need to call this.
-func (certCache *Cache) RenewManagedCertificates(interactive bool) error {
+// need to call this. This method assumes non-interactive
+// mode (i.e. operating in the background).
+func (certCache *Cache) RenewManagedCertificates() error {
 	// configs will hold a map of certificate name to the config
 	// to use when managing that certificate
 	configs := make(map[string]*Config)
@@ -143,10 +144,8 @@ func (certCache *Cache) RenewManagedCertificates(interactive bool) error {
 		// crucially, this happens OUTSIDE a lock on the certCache
 		err := cfg.reloadManagedCertificate(oldCert)
 		if err != nil {
-			if interactive {
-				return err // operator is present, so report error immediately
-			}
 			log.Printf("[ERROR] Loading renewed certificate: %v", err)
+			continue
 		}
 	}
 
@@ -163,21 +162,9 @@ func (certCache *Cache) RenewManagedCertificates(interactive bool) error {
 		renewName := oldCert.Names[0]
 
 		// perform renewal - crucially, this happens OUTSIDE a lock on certCache
-		err := cfg.RenewCert(renewName, interactive)
+		err := cfg.RenewCert(renewName, false)
 		if err != nil {
-			if interactive {
-				// Certificate renewal failed and the operator is present. See a discussion about
-				// this in issue mholt/caddy#642. For a while, we only stopped if the certificate
-				// was expired, but in reality, there is no difference between reporting it now
-				// versus later, except that there's somebody present to deal with it right now.
-				// Follow-up: See issue mholt/caddy#1680. Only fail in this case if the certificate
-				// is dangerously close to expiration.
-				timeLeft := oldCert.NotAfter.Sub(time.Now().UTC())
-				if timeLeft < cfg.RenewDurationBeforeAtStartup {
-					return err
-				}
-			}
-			log.Printf("[ERROR] %v", err)
+			log.Printf("[ERROR][%s] %v", renewName, err)
 			if cfg.OnDemand != nil {
 				// loaded dynamically, remove dynamically
 				deleteQueue = append(deleteQueue, oldCert)
@@ -189,10 +176,8 @@ func (certCache *Cache) RenewManagedCertificates(interactive bool) error {
 		// renewed certificate so it will be used with handshakes
 		err = cfg.reloadManagedCertificate(oldCert)
 		if err != nil {
-			if interactive {
-				return err // operator is present, so report error immediately
-			}
-			log.Printf("[ERROR] %v", err)
+			log.Printf("[ERROR][%s] %v", renewName, err)
+			continue
 		}
 	}
 
@@ -451,10 +436,6 @@ const (
 
 	// DefaultRenewDurationBefore is how long before expiration to renew certificates.
 	DefaultRenewDurationBefore = (24 * time.Hour) * 30
-
-	// DefaultRenewDurationBeforeAtStartup is how long before expiration to require
-	// a renewed certificate when the process is first starting up (see mholt/caddy#1680).
-	DefaultRenewDurationBeforeAtStartup = (24 * time.Hour) * 7
 
 	// DefaultOCSPCheckInterval is how often to check if OCSP stapling needs updating.
 	DefaultOCSPCheckInterval = 1 * time.Hour
