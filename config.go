@@ -15,10 +15,12 @@
 package certmagic
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -306,7 +308,7 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 // interactive use (i.e. when an administrator is present) so
 // that errors can be reported and fixed immediately.
 func (cfg *Config) ManageSync(domainNames []string) error {
-	return cfg.manageAll(domainNames, false)
+	return cfg.manageAll(nil, domainNames, false)
 }
 
 // ManageAsync is the same as ManageSync, except that ACME
@@ -319,11 +321,21 @@ func (cfg *Config) ManageSync(domainNames []string) error {
 //
 // As long as logs are monitored, this method is typically
 // recommended for non-interactive environments.
-func (cfg *Config) ManageAsync(domainNames []string) error {
-	return cfg.manageAll(domainNames, true)
+//
+// If there are failures loading, obtaining, or renewing a
+// certificate, it will be retried with exponential backoff
+// for up to about 1 day, with a maximum interval of about
+// 1 hour. Cancelling ctx will cancel retries and shut down
+// any goroutines spawned by ManageAsync.
+func (cfg *Config) ManageAsync(ctx context.Context, domainNames []string) error {
+	return cfg.manageAll(ctx, domainNames, true)
 }
 
-func (cfg *Config) manageAll(domainNames []string, async bool) error {
+func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	// first, check all domains for validity
 	for _, domainName := range domainNames {
 		if !HostQualifies(domainName) {
@@ -341,9 +353,30 @@ func (cfg *Config) manageAll(domainNames []string, async bool) error {
 		}
 		if async {
 			go func(domainName string) {
-				err := cfg.manageOne(domainName)
-				if err != nil {
-					log.Printf("[ERROR] %v", err)
+				var wait time.Duration
+				// the first 11 iterations ramp up the wait interval to
+				// ~1hr, and the remaining iterations retry at the
+				// maximum backoff until giving up after ~1 day.
+				const maxIter = 35
+				for i := 1; i <= maxIter; i++ {
+					select {
+					case <-ctx.Done():
+						log.Printf("[ERROR][%s] Context cancelled", domainName)
+						return
+					case <-time.After(wait):
+						err := cfg.manageOne(domainName)
+						if err == nil {
+							return
+						}
+						log.Printf("[ERROR] %s - backing off and retrying (attempt %d/%d)...", strings.TrimSpace(err.Error()), i, maxIter)
+					}
+					// retry with exponential backoff
+					if wait == 0 {
+						// this start interval multiplies nicely to round duration values
+						wait = 3515625 * time.Microsecond
+					} else if wait < time.Hour {
+						wait *= 2
+					}
 				}
 			}(domainName)
 		} else {

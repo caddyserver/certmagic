@@ -35,6 +35,7 @@
 package certmagic
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -230,9 +231,9 @@ func ManageSync(domainNames []string) error {
 // vital that you monitor the logs if using this method,
 // which is only recommended for automated/non-interactive
 // environments.
-func ManageAsync(domainNames []string) error {
+func ManageAsync(ctx context.Context, domainNames []string) error {
 	Default.Agreed = true
-	return NewDefault().ManageAsync(domainNames)
+	return NewDefault().ManageAsync(ctx, domainNames)
 }
 
 // OnDemandConfig configures on-demand TLS (certificate
