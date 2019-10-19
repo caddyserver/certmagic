@@ -579,7 +579,11 @@ func (c *acmeClient) nextChallenge(available []challenge.Type) (challenge.Type, 
 		})
 
 	case challenge.DNS01:
-		c.acmeClient.Challenge.SetDNS01Provider(c.config.DNSProvider)
+		if c.config.DNSChallengeOption != nil {
+			c.acmeClient.Challenge.SetDNS01Provider(c.config.DNSProvider, c.config.DNSChallengeOption)
+		} else {
+			c.acmeClient.Challenge.SetDNS01Provider(c.config.DNSProvider)
+		}
 	}
 
 	return randomChallenge, available
