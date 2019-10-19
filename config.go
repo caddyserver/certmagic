@@ -27,6 +27,7 @@ import (
 	"github.com/go-acme/lego/v3/certcrypto"
 	"github.com/go-acme/lego/v3/certificate"
 	"github.com/go-acme/lego/v3/challenge"
+	"github.com/go-acme/lego/v3/challenge/dns01"
 	"github.com/go-acme/lego/v3/challenge/tlsalpn01"
 	"github.com/go-acme/lego/v3/lego"
 )
@@ -82,6 +83,11 @@ type Config struct {
 	// The DNS provider to use when solving the
 	// ACME DNS challenge
 	DNSProvider challenge.Provider
+
+	// The ChallengeOption struct to provide
+	// custom precheck or name resolution options
+	// for DNS challenge validation and execution
+	DNSChallengeOption dns01.ChallengeOption
 
 	// The type of key to use when generating
 	// certificates
@@ -248,6 +254,9 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	}
 	if cfg.DNSProvider == nil {
 		cfg.DNSProvider = Default.DNSProvider
+	}
+	if cfg.DNSChallengeOption == nil {
+		cfg.DNSChallengeOption = Default.DNSChallengeOption
 	}
 	if cfg.KeyType == "" {
 		cfg.KeyType = Default.KeyType
