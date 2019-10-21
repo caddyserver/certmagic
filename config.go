@@ -363,10 +363,10 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 		if async {
 			go func(domainName string) {
 				var wait time.Duration
-				// the first 11 iterations ramp up the wait interval to
-				// ~1hr, and the remaining iterations retry at the
-				// maximum backoff until giving up after ~1 day.
-				const maxIter = 35
+				// the first 16 iterations ramp up the wait interval to
+				// ~24h, and the remaining iterations retry at that
+				// maximum backoff until giving up after ~14 days total.
+				const maxIter = 29
 				for i := 1; i <= maxIter; i++ {
 					select {
 					case <-ctx.Done():
@@ -381,9 +381,9 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 					}
 					// retry with exponential backoff
 					if wait == 0 {
-						// this start interval multiplies nicely to round duration values
-						wait = 3515625 * time.Microsecond
-					} else if wait < time.Hour {
+						// this starting interval (~2.6 seconds) doubles nicely to ~24h
+						wait = 2636719 * time.Microsecond
+					} else if wait < 24*time.Hour {
 						wait *= 2
 					}
 				}

@@ -254,7 +254,11 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 //
 // Callers who have access to a Config value should use the ObtainCert
 // method on that instead of this lower-level method.
+//
+// This method is throttled according to RateLimitOrders.
 func (c *acmeClient) Obtain(name string) error {
+	c.throttle("Obtain", name)
+
 	// ensure idempotency of the obtain operation for this name
 	lockKey := c.config.lockKey("cert_acme", name)
 	err := obtainLock(c.config.Storage, lockKey)
@@ -344,7 +348,11 @@ func (c *acmeClient) tryObtain(name string) error {
 //
 // Callers who have access to a Config value should use the RenewCert
 // method on that instead of this lower-level method.
+//
+// This method is throttled according to RateLimitOrders.
 func (c *acmeClient) Renew(name string) error {
+	c.throttle("Renew", name)
+
 	// ensure idempotency of the renew operation for this name
 	lockKey := c.config.lockKey("cert_acme", name)
 	err := obtainLock(c.config.Storage, lockKey)
@@ -589,6 +597,20 @@ func (c *acmeClient) nextChallenge(available []challenge.Type) (challenge.Type, 
 	return randomChallenge, available
 }
 
+func (c *acmeClient) throttle(op, name string) {
+	rateLimiterKey := c.config.CA + "," + c.config.Email
+	rateLimitersMu.Lock()
+	rl, ok := rateLimiters[rateLimiterKey]
+	if !ok {
+		rl = NewRateLimiter(RateLimitOrders, RateLimitOrdersWindow)
+		rateLimiters[rateLimiterKey] = rl
+	}
+	rateLimitersMu.Unlock()
+	log.Printf("[INFO][%s] %s: Waiting on rate limiter...", name, op)
+	rl.Wait()
+	log.Printf("[INFO][%s] %s: Done waiting", name, op)
+}
+
 func buildUAString() string {
 	ua := "CertMagic"
 	if UserAgent != "" {
@@ -596,6 +618,22 @@ func buildUAString() string {
 	}
 	return ua
 }
+
+// The following rate limits were chosen with respect
+// to Let's Encrypt's rate limits as of 2019:
+// https://letsencrypt.org/docs/rate-limits/
+var (
+	rateLimiters   = make(map[string]*RingBufferRateLimiter)
+	rateLimitersMu sync.RWMutex
+
+	// RateLimitOrders is how many new ACME orders can
+	// be made per account in RateLimitNewOrdersWindow.
+	RateLimitOrders = 300
+
+	// RateLimitOrdersWindow is the size of the sliding
+	// window that throttles new ACME orders.
+	RateLimitOrdersWindow = 3 * time.Hour
+)
 
 // Some default values passed down to the underlying lego client.
 var (
