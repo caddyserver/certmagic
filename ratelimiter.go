@@ -105,17 +105,19 @@ func (r *RingBufferRateLimiter) SetMaxEvents(maxEvents int) {
 		r.advance()
 	}
 
-	// copy timestamps into the new ring until we
-	// have either copied all of them or have reached
-	// the capacity of the new ring
-	startCursor := r.cursor
-	for i := 0; i < len(newRing); i++ {
-		newRing[i] = r.ring[r.cursor]
-		r.advance()
-		if r.cursor == startCursor {
-			// new ring is larger than old one;
-			// "we've come full circle"
-			break
+	if len(r.ring) > 0 {
+		// copy timestamps into the new ring until we
+		// have either copied all of them or have reached
+		// the capacity of the new ring
+		startCursor := r.cursor
+		for i := 0; i < len(newRing); i++ {
+			newRing[i] = r.ring[r.cursor]
+			r.advance()
+			if r.cursor == startCursor {
+				// new ring is larger than old one;
+				// "we've come full circle"
+				break
+			}
 		}
 	}
 
