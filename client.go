@@ -256,30 +256,30 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 // method on that instead of this lower-level method.
 //
 // This method is throttled according to RateLimitOrders.
-func (c *acmeClient) Obtain(name string) error {
-	c.throttle("Obtain", name)
+func (c *acmeClient) Obtain(domains []string) error {
+	c.throttle("Obtain", domains[0])
 
 	// ensure idempotency of the obtain operation for this name
-	lockKey := c.config.lockKey("cert_acme", name)
+	lockKey := c.config.lockKey("cert_acme", domains[0])
 	err := obtainLock(c.config.Storage, lockKey)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if err := releaseLock(c.config.Storage, lockKey); err != nil {
-			log.Printf("[ERROR][%s] Obtain: Unable to unlock '%s': %v", name, lockKey, err)
+			log.Printf("[ERROR][%s] Obtain: Unable to unlock '%s': %v", domains[0], lockKey, err)
 		}
 	}()
 
 	// check if obtain is still needed -- might have been obtained during lock
-	if c.config.storageHasCertResources(name) {
-		log.Printf("[INFO][%s] Obtain: Certificate already exists in storage", name)
+	if c.config.storageHasCertResources(domains[0]) {
+		log.Printf("[INFO][%s] Obtain: Certificate already exists in storage", domains[0])
 		return nil
 	}
 
 	challenges := c.initialChallenges()
 	if len(challenges) == 0 {
-		log.Printf("[ERROR][%s] No challenge types enabled; obtain is doomed", name)
+		log.Printf("[ERROR][%s] No challenge types enabled; obtain is doomed", domains[0])
 	}
 	var chosenChallenge challenge.Type
 
@@ -290,12 +290,12 @@ challengeLoop:
 		chosenChallenge, challenges = c.nextChallenge(challenges)
 		const maxAttempts = 3
 		for attempts := 0; attempts < maxAttempts; attempts++ {
-			err = c.tryObtain(name)
+			err = c.tryObtain(domains)
 			if err == nil {
 				break challengeLoop
 			}
 			log.Printf("[ERROR][%s] %s (attempt %d/%d; challenge=%s)",
-				name, strings.TrimSpace(err.Error()), attempts+1, maxAttempts, chosenChallenge)
+				domains[0], strings.TrimSpace(err.Error()), attempts+1, maxAttempts, chosenChallenge)
 			time.Sleep(1 * time.Second)
 		}
 	}
@@ -304,7 +304,7 @@ challengeLoop:
 	}
 
 	if c.config.OnEvent != nil {
-		c.config.OnEvent("acme_cert_obtained", name)
+		c.config.OnEvent("acme_cert_obtained", domains[0])
 	}
 
 	return nil
@@ -314,9 +314,9 @@ challengeLoop:
 // certificate for name and puts the result in storage if
 // it succeeds. There are no retries here and c must be
 // fully configured already.
-func (c *acmeClient) tryObtain(name string) error {
+func (c *acmeClient) tryObtain(domains []string) error {
 	request := certificate.ObtainRequest{
-		Domains:    []string{name},
+		Domains:    domains,
 		Bundle:     true,
 		MustStaple: c.config.MustStaple,
 	}

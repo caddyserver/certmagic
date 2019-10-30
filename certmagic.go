@@ -64,7 +64,7 @@ import (
 //
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
-func HTTPS(domainNames []string, mux http.Handler) error {
+func HTTPS(domainsNames [][]string, mux http.Handler) error {
 	if mux == nil {
 		mux = http.DefaultServeMux
 	}
@@ -72,7 +72,7 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 	Default.Agreed = true
 	cfg := NewDefault()
 
-	err := cfg.ManageSync(domainNames)
+	err := cfg.ManageSync(domainsNames)
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 	}
 
 	log.Printf("%v Serving HTTP->HTTPS on %s and %s",
-		domainNames, hln.Addr(), hsln.Addr())
+		domainsNames, hln.Addr(), hsln.Addr())
 
 	go httpServer.Serve(hln)
 	return httpsServer.Serve(hsln)
@@ -169,11 +169,11 @@ func httpRedirectHandler(w http.ResponseWriter, r *http.Request) {
 //
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
-func TLS(domainNames []string) (*tls.Config, error) {
+func TLS(domainsNames [][]string) (*tls.Config, error) {
 	Default.Agreed = true
 	Default.DisableHTTPChallenge = true
 	cfg := NewDefault()
-	return cfg.TLSConfig(), cfg.ManageSync(domainNames)
+	return cfg.TLSConfig(), cfg.ManageSync(domainsNames)
 }
 
 // Listen manages certificates for domainName and returns a
@@ -186,11 +186,11 @@ func TLS(domainNames []string) (*tls.Config, error) {
 //
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
-func Listen(domainNames []string) (net.Listener, error) {
+func Listen(domainsNames [][]string) (net.Listener, error) {
 	Default.Agreed = true
 	Default.DisableHTTPChallenge = true
 	cfg := NewDefault()
-	err := cfg.ManageSync(domainNames)
+	err := cfg.ManageSync(domainsNames)
 	if err != nil {
 		return nil, err
 	}
@@ -218,9 +218,9 @@ func Listen(domainNames []string) (net.Listener, error) {
 //
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
-func ManageSync(domainNames []string) error {
+func ManageSync(domainsNames [][]string) error {
 	Default.Agreed = true
-	return NewDefault().ManageSync(domainNames)
+	return NewDefault().ManageSync(domainsNames)
 }
 
 // ManageAsync is the same as ManageSync, except that
@@ -231,9 +231,9 @@ func ManageSync(domainNames []string) error {
 // vital that you monitor the logs if using this method,
 // which is only recommended for automated/non-interactive
 // environments.
-func ManageAsync(ctx context.Context, domainNames []string) error {
+func ManageAsync(ctx context.Context, domainsNames [][]string) error {
 	Default.Agreed = true
-	return NewDefault().ManageAsync(ctx, domainNames)
+	return NewDefault().ManageAsync(ctx, domainsNames)
 }
 
 // OnDemandConfig configures on-demand TLS (certificate

@@ -316,8 +316,8 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 // of the given domainNames. This behavior is recommended for
 // interactive use (i.e. when an administrator is present) so
 // that errors can be reported and fixed immediately.
-func (cfg *Config) ManageSync(domainNames []string) error {
-	return cfg.manageAll(nil, domainNames, false)
+func (cfg *Config) ManageSync(domainsNames [][]string) error {
+	return cfg.manageAll(nil, domainsNames, false)
 }
 
 // ManageAsync is the same as ManageSync, except that ACME
@@ -336,32 +336,32 @@ func (cfg *Config) ManageSync(domainNames []string) error {
 // for up to about 1 day, with a maximum interval of about
 // 1 hour. Cancelling ctx will cancel retries and shut down
 // any goroutines spawned by ManageAsync.
-func (cfg *Config) ManageAsync(ctx context.Context, domainNames []string) error {
-	return cfg.manageAll(ctx, domainNames, true)
+func (cfg *Config) ManageAsync(ctx context.Context, domainsNames [][]string) error {
+	return cfg.manageAll(ctx, domainsNames, true)
 }
 
-func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bool) error {
+func (cfg *Config) manageAll(ctx context.Context, domainsNames [][]string, async bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
 	// first, check all domains for validity
-	for _, domainName := range domainNames {
-		if !HostQualifies(domainName) {
-			return fmt.Errorf("name does not qualify for automatic certificate management: %s", domainName)
+	for _, domains := range domainsNames {
+		if !HostsQualifies(domains) {
+			return fmt.Errorf("names does not qualify for automatic certificate management: %v", domains)
 		}
 	}
 
-	for _, domainName := range domainNames {
+	for _, domains := range domainsNames {
 		// if on-demand is configured, defer obtain and renew operations
 		if cfg.OnDemand != nil {
-			if !cfg.OnDemand.whitelistContains(domainName) {
-				cfg.OnDemand.hostWhitelist = append(cfg.OnDemand.hostWhitelist, domainName)
+			if !cfg.OnDemand.whitelistContains(domains[0]) {
+				cfg.OnDemand.hostWhitelist = append(cfg.OnDemand.hostWhitelist, domains[0])
 			}
 			continue
 		}
 		if async {
-			go func(domainName string) {
+			go func(domains []string) {
 				var wait time.Duration
 				// the first 16 iterations ramp up the wait interval to
 				// ~24h, and the remaining iterations retry at that
@@ -370,10 +370,10 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 				for i := 1; i <= maxIter; i++ {
 					select {
 					case <-ctx.Done():
-						log.Printf("[ERROR][%s] Context cancelled", domainName)
+						log.Printf("[ERROR][%s] Context cancelled", domains[0])
 						return
 					case <-time.After(wait):
-						err := cfg.manageOne(domainName)
+						err := cfg.manageOne(domains)
 						if err == nil {
 							return
 						}
@@ -387,9 +387,9 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 						wait *= 2
 					}
 				}
-			}(domainName)
+			}(domains)
 		} else {
-			err := cfg.manageOne(domainName)
+			err := cfg.manageOne(domains)
 			if err != nil {
 				return err
 			}
@@ -399,31 +399,31 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 	return nil
 }
 
-func (cfg *Config) manageOne(domainName string) error {
+func (cfg *Config) manageOne(domains []string) error {
 	// try loading an existing certificate; if it doesn't
 	// exist yet, obtain one and try loading it again
-	cert, err := cfg.CacheManagedCertificate(domainName)
+	cert, err := cfg.CacheManagedCertificate(domains[0])
 	if err != nil {
 		if _, ok := err.(ErrNotExist); ok {
 			// if it doesn't exist, get it, then try loading it again
-			err := cfg.ObtainCert(domainName, false)
+			err := cfg.ObtainCert(domains, false)
 			if err != nil {
-				return fmt.Errorf("%s: obtaining certificate: %v", domainName, err)
+				return fmt.Errorf("%s: obtaining certificate: %v", domains[0], err)
 			}
-			cert, err = cfg.CacheManagedCertificate(domainName)
+			cert, err = cfg.CacheManagedCertificate(domains[0])
 			if err != nil {
-				return fmt.Errorf("%s: caching certificate after obtaining it: %v", domainName, err)
+				return fmt.Errorf("%s: caching certificate after obtaining it: %v", domains[0], err)
 			}
 			return nil
 		}
-		return fmt.Errorf("%s: caching certificate: %v", domainName, err)
+		return fmt.Errorf("%s: caching certificate: %v", domains[0], err)
 	}
 
 	// for existing certificates, make sure it is renewed
 	if cert.NeedsRenewal(cfg) {
-		err := cfg.RenewCert(domainName, false)
+		err := cfg.RenewCert(domains[0], false)
 		if err != nil {
-			return fmt.Errorf("%s: renewing certificate: %v", domainName, err)
+			return fmt.Errorf("%s: renewing certificate: %v", domains[0], err)
 		}
 	}
 
@@ -439,11 +439,11 @@ func (cfg *Config) manageOne(domainName string) error {
 // It only obtains and stores certificates (and their keys),
 // it does not load them into memory. If interactive is true,
 // the user may be shown a prompt.
-func (cfg *Config) ObtainCert(name string, interactive bool) error {
-	if cfg.storageHasCertResources(name) {
+func (cfg *Config) ObtainCert(domains []string, interactive bool) error {
+	if cfg.storageHasCertResources(domains[0]) {
 		return nil
 	}
-	skip, err := cfg.preObtainOrRenewChecks(name, interactive)
+	skip, err := cfg.preObtainOrRenewChecks(domains[0], interactive)
 	if err != nil {
 		return err
 	}
@@ -454,8 +454,8 @@ func (cfg *Config) ObtainCert(name string, interactive bool) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("[INFO][%s] Obtain certificate", name)
-	return manager.Obtain(name)
+	log.Printf("[INFO][%s] Obtain certificate", domains[0])
+	return manager.Obtain(domains)
 }
 
 // RenewCert renews the certificate for name using cfg. It stows the
@@ -523,7 +523,7 @@ func (cfg *Config) TLSConfig() *tls.Config {
 // config is Managed, that the name qualifies for a certificate,
 // and that an email address is available.
 func (cfg *Config) preObtainOrRenewChecks(name string, allowPrompts bool) (bool, error) {
-	if !HostQualifies(name) {
+	if !HostsQualifies([]string{name}) {
 		return true, nil
 	}
 
@@ -550,7 +550,7 @@ func (cfg *Config) storageHasCertResources(domain string) bool {
 
 // managedCertNeedsRenewal returns true if certRes is
 // expiring soon or already expired, or if the process
-// of checking the expiration returned an error.
+// of checking the expiration returned an error.²
 func (cfg *Config) managedCertNeedsRenewal(certRes certificate.Resource) bool {
 	cert, err := makeCertificate(certRes.Certificate, certRes.PrivateKey)
 	if err != nil {
@@ -562,7 +562,7 @@ func (cfg *Config) managedCertNeedsRenewal(certRes certificate.Resource) bool {
 // Manager is a type that can manage a certificate.
 // They are usually very short-lived.
 type Manager interface {
-	Obtain(name string) error
+	Obtain(domains []string) error
 	Renew(name string) error
 	Revoke(name string) error
 }

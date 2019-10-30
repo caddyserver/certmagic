@@ -228,7 +228,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 			}
 
 			// Name has to qualify for a certificate
-			if !HostQualifies(name) {
+			if !HostsQualifies([]string{name}) {
 				return cert, fmt.Errorf("hostname '%s' does not qualify for certificate", name)
 			}
 
@@ -289,7 +289,7 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 
 	// obtain the certificate
 	log.Printf("[INFO] Obtaining new certificate for %s", name)
-	err := cfg.ObtainCert(name, false)
+	err := cfg.ObtainCert([]string{name}, false)
 
 	// immediately unblock anyone waiting for it; doing this in
 	// a defer would risk deadlock because of the recursive call
