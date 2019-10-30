@@ -294,8 +294,8 @@ challengeLoop:
 			if err == nil {
 				break challengeLoop
 			}
-			log.Printf("[ERROR][%s] %s (attempt %d/%d; challenge=%s)",
-				domains[0], strings.TrimSpace(err.Error()), attempts+1, maxAttempts, chosenChallenge)
+			log.Printf("[ERROR][%v] %s (attempt %d/%d; challenge=%s)",
+				domains, strings.TrimSpace(err.Error()), attempts+1, maxAttempts, chosenChallenge)
 			time.Sleep(1 * time.Second)
 		}
 	}

@@ -316,7 +316,14 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 // of the given domainNames. This behavior is recommended for
 // interactive use (i.e. when an administrator is present) so
 // that errors can be reported and fixed immediately.
-func (cfg *Config) ManageSync(domainsNames [][]string) error {
+func (cfg *Config) ManageSync(domainNames []string) error {
+	return cfg.manageAll(nil, domainsAlternativeNames(domainNames), false)
+}
+
+// ManageSyncAlternative see ManageSync.
+// The first domain in domains is used for the CommonName field of the certificate,
+// all other domains are added using the Subject Alternate Names extension.
+func (cfg *Config) ManageSyncAlternative(domainsNames [][]string) error {
 	return cfg.manageAll(nil, domainsNames, false)
 }
 
@@ -336,7 +343,14 @@ func (cfg *Config) ManageSync(domainsNames [][]string) error {
 // for up to about 1 day, with a maximum interval of about
 // 1 hour. Cancelling ctx will cancel retries and shut down
 // any goroutines spawned by ManageAsync.
-func (cfg *Config) ManageAsync(ctx context.Context, domainsNames [][]string) error {
+func (cfg *Config) ManageAsync(ctx context.Context, domainNames []string) error {
+	return cfg.manageAll(ctx, domainsAlternativeNames(domainNames), true)
+}
+
+// ManageAsyncAlternative see ManageAsync.
+// The first domain in domains is used for the CommonName field of the certificate,
+// all other domains are added using the Subject Alternate Names extension.
+func (cfg *Config) ManageAsyncAlternative(ctx context.Context, domainsNames [][]string) error {
 	return cfg.manageAll(ctx, domainsNames, true)
 }
 
@@ -454,7 +468,7 @@ func (cfg *Config) ObtainCert(domains []string, interactive bool) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("[INFO][%s] Obtain certificate", domains[0])
+	log.Printf("[INFO][%v] Obtain certificate", domains)
 	return manager.Obtain(domains)
 }
 

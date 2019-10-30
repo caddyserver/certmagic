@@ -64,7 +64,14 @@ import (
 //
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
-func HTTPS(domainsNames [][]string, mux http.Handler) error {
+func HTTPS(domainNames []string, mux http.Handler) error {
+	return HTTPSAlternative(domainsAlternativeNames(domainNames), mux)
+}
+
+// HTTPSAlternative see HTTPS.
+// The first domain in domains is used for the CommonName field of the certificate,
+// all other domains are added using the Subject Alternate Names extension.
+func HTTPSAlternative(domainsNames [][]string, mux http.Handler) error {
 	if mux == nil {
 		mux = http.DefaultServeMux
 	}
@@ -72,7 +79,7 @@ func HTTPS(domainsNames [][]string, mux http.Handler) error {
 	Default.Agreed = true
 	cfg := NewDefault()
 
-	err := cfg.ManageSync(domainsNames)
+	err := cfg.ManageSyncAlternative(domainsNames)
 	if err != nil {
 		return err
 	}
@@ -169,11 +176,18 @@ func httpRedirectHandler(w http.ResponseWriter, r *http.Request) {
 //
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
-func TLS(domainsNames [][]string) (*tls.Config, error) {
+func TLS(domainNames []string) (*tls.Config, error) {
+	return TLSAlternative(domainsAlternativeNames(domainNames))
+}
+
+// TLSAlternative see TLS.
+// The first domain in domains is used for the CommonName field of the certificate,
+// all other domains are added using the Subject Alternate Names extension.
+func TLSAlternative(domainsNames [][]string) (*tls.Config, error) {
 	Default.Agreed = true
 	Default.DisableHTTPChallenge = true
 	cfg := NewDefault()
-	return cfg.TLSConfig(), cfg.ManageSync(domainsNames)
+	return cfg.TLSConfig(), cfg.ManageSyncAlternative(domainsNames)
 }
 
 // Listen manages certificates for domainName and returns a
@@ -186,11 +200,18 @@ func TLS(domainsNames [][]string) (*tls.Config, error) {
 //
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
-func Listen(domainsNames [][]string) (net.Listener, error) {
+func Listen(domainNames []string) (net.Listener, error) {
+	return ListenAlternative(domainsAlternativeNames(domainNames))
+}
+
+// ListenAlternative see Listen.
+// The first domain in domains is used for the CommonName field of the certificate,
+// all other domains are added using the Subject Alternate Names extension.
+func ListenAlternative(domainsNames [][]string) (net.Listener, error) {
 	Default.Agreed = true
 	Default.DisableHTTPChallenge = true
 	cfg := NewDefault()
-	err := cfg.ManageSync(domainsNames)
+	err := cfg.ManageSyncAlternative(domainsNames)
 	if err != nil {
 		return nil, err
 	}
@@ -218,9 +239,16 @@ func Listen(domainsNames [][]string) (net.Listener, error) {
 //
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
-func ManageSync(domainsNames [][]string) error {
+func ManageSync(domainNames []string) error {
+	return ManageSyncAlternative(domainsAlternativeNames(domainNames))
+}
+
+// ManageSyncAlternative see ManageSync.
+// The first domain in domains is used for the CommonName field of the certificate,
+// all other domains are added using the Subject Alternate Names extension.
+func ManageSyncAlternative(domainsNames [][]string) error {
 	Default.Agreed = true
-	return NewDefault().ManageSync(domainsNames)
+	return NewDefault().ManageSyncAlternative(domainsNames)
 }
 
 // ManageAsync is the same as ManageSync, except that
@@ -231,9 +259,16 @@ func ManageSync(domainsNames [][]string) error {
 // vital that you monitor the logs if using this method,
 // which is only recommended for automated/non-interactive
 // environments.
-func ManageAsync(ctx context.Context, domainsNames [][]string) error {
+func ManageAsync(ctx context.Context, domainNames []string) error {
+	return ManageAsyncAlternative(ctx, domainsAlternativeNames(domainNames))
+}
+
+// ManageAsyncAlternative see ManageAsync.
+// The first domain in domains is used for the CommonName field of the certificate,
+// all other domains are added using the Subject Alternate Names extension.
+func ManageAsyncAlternative(ctx context.Context, domainsNames [][]string) error {
 	Default.Agreed = true
-	return NewDefault().ManageAsync(ctx, domainsNames)
+	return NewDefault().ManageAsyncAlternative(ctx, domainsNames)
 }
 
 // OnDemandConfig configures on-demand TLS (certificate
@@ -327,6 +362,14 @@ func isInternal(addr string) bool {
 		}
 	}
 	return false
+}
+
+func domainsAlternativeNames(domainNames []string) [][]string {
+	domainsNames := make([][]string, len(domainNames))
+	for i, domain := range domainNames {
+		domainsNames[i] = []string{domain}
+	}
+	return domainsNames
 }
 
 // Default contains the package defaults for the
