@@ -1,4 +1,4 @@
-module gitlab.iguanesolutions.com/engi/golibs/certmagic
+module github.com/mholt/certmagic
 
 go 1.13
 
