@@ -289,7 +289,7 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 
 	// obtain the certificate
 	log.Printf("[INFO] Obtaining new certificate for %s", name)
-	err := cfg.ObtainCert([]string{name}, false)
+	err := cfg.ObtainCertAlternative([]string{name}, false)
 
 	// immediately unblock anyone waiting for it; doing this in
 	// a defer would risk deadlock because of the recursive call

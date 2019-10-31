@@ -79,7 +79,7 @@ func TestCacheCertificate(t *testing.T) {
 	}
 }
 
-func TestHostsQualifies(t *testing.T) {
+func TestHostQualifies(t *testing.T) {
 	for i, test := range []struct {
 		host   string
 		expect bool
@@ -119,9 +119,9 @@ func TestHostsQualifies(t *testing.T) {
 		{`"hostname"`, false},
 		{"hostname:", false},
 	} {
-		actual := HostsQualifies([]string{test.host})
+		actual := HostQualifies(test.host)
 		if actual != test.expect {
-			t.Errorf("Test %d: Expected HostsQualifies(%s)=%v, but got %v",
+			t.Errorf("Test %d: Expected HostQualifies(%s)=%v, but got %v",
 				i, test.host, test.expect, actual)
 		}
 	}

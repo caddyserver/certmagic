@@ -124,6 +124,10 @@ type Config struct {
 	// an ACME client will be created and used.
 	NewManager func(interactive bool) (Manager, error)
 
+	// NewManagerAlternative returns a new ManagerAlternative. If nil,
+	// an ACME client will be created and used.
+	NewManagerAlternative func(interactive bool) (ManagerAlternative, error)
+
 	// CertSelection chooses one of the certificates
 	// with which the ClientHello will be completed.
 	// If not set, the first matching certificate
@@ -355,6 +359,10 @@ func (cfg *Config) ManageAsyncAlternative(ctx context.Context, domainsNames [][]
 }
 
 func (cfg *Config) manageAll(ctx context.Context, domainsNames [][]string, async bool) error {
+	if len(domainsNames) == 0 {
+		return ErrEmptyDomains
+	}
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -420,7 +428,7 @@ func (cfg *Config) manageOne(domains []string) error {
 	if err != nil {
 		if _, ok := err.(ErrNotExist); ok {
 			// if it doesn't exist, get it, then try loading it again
-			err := cfg.ObtainCert(domains, false)
+			err := cfg.ObtainCertAlternative(domains, false)
 			if err != nil {
 				return fmt.Errorf("%s: obtaining certificate: %v", domains[0], err)
 			}
@@ -453,11 +461,11 @@ func (cfg *Config) manageOne(domains []string) error {
 // It only obtains and stores certificates (and their keys),
 // it does not load them into memory. If interactive is true,
 // the user may be shown a prompt.
-func (cfg *Config) ObtainCert(domains []string, interactive bool) error {
-	if cfg.storageHasCertResources(domains[0]) {
+func (cfg *Config) ObtainCert(name string, interactive bool) error {
+	if cfg.storageHasCertResources(name) {
 		return nil
 	}
-	skip, err := cfg.preObtainOrRenewChecks(domains[0], interactive)
+	skip, err := cfg.preObtainOrRenewChecks(name, interactive)
 	if err != nil {
 		return err
 	}
@@ -468,8 +476,33 @@ func (cfg *Config) ObtainCert(domains []string, interactive bool) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("[INFO][%v] Obtain certificate", name)
+	return manager.Obtain(name)
+}
+
+// ObtainCertAlternative see ObtainCert.
+// The first domain in domains is used for the CommonName field of the certificate,
+// all other domains are added using the Subject Alternate Names extension.
+func (cfg *Config) ObtainCertAlternative(domains []string, interactive bool) error {
+	if len(domains) == 0 {
+		return ErrEmptyDomains
+	}
+	if cfg.storageHasCertResources(domains[0]) {
+		return nil
+	}
+	skip, err := cfg.preObtainOrRenewChecks(domains[0], interactive)
+	if err != nil {
+		return err
+	}
+	if skip {
+		return nil
+	}
+	manager, err := cfg.newManagerAlternative(interactive)
+	if err != nil {
+		return err
+	}
 	log.Printf("[INFO][%v] Obtain certificate", domains)
-	return manager.Obtain(domains)
+	return manager.ObtainAlternative(domains)
 }
 
 // RenewCert renews the certificate for name using cfg. It stows the
@@ -576,7 +609,13 @@ func (cfg *Config) managedCertNeedsRenewal(certRes certificate.Resource) bool {
 // Manager is a type that can manage a certificate.
 // They are usually very short-lived.
 type Manager interface {
-	Obtain(domains []string) error
+	Obtain(name string) error
+	Renew(name string) error
+	Revoke(name string) error
+}
+
+type ManagerAlternative interface {
+	ObtainAlternative(domains []string) error
 	Renew(name string) error
 	Revoke(name string) error
 }

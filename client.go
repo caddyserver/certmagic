@@ -17,6 +17,7 @@ package certmagic
 import (
 	"bytes"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log"
 	weakrand "math/rand"
@@ -119,6 +120,39 @@ func (cfg *Config) newManager(interactive bool) (Manager, error) {
 	for i := 0; i < maxTries; i++ {
 		if cfg.NewManager != nil {
 			mgr, err = cfg.NewManager(interactive)
+		} else {
+			mgr, err = cfg.newACMEClient(interactive)
+		}
+		if err == nil {
+			break
+		}
+		if acmeErr, ok := err.(acme.ProblemDetails); ok {
+			if acmeErr.HTTPStatus == http.StatusTooManyRequests {
+				log.Printf("[ERROR] Too many requests when making new ACME client: %+v - aborting", acmeErr)
+				return nil, err
+			}
+		}
+		log.Printf("[ERROR] Making new certificate manager: %v (attempt %d/%d)", err, i+1, maxTries)
+		time.Sleep(1 * time.Second)
+	}
+	return mgr, err
+}
+
+func (cfg *Config) newManagerAlternative(interactive bool) (ManagerAlternative, error) {
+	// ensure storage is writeable and readable
+	// TODO: this is not necessary every time; should only
+	// perform check once every so often for each storage,
+	// which may require some global state...
+	err := cfg.checkStorage()
+	if err != nil {
+		return nil, fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
+	}
+
+	const maxTries = 3
+	var mgr ManagerAlternative
+	for i := 0; i < maxTries; i++ {
+		if cfg.NewManager != nil {
+			mgr, err = cfg.NewManagerAlternative(interactive)
 		} else {
 			mgr, err = cfg.newACMEClient(interactive)
 		}
@@ -256,7 +290,18 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 // method on that instead of this lower-level method.
 //
 // This method is throttled according to RateLimitOrders.
-func (c *acmeClient) Obtain(domains []string) error {
+func (c *acmeClient) Obtain(name string) error {
+	return c.ObtainAlternative([]string{name})
+}
+
+// ObtainAlternative see Obtain.
+// The first domain in domains is used for the CommonName field of the certificate,
+// all other domains are added using the Subject Alternate Names extension.
+func (c *acmeClient) ObtainAlternative(domains []string) error {
+	if len(domains) == 0 {
+		return ErrEmptyDomains
+	}
+
 	c.throttle("Obtain", domains[0])
 
 	// ensure idempotency of the obtain operation for this name
@@ -641,5 +686,10 @@ var (
 	HTTPTimeout = 30 * time.Second
 )
 
+// ErrEmptyDomains is returned on Alternative functions
+// when domains slice is empty.
+var ErrEmptyDomains = errors.New(("domains are empty"))
+
 // Interface guard
 var _ Manager = (*acmeClient)(nil)
+var _ ManagerAlternative = (*acmeClient)(nil)

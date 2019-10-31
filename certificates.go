@@ -332,7 +332,7 @@ func (cfg *Config) reloadManagedCertificate(oldCert Certificate) error {
 	return nil
 }
 
-// HostsQualifies returns true if the hostnames
+// HostQualifies returns true if the hostname alone
 // appears eligible for automagic TLS. For example:
 // localhost, empty hostname, and IP addresses are
 // not eligible because we cannot obtain certificates
@@ -341,30 +341,37 @@ func (cfg *Config) reloadManagedCertificate(oldCert Certificate) error {
 // label, and it must be the left-most label). Names with
 // certain special characters that are commonly accidental
 // are also rejected.
+func HostQualifies(hostname string) bool {
+	return hostname != "localhost" && // localhost is ineligible
+
+		// hostname must not be empty
+		strings.TrimSpace(hostname) != "" &&
+
+		// only one wildcard label allowed, and it must be left-most
+		(!strings.Contains(hostname, "*") ||
+			(strings.Count(hostname, "*") == 1 &&
+				strings.HasPrefix(hostname, "*."))) &&
+
+		// must not start or end with a dot
+		!strings.HasPrefix(hostname, ".") &&
+		!strings.HasSuffix(hostname, ".") &&
+
+		// must not contain other common special characters
+		!strings.ContainsAny(hostname, "()[]{}<>\\/!@#$%^&|:;+='\"") &&
+
+		// cannot be an IP address, see
+		// https://community.letsencrypt.org/t/certificate-for-static-ip/84/2?u=mholt
+		net.ParseIP(hostname) == nil
+}
+
+// HostsQualifies see HostQualifies
 func HostsQualifies(hostnames []string) bool {
+	if len(hostnames) == 0 {
+		// Empty hostnames is not valid
+		return false
+	}
 	for _, hostname := range hostnames {
-		// TODO: rework test
-		if hostname != "localhost" && // localhost is ineligible
-
-			// hostname must not be empty
-			strings.TrimSpace(hostname) != "" &&
-
-			// only one wildcard label allowed, and it must be left-most
-			(!strings.Contains(hostname, "*") ||
-				(strings.Count(hostname, "*") == 1 &&
-					strings.HasPrefix(hostname, "*."))) &&
-
-			// must not start or end with a dot
-			!strings.HasPrefix(hostname, ".") &&
-			!strings.HasSuffix(hostname, ".") &&
-
-			// must not contain other common special characters
-			!strings.ContainsAny(hostname, "()[]{}<>\\/!@#$%^&|:;+='\"") &&
-
-			// cannot be an IP address, see
-			// https://community.letsencrypt.org/t/certificate-for-static-ip/84/2?u=mholt
-			net.ParseIP(hostname) == nil {
-		} else {
+		if !HostQualifies(hostname) {
 			return false
 		}
 	}
