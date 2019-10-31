@@ -228,7 +228,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 			}
 
 			// Name has to qualify for a certificate
-			if !HostsQualifies([]string{name}) {
+			if !HostQualifies(name) {
 				return cert, fmt.Errorf("hostname '%s' does not qualify for certificate", name)
 			}
 
