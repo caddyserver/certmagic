@@ -614,6 +614,8 @@ type Manager interface {
 	Revoke(name string) error
 }
 
+// ManagerAlternative is a type that can manage a certificate with alternative names.
+// They are usually very short-lived.
 type ManagerAlternative interface {
 	ObtainAlternative(domains []string) error
 	Renew(name string) error
