@@ -84,6 +84,7 @@ func (r *RingBufferRateLimiter) loop() {
 		case <-waitTimer.C:
 			r.permit()
 		case <-r.stop:
+			waitTimer.Stop()
 			return
 		}
 	}
