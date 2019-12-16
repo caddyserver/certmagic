@@ -1,6 +1,7 @@
 package certmagic
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -8,18 +9,25 @@ import (
 // NewRateLimiter returns a rate limiter that allows up to maxEvents
 // in a sliding window of size window. If maxEvents and window are
 // both 0, or if maxEvents is non-zero and window is 0, rate limiting
-// is disabled. If maxEvents is 0 but the window is non-zero, it is
-// impossible to make reservations, so Allow() will always return false
-// and Wait() will panic (instead of blocking forever). This function
-// panics if maxEvents is less than 0.
+// is disabled. This function panics if maxEvents is less than 0 or
+// if maxEvents is 0 and window is non-zero, which is considered to be
+// an invalid configuration, as it would never allow events.
 func NewRateLimiter(maxEvents int, window time.Duration) *RingBufferRateLimiter {
 	if maxEvents < 0 {
 		panic("maxEvents cannot be less than zero")
 	}
-	return &RingBufferRateLimiter{
-		window: window,
-		ring:   make([]time.Time, maxEvents),
+	if maxEvents == 0 && window != 0 {
+		panic("invalid configuration: maxEvents = 0 and window != 0 would not allow any events")
 	}
+	rbrl := &RingBufferRateLimiter{
+		window:  window,
+		ring:    make([]time.Time, maxEvents),
+		nowFunc: time.Now,
+		signal:  make(chan struct{}),
+		stop:    make(chan struct{}),
+	}
+	go rbrl.loop()
+	return rbrl
 }
 
 // RingBufferRateLimiter uses a ring to enforce rate limits
@@ -27,50 +35,81 @@ func NewRateLimiter(maxEvents int, window time.Duration) *RingBufferRateLimiter 
 // sliding window of a given duration. An empty value is
 // not valid; use NewRateLimiter to get one.
 type RingBufferRateLimiter struct {
-	window time.Duration
-	ring   []time.Time // maxEvents == len(ring)
-	cursor int         // always points to the oldest timestamp
-	mu     sync.Mutex
+	window  time.Duration
+	ring    []time.Time // maxEvents == len(ring)
+	cursor  int         // always points to the oldest timestamp
+	mu      sync.Mutex  // protects ring, cursor, and window
+	signal  chan struct{}
+	nowFunc func() time.Time
+	stop    chan struct{}
+}
+
+// Stop cleans up r's scheduling goroutine.
+func (r *RingBufferRateLimiter) Stop() {
+	close(r.stop)
+}
+
+func (r *RingBufferRateLimiter) loop() {
+	for {
+		// if we've been stopped, return
+		select {
+		case <-r.stop:
+			return
+		default:
+		}
+
+		if len(r.ring) == 0 {
+			if r.window == 0 {
+				// rate limiting is disabled; always allow immediately
+				r.permit()
+				continue
+			}
+			panic("invalid configuration: maxEvents = 0 and window != 0 does not allow any events")
+		}
+
+		r.mu.Lock()
+		if r.ring[r.cursor].IsZero() {
+			r.mu.Unlock()
+			// next slot is immediately available
+			r.permit()
+			continue
+		}
+
+		// wait until next slot is available or until we've been stopped
+		then := r.ring[r.cursor].Add(r.window)
+		r.mu.Unlock()
+		waitDuration := time.Until(then)
+		waitTimer := time.NewTimer(waitDuration)
+		select {
+		case <-waitTimer.C:
+			r.permit()
+		case <-r.stop:
+			return
+		}
+	}
 }
 
 // Allow returns true if the event is allowed to
 // happen right now. It does not wait. If the event
-// is allowed, a reservation is made.
+// is allowed, a ticket is claimed.
 func (r *RingBufferRateLimiter) Allow() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.ring) == 0 {
-		return r.window == 0
-	}
-	if time.Since(r.ring[r.cursor]) >= r.window {
-		r.reserve(time.Now())
+	select {
+	case <-r.signal:
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
-// Wait makes a reservation then blocks until the
-// event is allowed to occur. It panics if maxEvents
-// is 0 but the window is non-zero, because Wait
-// would only be able to block forever in that case.
-func (r *RingBufferRateLimiter) Wait() {
-	r.mu.Lock()
-	if len(r.ring) == 0 {
-		if r.window == 0 {
-			r.mu.Unlock()
-			return
-		}
-		panic("cannot wait when maxEvents = 0 and window != 0 ")
+// Wait blocks until the event is allowed to occur. It returns an
+// error if the context is cancelled.
+func (r *RingBufferRateLimiter) Wait(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return context.Canceled
+	case <-r.signal:
+		return nil
 	}
-	if r.ring[r.cursor].IsZero() {
-		r.reserve(time.Now())
-		r.mu.Unlock()
-		return
-	}
-	then := r.ring[r.cursor].Add(r.window)
-	r.reserve(then)
-	r.mu.Unlock()
-	time.Sleep(time.Until(then))
 }
 
 // MaxEvents returns the maximum number of events that
@@ -85,11 +124,16 @@ func (r *RingBufferRateLimiter) MaxEvents() int {
 // allowed in the sliding window. If the new limit is lower,
 // the oldest events will be forgotten. If the new limit is
 // higher, the window will suddenly have capacity for new
-// reservations.
+// reservations. It panics if maxEvents is 0 and window size
+// is not zero.
 func (r *RingBufferRateLimiter) SetMaxEvents(maxEvents int) {
 	newRing := make([]time.Time, maxEvents)
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.window != 0 && maxEvents == 0 {
+		panic("invalid configuration: maxEvents = 0 and window != 0 would not allow any events")
+	}
 
 	// only make the change if the new limit is different
 	if maxEvents == len(r.ring) {
@@ -134,19 +178,32 @@ func (r *RingBufferRateLimiter) Window() time.Duration {
 
 // SetWindow changes r's sliding window duration to window.
 // Goroutines that are already blocked on a call to Wait()
-// will not be affected.
+// will not be affected. It panics if window is non-zero
+// but the max event limit is 0.
 func (r *RingBufferRateLimiter) SetWindow(window time.Duration) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if window != 0 && len(r.ring) == 0 {
+		panic("invalid configuration: maxEvents = 0 and window != 0 would not allow any events")
+	}
 	r.window = window
-	r.mu.Unlock()
 }
 
-// reserve claims the current spot at the head of
-// the window. It is NOT safe for concurrent use,
-// so it must be called inside a lock on r.mu.
-func (r *RingBufferRateLimiter) reserve(when time.Time) {
-	r.ring[r.cursor] = when
-	r.advance()
+// permit allows one event through the throttle. This method
+// blocks until a goroutine is waiting for a ticket or until
+// the rate limiter is stopped.
+func (r *RingBufferRateLimiter) permit() {
+	select {
+	case <-r.stop:
+		return
+	case r.signal <- struct{}{}:
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.ring) > 0 {
+		r.ring[r.cursor] = r.nowFunc()
+		r.advance()
+	}
 }
 
 // advance moves the cursor to the next position.

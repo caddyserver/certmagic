@@ -333,8 +333,8 @@ func (cfg *Config) ManageSync(domainNames []string) error {
 //
 // If there are failures loading, obtaining, or renewing a
 // certificate, it will be retried with exponential backoff
-// for up to about 1 day, with a maximum interval of about
-// 1 hour. Cancelling ctx will cancel retries and shut down
+// for up to about 30 days, with a maximum interval of about
+// 24 hours. Cancelling ctx will cancel retries and shut down
 // any goroutines spawned by ManageAsync.
 func (cfg *Config) ManageAsync(ctx context.Context, domainNames []string) error {
 	return cfg.manageAll(ctx, domainNames, true)
@@ -363,17 +363,19 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 		if async {
 			go func(domainName string) {
 				var wait time.Duration
-				// the first 16 iterations ramp up the wait interval to
+				// the first 17 iterations ramp up the wait interval to
 				// ~24h, and the remaining iterations retry at that
-				// maximum backoff until giving up after ~14 days total.
-				const maxIter = 29
+				// maximum backoff until giving up after ~30 days total.
+				const maxIter = 46
 				for i := 1; i <= maxIter; i++ {
+					timer := time.NewTimer(wait)
 					select {
 					case <-ctx.Done():
+						timer.Stop()
 						log.Printf("[ERROR][%s] Context cancelled", domainName)
 						return
-					case <-time.After(wait):
-						err := cfg.manageOne(domainName)
+					case <-timer.C:
+						err := cfg.manageOne(ctx, domainName)
 						if err == nil {
 							return
 						}
@@ -389,7 +391,7 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 				}
 			}(domainName)
 		} else {
-			err := cfg.manageOne(domainName)
+			err := cfg.manageOne(ctx, domainName)
 			if err != nil {
 				return err
 			}
@@ -399,14 +401,14 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 	return nil
 }
 
-func (cfg *Config) manageOne(domainName string) error {
+func (cfg *Config) manageOne(ctx context.Context, domainName string) error {
 	// try loading an existing certificate; if it doesn't
 	// exist yet, obtain one and try loading it again
 	cert, err := cfg.CacheManagedCertificate(domainName)
 	if err != nil {
 		if _, ok := err.(ErrNotExist); ok {
 			// if it doesn't exist, get it, then try loading it again
-			err := cfg.ObtainCert(domainName, false)
+			err := cfg.ObtainCert(ctx, domainName, false)
 			if err != nil {
 				return fmt.Errorf("%s: obtaining certificate: %v", domainName, err)
 			}
@@ -421,7 +423,7 @@ func (cfg *Config) manageOne(domainName string) error {
 
 	// for existing certificates, make sure it is renewed
 	if cert.NeedsRenewal(cfg) {
-		err := cfg.RenewCert(domainName, false)
+		err := cfg.RenewCert(ctx, domainName, false)
 		if err != nil {
 			return fmt.Errorf("%s: renewing certificate: %v", domainName, err)
 		}
@@ -439,7 +441,7 @@ func (cfg *Config) manageOne(domainName string) error {
 // It only obtains and stores certificates (and their keys),
 // it does not load them into memory. If interactive is true,
 // the user may be shown a prompt.
-func (cfg *Config) ObtainCert(name string, interactive bool) error {
+func (cfg *Config) ObtainCert(ctx context.Context, name string, interactive bool) error {
 	if cfg.storageHasCertResources(name) {
 		return nil
 	}
@@ -455,12 +457,12 @@ func (cfg *Config) ObtainCert(name string, interactive bool) error {
 		return err
 	}
 	log.Printf("[INFO][%s] Obtain certificate", name)
-	return manager.Obtain(name)
+	return manager.Obtain(ctx, name)
 }
 
 // RenewCert renews the certificate for name using cfg. It stows the
 // renewed certificate and its assets in storage if successful.
-func (cfg *Config) RenewCert(name string, interactive bool) error {
+func (cfg *Config) RenewCert(ctx context.Context, name string, interactive bool) error {
 	skip, err := cfg.preObtainOrRenewChecks(name, interactive)
 	if err != nil {
 		return err
@@ -473,16 +475,16 @@ func (cfg *Config) RenewCert(name string, interactive bool) error {
 		return err
 	}
 	log.Printf("[INFO][%s] Renew certificate", name)
-	return manager.Renew(name)
+	return manager.Renew(ctx, name)
 }
 
 // RevokeCert revokes the certificate for domain via ACME protocol.
-func (cfg *Config) RevokeCert(domain string, interactive bool) error {
+func (cfg *Config) RevokeCert(ctx context.Context, domain string, interactive bool) error {
 	manager, err := cfg.newManager(interactive)
 	if err != nil {
 		return err
 	}
-	return manager.Revoke(domain)
+	return manager.Revoke(ctx, domain)
 }
 
 // TLSConfig is an opinionated method that returns a
@@ -562,9 +564,9 @@ func (cfg *Config) managedCertNeedsRenewal(certRes certificate.Resource) bool {
 // Manager is a type that can manage a certificate.
 // They are usually very short-lived.
 type Manager interface {
-	Obtain(name string) error
-	Renew(name string) error
-	Revoke(name string) error
+	Obtain(ctx context.Context, name string) error
+	Renew(ctx context.Context, name string) error
+	Revoke(ctx context.Context, name string) error
 }
 
 // CertificateSelector is a type which can select a certificate to use given multiple choices.

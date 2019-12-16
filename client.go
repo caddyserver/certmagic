@@ -16,6 +16,7 @@ package certmagic
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -39,9 +40,6 @@ import (
 func init() {
 	weakrand.Seed(time.Now().UnixNano())
 }
-
-// acmeMu ensures that only one ACME challenge occurs at a time.
-var acmeMu sync.Mutex
 
 // acmeClient is a wrapper over acme.Client with
 // some custom state attached. It is used to obtain,
@@ -256,8 +254,10 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 // method on that instead of this lower-level method.
 //
 // This method is throttled according to RateLimitOrders.
-func (c *acmeClient) Obtain(name string) error {
-	c.throttle("Obtain", name)
+func (c *acmeClient) Obtain(ctx context.Context, name string) error {
+	if err := c.throttle(ctx, "Obtain", name); err != nil {
+		return err
+	}
 
 	// ensure idempotency of the obtain operation for this name
 	lockKey := c.config.lockKey("cert_acme", name)
@@ -288,7 +288,7 @@ func (c *acmeClient) Obtain(name string) error {
 challengeLoop:
 	for len(challenges) > 0 {
 		chosenChallenge, challenges = c.nextChallenge(challenges)
-		const maxAttempts = 3
+		const maxAttempts = 2
 		for attempts := 0; attempts < maxAttempts; attempts++ {
 			err = c.tryObtain(name)
 			if err == nil {
@@ -320,9 +320,7 @@ func (c *acmeClient) tryObtain(name string) error {
 		Bundle:     true,
 		MustStaple: c.config.MustStaple,
 	}
-	acmeMu.Lock()
 	certificate, err := c.acmeClient.Certificate.Obtain(request)
-	acmeMu.Unlock()
 	if err != nil {
 		return fmt.Errorf("failed to obtain certificate: %v", err)
 	}
@@ -350,8 +348,10 @@ func (c *acmeClient) tryObtain(name string) error {
 // method on that instead of this lower-level method.
 //
 // This method is throttled according to RateLimitOrders.
-func (c *acmeClient) Renew(name string) error {
-	c.throttle("Renew", name)
+func (c *acmeClient) Renew(ctx context.Context, name string) error {
+	if err := c.throttle(ctx, "Renew", name); err != nil {
+		return err
+	}
 
 	// ensure idempotency of the renew operation for this name
 	lockKey := c.config.lockKey("cert_acme", name)
@@ -388,7 +388,7 @@ func (c *acmeClient) Renew(name string) error {
 challengeLoop:
 	for len(challenges) > 0 {
 		chosenChallenge, challenges = c.nextChallenge(challenges)
-		const maxAttempts = 3
+		const maxAttempts = 2
 		for attempts := 0; attempts < maxAttempts; attempts++ {
 			err = c.tryRenew(certRes)
 			if err == nil {
@@ -415,9 +415,7 @@ challengeLoop:
 // in storage if it succeeds. There are no retries here
 // and c must be fully configured already.
 func (c *acmeClient) tryRenew(certRes certificate.Resource) error {
-	acmeMu.Lock()
 	newCertMeta, err := c.acmeClient.Certificate.Renew(certRes, true, c.config.MustStaple)
-	acmeMu.Unlock()
 	if err != nil {
 		return fmt.Errorf("failed to renew certificate: %v", err)
 	}
@@ -438,7 +436,7 @@ func (c *acmeClient) tryRenew(certRes certificate.Resource) error {
 }
 
 // Revoke revokes the certificate for name and deletes it from storage.
-func (c *acmeClient) Revoke(name string) error {
+func (c *acmeClient) Revoke(_ context.Context, name string) error {
 	if !c.config.Storage.Exists(StorageKeys.SitePrivateKey(c.config.CA, name)) {
 		return fmt.Errorf("private key not found for %s", name)
 	}
@@ -597,18 +595,23 @@ func (c *acmeClient) nextChallenge(available []challenge.Type) (challenge.Type, 
 	return randomChallenge, available
 }
 
-func (c *acmeClient) throttle(op, name string) {
+func (c *acmeClient) throttle(ctx context.Context, op, name string) error {
 	rateLimiterKey := c.config.CA + "," + c.config.Email
 	rateLimitersMu.Lock()
 	rl, ok := rateLimiters[rateLimiterKey]
 	if !ok {
 		rl = NewRateLimiter(RateLimitOrders, RateLimitOrdersWindow)
 		rateLimiters[rateLimiterKey] = rl
+		// TODO: stop rate limiter when it is garbage-collected...
 	}
 	rateLimitersMu.Unlock()
 	log.Printf("[INFO][%s] %s: Waiting on rate limiter...", name, op)
-	rl.Wait()
+	err := rl.Wait(ctx)
+	if err != nil {
+		return err
+	}
 	log.Printf("[INFO][%s] %s: Done waiting", name, op)
+	return nil
 }
 
 func buildUAString() string {
