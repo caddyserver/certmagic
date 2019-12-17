@@ -22,11 +22,12 @@ func NewRateLimiter(maxEvents int, window time.Duration) *RingBufferRateLimiter 
 	rbrl := &RingBufferRateLimiter{
 		window:  window,
 		ring:    make([]time.Time, maxEvents),
-		nowFunc: time.Now,
-		signal:  make(chan struct{}),
-		stop:    make(chan struct{}),
+		started: make(chan struct{}),
+		stopped: make(chan struct{}),
+		ticket:  make(chan struct{}),
 	}
 	go rbrl.loop()
+	<-rbrl.started // make sure loop is ready to receive before we return
 	return rbrl
 }
 
@@ -39,21 +40,21 @@ type RingBufferRateLimiter struct {
 	ring    []time.Time // maxEvents == len(ring)
 	cursor  int         // always points to the oldest timestamp
 	mu      sync.Mutex  // protects ring, cursor, and window
-	signal  chan struct{}
-	nowFunc func() time.Time
-	stop    chan struct{}
+	started chan struct{}
+	stopped chan struct{}
+	ticket  chan struct{}
 }
 
 // Stop cleans up r's scheduling goroutine.
 func (r *RingBufferRateLimiter) Stop() {
-	close(r.stop)
+	close(r.stopped)
 }
 
 func (r *RingBufferRateLimiter) loop() {
 	for {
 		// if we've been stopped, return
 		select {
-		case <-r.stop:
+		case <-r.stopped:
 			return
 		default:
 		}
@@ -67,15 +68,8 @@ func (r *RingBufferRateLimiter) loop() {
 			panic("invalid configuration: maxEvents = 0 and window != 0 does not allow any events")
 		}
 
-		r.mu.Lock()
-		if r.ring[r.cursor].IsZero() {
-			r.mu.Unlock()
-			// next slot is immediately available
-			r.permit()
-			continue
-		}
-
 		// wait until next slot is available or until we've been stopped
+		r.mu.Lock()
 		then := r.ring[r.cursor].Add(r.window)
 		r.mu.Unlock()
 		waitDuration := time.Until(then)
@@ -83,7 +77,7 @@ func (r *RingBufferRateLimiter) loop() {
 		select {
 		case <-waitTimer.C:
 			r.permit()
-		case <-r.stop:
+		case <-r.stopped:
 			waitTimer.Stop()
 			return
 		}
@@ -95,7 +89,7 @@ func (r *RingBufferRateLimiter) loop() {
 // is allowed, a ticket is claimed.
 func (r *RingBufferRateLimiter) Allow() bool {
 	select {
-	case <-r.signal:
+	case <-r.ticket:
 		return true
 	default:
 		return false
@@ -108,7 +102,7 @@ func (r *RingBufferRateLimiter) Wait(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return context.Canceled
-	case <-r.signal:
+	case <-r.ticket:
 		return nil
 	}
 }
@@ -194,16 +188,23 @@ func (r *RingBufferRateLimiter) SetWindow(window time.Duration) {
 // blocks until a goroutine is waiting for a ticket or until
 // the rate limiter is stopped.
 func (r *RingBufferRateLimiter) permit() {
-	select {
-	case <-r.stop:
-		return
-	case r.signal <- struct{}{}:
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.ring) > 0 {
-		r.ring[r.cursor] = r.nowFunc()
-		r.advance()
+	for {
+		select {
+		case r.started <- struct{}{}:
+			// notify parent goroutine that we've started; should
+			// only happen once, before constructor returns
+			continue
+		case <-r.stopped:
+			return
+		case r.ticket <- struct{}{}:
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if len(r.ring) > 0 {
+				r.ring[r.cursor] = time.Now()
+				r.advance()
+			}
+			return
+		}
 	}
 }
 
