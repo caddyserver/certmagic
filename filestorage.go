@@ -190,6 +190,7 @@ func fileLockIsStale(info os.FileInfo) bool {
 	if info == nil {
 		return true
 	}
+	// TODO: consider updating the lock while it is active...?
 	return time.Since(info.ModTime()) > staleLockDuration
 }
 

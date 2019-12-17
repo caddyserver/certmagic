@@ -56,6 +56,7 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 		- [The `Config` type](#the-config-type)
 		- [Defaults](#defaults)
 		- [Providing an email address](#providing-an-email-address)
+		- [Rate limiting](#rate-limiting)
 	- [Development and testing](#development-and-testing)
 	- [Examples](#examples)
 		- [Serving HTTP handlers with HTTPS](#serving-http-handlers-with-https)
@@ -149,6 +150,15 @@ The high-level functions in this package (`HTTPS()`, `Listen()`, `ManageSync()`,
 #### Providing an email address
 
 Although not strictly required, this is highly recommended best practice. It allows you to receive expiration emails if your certificates are expiring for some reason, and also allows the CA's engineers to potentially get in touch with you if something is wrong. I recommend setting `certmagic.Default.Email` or always setting the `Email` field of a new `Config` struct.
+
+
+#### Rate limiting
+
+To avoid firehosing the CA's servers, CertMagic has built-in rate limiting. Currently, its default limit is up to 10 transactions (obtain or renew) every 1 minute (sliding window). This can be changed by setting the `RateLimitOrders` and `RateLimitOrdersWindow` variables, if desired.
+
+The CA may still enforce their own rate limits, and there's nothing (well, nothing ethical) CertMagic can do to bypass them for you.
+
+Additionally, CertMagic will retry failed validations with exponential backoff for up to 30 days, with a maximum of 1 day between attempts. (An "attempt" means trying each enabled challenge type twice.)
 
 
 ### Development and Testing

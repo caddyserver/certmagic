@@ -390,6 +390,7 @@ challengeLoop:
 		chosenChallenge, challenges = c.nextChallenge(challenges)
 		const maxAttempts = 2
 		for attempts := 0; attempts < maxAttempts; attempts++ {
+			// TODO: consider moving throttle to here instead, the only potentially negative consequence is that the lock in storage may be persisted and get "stale" when it's actually not stale...
 			err = c.tryRenew(certRes)
 			if err == nil {
 				break challengeLoop
@@ -622,20 +623,46 @@ func buildUAString() string {
 	return ua
 }
 
-// The following rate limits were chosen with respect
-// to Let's Encrypt's rate limits as of 2019:
+// These internal rate limits are designed to prevent accidentally
+// firehosing a CA's ACME endpoints. They are not intended to
+// replace or reimplement the CA's actual rate limits.
+//
+// Let's Encrypt's rate limits can be found here:
 // https://letsencrypt.org/docs/rate-limits/
+//
+// Currently (as of December 2019), Let's Encrypt's most relevant
+// rate limit for large deployments is 300 new orders per account
+// per 3 hours (on average, or best case, that's about 1 every 36
+// seconds, or 2 every 72 seconds, etc.); but it's not reasonable
+// to try to assume that our internal state is the same as the CA's
+// (due to process restarts, config changes, failed validations,
+// etc.) and ultimately, only the CA's actual rate limiter is the
+// authority. Thus, our own rate limiters do not attempt to enforce
+// external rate limits. Doing so causes problems when the domains
+// are not in our control (i.e. serving customer sites) and/or lots
+// of domains fail validation: they clog our internal rate limiter
+// and nearly starve out (or at least slow down) the other domains
+// that need certificates. Failed transactions are already retried
+// with exponential backoff, so adding in rate limiting can slow
+// things down even more.
+//
+// Instead, the point of our internal rate limiter is to avoid
+// hammering the CA's endpoint when there are thousands or even
+// millions of certificates under management. Our goal is to
+// allow small bursts in a relatively short timeframe so as to
+// not block any one domain for too long, without unleashing
+// thousands of requests to the CA at once.
 var (
 	rateLimiters   = make(map[string]*RingBufferRateLimiter)
 	rateLimitersMu sync.RWMutex
 
-	// RateLimitOrders is how many new ACME orders can
-	// be made per account in RateLimitNewOrdersWindow.
-	RateLimitOrders = 300
+	// RateLimitOrders is how many new ACME orders can be made per
+	// account in RateLimitNewOrdersWindow.
+	RateLimitOrders = 10
 
 	// RateLimitOrdersWindow is the size of the sliding
 	// window that throttles new ACME orders.
-	RateLimitOrdersWindow = 3 * time.Hour
+	RateLimitOrdersWindow = 1 * time.Minute
 )
 
 // Some default values passed down to the underlying lego client.
