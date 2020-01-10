@@ -324,6 +324,7 @@ func (cfg *Config) managedCertInStorageExpiresSoon(cert Certificate) (bool, erro
 // to the new cert. It assumes that the new certificate for oldCert.Names[0] is
 // already in storage.
 func (cfg *Config) reloadManagedCertificate(oldCert Certificate) error {
+	log.Printf("[INFO] Reloading managed certificate for %v", oldCert.Names)
 	newCert, err := cfg.loadManagedCertificate(oldCert.Names[0])
 	if err != nil {
 		return fmt.Errorf("loading managed certificate for %v from storage: %v", oldCert.Names, err)

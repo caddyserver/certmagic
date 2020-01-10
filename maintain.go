@@ -202,25 +202,29 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 // Ryan Sleevi's recommendations for good OCSP support:
 // https://gist.github.com/sleevi/5efe9ef98961ecfb4da8
 func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
-	// Create a temporary place to store updates
-	// until we release the potentially long-lived
-	// read lock and use a short-lived write lock
-	// on the certificate cache.
+	// temporary structures to store updates or tasks
+	// so that we can keep our locks short-lived
 	type ocspUpdate struct {
 		rawBytes []byte
 		parsed   *ocsp.Response
 	}
+	type updateQueueEntry struct {
+		cert           Certificate
+		certHash       string
+		lastNextUpdate time.Time
+	}
 	updated := make(map[string]ocspUpdate)
+	var updateQueue []updateQueueEntry
 	var renewQueue []Certificate
 	configs := make(map[string]*Config)
 
+	// obtain brief read lock during our scan to see which staples need updating
 	certCache.mu.RLock()
 	for certHash, cert := range certCache.cache {
 		// no point in updating OCSP for expired certificates
 		if time.Now().After(cert.NotAfter) {
 			continue
 		}
-
 		var lastNextUpdate time.Time
 		if cert.ocsp != nil {
 			lastNextUpdate = cert.ocsp.NextUpdate
@@ -228,6 +232,15 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 				continue // no need to update staple if ours is still fresh
 			}
 		}
+		updateQueue = append(updateQueue, updateQueueEntry{cert, certHash, lastNextUpdate})
+	}
+	certCache.mu.RUnlock()
+
+	// perform updates outside of any lock on certCache
+	for _, qe := range updateQueue {
+		cert := qe.cert
+		certHash := qe.certHash
+		lastNextUpdate := qe.lastNextUpdate
 
 		cfg, err := certCache.getConfig(cert)
 		if err != nil {
@@ -259,14 +272,12 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		}
 
 		// If a managed certificate was revoked, we should attempt
-		// to replace it with a new one. If that fails, oh well;
-		// but it's better than serving a cert we know is revoked.
+		// to replace it with a new one. If that fails, oh well.
 		if cert.managed && ocspResp.Status == ocsp.Revoked && len(cert.Names) > 0 {
 			renewQueue = append(renewQueue, cert)
 			configs[cert.Names[0]] = cfg
 		}
 	}
-	certCache.mu.RUnlock()
 
 	// These write locks should be brief since we have all the info we need now.
 	for certKey, update := range updated {

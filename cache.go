@@ -16,6 +16,7 @@ package certmagic
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -222,6 +223,8 @@ func (certCache *Cache) replaceCertificate(oldCert, newCert Certificate) {
 	certCache.removeCertificate(oldCert)
 	certCache.unsyncedCacheCertificate(newCert)
 	certCache.mu.Unlock()
+	log.Printf("[INFO] Replaced certificate in cache for %v (new expiration date: %s)",
+		newCert.Names, newCert.NotAfter.Format("2006-01-02 15:04:05"))
 }
 
 func (certCache *Cache) getFirstMatchingCert(name string) (Certificate, bool) {
