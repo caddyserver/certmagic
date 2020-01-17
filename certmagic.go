@@ -148,6 +148,9 @@ func httpRedirectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	toURL += requestHost
+	if HTTPSPort != 443 {
+		toURL += fmt.Sprintf(":%d", HTTPSPort)
+	}
 	toURL += r.URL.RequestURI()
 
 	// get rid of this disgusting unencrypted HTTP connection 🤢
