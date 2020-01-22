@@ -18,10 +18,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-acme/lego/v3/certcrypto"
@@ -29,7 +29,6 @@ import (
 	"github.com/go-acme/lego/v3/challenge"
 	"github.com/go-acme/lego/v3/challenge/dns01"
 	"github.com/go-acme/lego/v3/challenge/tlsalpn01"
-	"github.com/go-acme/lego/v3/lego"
 )
 
 // Config configures a certificate manager instance.
@@ -137,12 +136,6 @@ type Config struct {
 
 	// Pointer to the in-memory certificate cache
 	certCache *Cache
-
-	// Map of client config key to ACME clients
-	// so they can be reused
-	// TODO: It might be better if these were globally cached, rather than per-config, which are ephemeral... but maybe evict them after a certain time, like 1 day or something
-	acmeClients   map[string]*lego.Client
-	acmeClientsMu *sync.Mutex
 }
 
 // NewDefault makes a valid config based on the package
@@ -289,8 +282,6 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 
 	// ensure the unexported fields are valid
 	cfg.certCache = certCache
-	cfg.acmeClients = make(map[string]*lego.Client)
-	cfg.acmeClientsMu = new(sync.Mutex)
 
 	return &cfg
 }
@@ -379,7 +370,9 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 						if err == nil {
 							return
 						}
-						log.Printf("[ERROR] %s - backing off and retrying (attempt %d/%d)...", strings.TrimSpace(err.Error()), i, maxIter)
+						if !errors.Is(err, context.Canceled) {
+							log.Printf("[ERROR] %s - backing off and retrying (attempt %d/%d)...", strings.TrimSpace(err.Error()), i, maxIter)
+						}
 					}
 					// retry with exponential backoff
 					if wait == 0 {
@@ -410,7 +403,7 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string) error {
 			// if it doesn't exist, get it, then try loading it again
 			err := cfg.ObtainCert(ctx, domainName, false)
 			if err != nil {
-				return fmt.Errorf("%s: obtaining certificate: %v", domainName, err)
+				return fmt.Errorf("%s: obtaining certificate: %w", domainName, err)
 			}
 			cert, err = cfg.CacheManagedCertificate(domainName)
 			if err != nil {
@@ -425,7 +418,7 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string) error {
 	if cert.NeedsRenewal(cfg) {
 		err := cfg.RenewCert(ctx, domainName, false)
 		if err != nil {
-			return fmt.Errorf("%s: renewing certificate: %v", domainName, err)
+			return fmt.Errorf("%s: renewing certificate: %w", domainName, err)
 		}
 	}
 

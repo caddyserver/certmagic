@@ -136,11 +136,8 @@ func (cfg *Config) newManager(interactive bool) (Manager, error) {
 }
 
 func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
-	// look up or create the user account
-	leUser, err := cfg.getUser(cfg.Email)
-	if err != nil {
-		return nil, err
-	}
+	acmeClientsMu.Lock()
+	defer acmeClientsMu.Unlock()
 
 	// ensure key type and timeout are set
 	keyType := cfg.KeyType
@@ -166,17 +163,19 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	if u.Scheme != "https" && !isLoopback(u.Host) && !isInternal(u.Host) {
 		return nil, fmt.Errorf("%s: insecure CA URL (HTTPS required)", caURL)
 	}
 
-	clientKey := caURL + leUser.Email + string(keyType)
+	// look up or create the user account
+	leUser, err := cfg.getUser(cfg.Email)
+	if err != nil {
+		return nil, err
+	}
 
-	// if an underlying client with this configuration already exists, reuse it
-	// TODO: Could this be a global cache instead, perhaps?
-	cfg.acmeClientsMu.Lock()
-	client, ok := cfg.acmeClients[clientKey]
+	// if a lego client with this configuration already exists, reuse it
+	clientKey := caURL + leUser.Email + string(keyType)
+	client, ok := acmeClients[clientKey]
 	if !ok {
 		// the client facilitates our communication with the CA server
 		legoCfg := lego.NewConfig(leUser)
@@ -198,12 +197,10 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 		}
 		client, err = lego.NewClient(legoCfg)
 		if err != nil {
-			cfg.acmeClientsMu.Unlock()
 			return nil, err
 		}
-		cfg.acmeClients[clientKey] = client
+		acmeClients[clientKey] = client
 	}
-	cfg.acmeClientsMu.Unlock()
 
 	// if not registered, the user must register an account
 	// with the CA and agree to terms
@@ -663,6 +660,20 @@ var (
 	// RateLimitOrdersWindow is the size of the sliding
 	// window that throttles new ACME orders.
 	RateLimitOrdersWindow = 1 * time.Minute
+)
+
+// We keep a global cache of ACME clients so that they
+// can be reused. Since the number of CAs, accounts,
+// and key types should be fairly limited under best
+// practices, this map will hardly ever have more than
+// a few entries at the most. The associated lock
+// protects access to the map but also ensures that only
+// one ACME client is created at a time.
+// TODO: consider using storage for a distributed lock
+// TODO: consider evicting clients after some time
+var (
+	acmeClients   = make(map[string]*lego.Client)
+	acmeClientsMu sync.Mutex
 )
 
 // Some default values passed down to the underlying lego client.
