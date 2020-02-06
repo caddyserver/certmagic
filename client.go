@@ -24,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,8 +32,6 @@ import (
 	"github.com/go-acme/lego/v3/acme"
 	"github.com/go-acme/lego/v3/certificate"
 	"github.com/go-acme/lego/v3/challenge"
-	"github.com/go-acme/lego/v3/challenge/http01"
-	"github.com/go-acme/lego/v3/challenge/tlsalpn01"
 	"github.com/go-acme/lego/v3/lego"
 	"github.com/go-acme/lego/v3/registration"
 )
@@ -523,7 +522,6 @@ func (c *acmeClient) nextChallenge(available []challenge.Type) (challenge.Type, 
 
 	switch randomChallenge {
 	case challenge.HTTP01:
-		// figure out which ports we'll be serving the challenge on
 		useHTTPPort := HTTPChallengePort
 		if HTTPPort > 0 && HTTPPort != HTTPChallengePort {
 			useHTTPPort = HTTPPort
@@ -532,34 +530,15 @@ func (c *acmeClient) nextChallenge(available []challenge.Type) (challenge.Type, 
 			useHTTPPort = c.config.AltHTTPPort
 		}
 
-		// If this machine is already listening on the HTTP or TLS-ALPN port
-		// designated for the challenges, then we need to handle the challenges
-		// a little differently: for HTTP, we will answer the challenge request
-		// using our own HTTP handler (the HandleHTTPChallenge function - this
-		// works only because challenge info is written to storage associated
-		// with c.config when the challenge is initiated); for TLS-ALPN, we will
-		// add the challenge cert to our cert cache and serve it up during the
-		// handshake. As for the default solvers...  we are careful to honor the
-		// listener bind preferences by using c.config.ListenHost.
-		var httpSolver challenge.Provider
-		if listenerAddressInUse(net.JoinHostPort(c.config.ListenHost, fmt.Sprintf("%d", useHTTPPort))) {
-			httpSolver = nil // assume that whatever's listening can solve the HTTP challenge
-		} else {
-			httpSolver = http01.NewProviderServer(c.config.ListenHost, fmt.Sprintf("%d", useHTTPPort))
-		}
-
-		// because of our nifty Storage interface, we can distribute the HTTP and
-		// TLS-ALPN challenges across all instances that share the same storage -
-		// in fact, this is required now for successful solving of the HTTP challenge
-		// if the port is already in use, since we must write the challenge info
-		// to storage for the HTTPChallengeHandler to solve it successfully
 		c.acmeClient.Challenge.SetHTTP01Provider(distributedSolver{
-			config:         c.config,
-			providerServer: httpSolver,
+			config: c.config,
+			providerServer: &httpSolver{
+				config:  c.config,
+				address: net.JoinHostPort(c.config.ListenHost, strconv.Itoa(useHTTPPort)),
+			},
 		})
 
 	case challenge.TLSALPN01:
-		// figure out which ports we'll be serving the challenge on
 		useTLSALPNPort := TLSALPNChallengePort
 		if HTTPSPort > 0 && HTTPSPort != TLSALPNChallengePort {
 			useTLSALPNPort = HTTPSPort
@@ -568,18 +547,12 @@ func (c *acmeClient) nextChallenge(available []challenge.Type) (challenge.Type, 
 			useTLSALPNPort = c.config.AltTLSALPNPort
 		}
 
-		// (see comments above for the HTTP challenge to gain an understanding of this chunk)
-		var alpnSolver challenge.Provider
-		if listenerAddressInUse(net.JoinHostPort(c.config.ListenHost, fmt.Sprintf("%d", useTLSALPNPort))) {
-			alpnSolver = tlsALPNSolver{certCache: c.config.certCache} // assume that our process is listening
-		} else {
-			alpnSolver = tlsalpn01.NewProviderServer(c.config.ListenHost, fmt.Sprintf("%d", useTLSALPNPort))
-		}
-
-		// (see comments above for the HTTP challenge to gain an understanding of this chunk)
 		c.acmeClient.Challenge.SetTLSALPN01Provider(distributedSolver{
-			config:         c.config,
-			providerServer: alpnSolver,
+			config: c.config,
+			providerServer: &tlsALPNSolver{
+				config:  c.config,
+				address: net.JoinHostPort(c.config.ListenHost, strconv.Itoa(useTLSALPNPort)),
+			},
 		})
 
 	case challenge.DNS01:

@@ -142,10 +142,7 @@ func httpRedirectHandler(w http.ResponseWriter, r *http.Request) {
 
 	// since we redirect to the standard HTTPS port, we
 	// do not need to include it in the redirect URL
-	requestHost, _, err := net.SplitHostPort(r.Host)
-	if err != nil {
-		requestHost = r.Host // host probably did not contain a port
-	}
+	requestHost := hostOnly(r.Host)
 
 	toURL += requestHost
 	toURL += r.URL.RequestURI()
@@ -289,10 +286,7 @@ func (o *OnDemandConfig) whitelistContains(name string) bool {
 // explicitly like a common local hostname. addr must only
 // be a host or a host:port combination.
 func isLoopback(addr string) bool {
-	host, _, err := net.SplitHostPort(strings.ToLower(addr))
-	if err != nil {
-		host = addr // happens if the addr is only a hostname
-	}
+	host := hostOnly(addr)
 	return host == "localhost" ||
 		strings.Trim(host, "[]") == "::1" ||
 		strings.HasPrefix(host, "127.")
@@ -309,13 +303,7 @@ func isInternal(addr string) bool {
 		"192.168.0.0/16",
 		"fc00::/7",
 	}
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		host = addr // happens if the addr is just a hostname, missing port
-		// if we encounter an error, the brackets need to be stripped
-		// because SplitHostPort didn't do it for us
-		host = strings.Trim(host, "[]")
-	}
+	host := hostOnly(addr)
 	ip := net.ParseIP(host)
 	if ip == nil {
 		return false
@@ -327,6 +315,17 @@ func isInternal(addr string) bool {
 		}
 	}
 	return false
+}
+
+// hostOnly returns only the host portion of hostport.
+// If there is no port or if there is an error splitting
+// the port off, the whole input string is returned.
+func hostOnly(hostport string) string {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		return hostport // OK; probably had no port to begin with
+	}
+	return host
 }
 
 // Default contains the package defaults for the

@@ -82,7 +82,7 @@ func (cfg *Config) getEmail(allowPrompts bool) error {
 
 	// First try package default email
 	if leEmail == "" {
-		leEmail = Default.Email
+		leEmail = Default.Email // TODO: racey with line 108
 	}
 
 	// Then try to get most recent user email from storage
@@ -105,7 +105,7 @@ func (cfg *Config) getEmail(allowPrompts bool) error {
 
 	// save the email for later and ensure it is consistent
 	// for repeated use; then update cfg with the email
-	Default.Email = strings.TrimSpace(strings.ToLower(leEmail))
+	Default.Email = strings.TrimSpace(strings.ToLower(leEmail)) // TODO: this is racey with line 85
 	cfg.Email = Default.Email
 
 	return nil

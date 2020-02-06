@@ -55,14 +55,15 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 				// should already have taken care of that when we made the tls.Config)
 				challengeCert, ok, err := cfg.tryDistributedChallengeSolver(clientHello)
 				if err != nil {
-					log.Printf("[ERROR][%s] TLS-ALPN: %v", clientHello.ServerName, err)
+					log.Printf("[ERROR][%s] TLS-ALPN challenge: %v", clientHello.ServerName, err)
 				}
 				if ok {
+					log.Printf("[INFO][%s] Served key authentication certificate (distributed TLS-ALPN challenge)", clientHello.ServerName)
 					return &challengeCert.Certificate, nil
 				}
-
 				return nil, fmt.Errorf("no certificate to complete TLS-ALPN challenge for SNI name: %s", clientHello.ServerName)
 			}
+			log.Printf("[INFO][%s] Served key authentication certificate (TLS-ALPN challenge)", clientHello.ServerName)
 			return &challengeCert.Certificate, nil
 		}
 	}

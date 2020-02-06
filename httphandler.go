@@ -28,7 +28,7 @@ import (
 // cache backed by a functional storage facility, since that is where
 // the challenge state is stored between initiation and solution.
 //
-// If a request is not an ACME HTTP challenge, h willl be invoked.
+// If a request is not an ACME HTTP challenge, h will be invoked.
 func (cfg *Config) HTTPChallengeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if cfg.HandleHTTPChallenge(w, r) {
@@ -72,11 +72,13 @@ func (cfg *Config) distributedHTTPChallengeSolver(w http.ResponseWriter, r *http
 		return false
 	}
 
-	tokenKey := distributedSolver{config: cfg}.challengeTokensKey(r.Host)
+	host := hostOnly(r.Host)
+
+	tokenKey := distributedSolver{config: cfg}.challengeTokensKey(host)
 	chalInfoBytes, err := cfg.Storage.Load(tokenKey)
 	if err != nil {
 		if _, ok := err.(ErrNotExist); !ok {
-			log.Printf("[ERROR][%s] Opening distributed HTTP challenge token file: %v", r.Host, err)
+			log.Printf("[ERROR][%s] Opening distributed HTTP challenge token file: %v", host, err)
 		}
 		return false
 	}
@@ -84,7 +86,7 @@ func (cfg *Config) distributedHTTPChallengeSolver(w http.ResponseWriter, r *http
 	var chalInfo challengeInfo
 	err = json.Unmarshal(chalInfoBytes, &chalInfo)
 	if err != nil {
-		log.Printf("[ERROR][%s] Decoding challenge token file %s (corrupted?): %v", r.Host, tokenKey, err)
+		log.Printf("[ERROR][%s] Decoding challenge token file %s (corrupted?): %v", host, tokenKey, err)
 		return false
 	}
 
@@ -97,12 +99,12 @@ func (cfg *Config) distributedHTTPChallengeSolver(w http.ResponseWriter, r *http
 func answerHTTPChallenge(w http.ResponseWriter, r *http.Request, chalInfo challengeInfo) bool {
 	challengeReqPath := http01.ChallengePath(chalInfo.Token)
 	if r.URL.Path == challengeReqPath &&
-		strings.HasPrefix(r.Host, chalInfo.Domain) &&
+		strings.EqualFold(hostOnly(r.Host), chalInfo.Domain) && // mitigate DNS rebinding attacks
 		r.Method == "GET" {
 		w.Header().Add("Content-Type", "text/plain")
 		w.Write([]byte(chalInfo.KeyAuth))
 		r.Close = true
-		log.Printf("[INFO][%s] Served key authentication (distributed)", chalInfo.Domain)
+		log.Printf("[INFO][%s] Served key authentication (HTTP challenge)", chalInfo.Domain)
 		return true
 	}
 	return false

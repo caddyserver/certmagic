@@ -15,43 +15,205 @@
 package certmagic
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/go-acme/lego/v3/challenge"
 	"github.com/go-acme/lego/v3/challenge/tlsalpn01"
 )
 
-// tlsALPNSolver is a type that can solve TLS-ALPN challenges using
-// an existing listener and our custom, in-memory certificate cache.
-type tlsALPNSolver struct {
-	certCache *Cache
+// httpSolver solves the HTTP challenge. It must be
+// associated with a config and an address to use
+// for solving the challenge. If multiple httpSolvers
+// are initialized concurrently, the first one to
+// begin will start the server, and the last one to
+// finish will stop the server. This solver must be
+// wrapped by a distributedSolver to work properly,
+// because the only way the HTTP challenge handler
+// can access the keyAuth material is by loading it
+// from storage, which is done by distributedSolver.
+type httpSolver struct {
+	config  *Config
+	address string
 }
 
-// Present adds the challenge certificate to the cache.
-func (s tlsALPNSolver) Present(domain, token, keyAuth string) error {
+// Present starts an HTTP server if none is already listening on s.address.
+func (s *httpSolver) Present(domain, token, keyAuth string) error {
+	solversMu.Lock()
+	defer solversMu.Unlock()
+
+	si := getSolverInfo(s.address)
+	si.count++
+	if si.listener != nil {
+		return nil
+	}
+
+	var err error
+	si.listener, err = net.Listen("tcp", s.address)
+	if err != nil {
+		if listenerAddressInUse(s.address) {
+			// if it failed just because the socket is already in use, we
+			// have no choice but to assume that whatever is using the socket
+			// can answer the challenge already
+			return nil
+		}
+		// otherwise, if the socket is not in use, something is wrong
+		return fmt.Errorf("could not start listener for HTTP challenge server: %v", err)
+	}
+
+	// successfully bound socket, so start key auth HTTP server
+	go s.serve(si)
+
+	return nil
+}
+
+// serve is an HTTP server that serves only HTTP challenge responses.
+func (s *httpSolver) serve(si *solverInfo) {
+	httpServer := &http.Server{Handler: s.config.HTTPChallengeHandler(http.NewServeMux())}
+	httpServer.SetKeepAlivesEnabled(false)
+	err := httpServer.Serve(si.listener)
+	if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
+		log.Printf("[ERROR] key auth HTTP server: %v", err)
+	}
+	close(si.done)
+}
+
+// CleanUp cleans up the HTTP server if it is the last one to finish.
+func (s *httpSolver) CleanUp(domain, token, keyAuth string) error {
+	solversMu.Lock()
+	defer solversMu.Unlock()
+	si := getSolverInfo(s.address)
+	si.count--
+	if si.count == 0 {
+		// last one out turns off the lights
+		if si.listener != nil {
+			si.listener.Close()
+		}
+		delete(solvers, s.address)
+		<-si.done
+	}
+	return nil
+}
+
+// tlsALPNSolver is a type that can solve TLS-ALPN challenges.
+// It must have an associated config and address on which to
+// serve the challenge.
+type tlsALPNSolver struct {
+	config  *Config
+	address string
+	closing chan struct{}
+}
+
+// Present adds the certificate to the certificate cache and, if
+// needed, starts a TLS server for answering TLS-ALPN challenges.
+func (s *tlsALPNSolver) Present(domain, token, keyAuth string) error {
+	// load the certificate into the cache; this isn't strictly necessary
+	// if we're using the distributed solver since our GetCertificate
+	// function will check storage for the keyAuth anyway, but it seems
+	// like loading it into the cache is the right thing to do
 	cert, err := tlsalpn01.ChallengeCert(domain, keyAuth)
 	if err != nil {
 		return err
 	}
 	certHash := hashCertificateChain(cert.Certificate)
-	s.certCache.mu.Lock()
-	s.certCache.cache[tlsALPNCertKeyName(domain)] = Certificate{
+	s.config.certCache.mu.Lock()
+	s.config.certCache.cache[tlsALPNCertKeyName(domain)] = Certificate{
 		Certificate: *cert,
 		Names:       []string{domain},
 		hash:        certHash, // perhaps not necesssary
 	}
-	s.certCache.mu.Unlock()
+	s.config.certCache.mu.Unlock()
+
+	// the rest of this function increments the
+	// challenge count for the solver at this
+	// listener address, and if necessary, starts
+	// a simple TLS server
+
+	solversMu.Lock()
+	defer solversMu.Unlock()
+
+	si := getSolverInfo(s.address)
+	si.count++
+	if si.listener != nil {
+		return nil
+	}
+
+	si.listener, err = tls.Listen("tcp", s.address, s.config.TLSConfig())
+	if err != nil {
+		if listenerAddressInUse(s.address) {
+			// if it failed just because the socket is already in use, we
+			// have no choice but to assume that whatever is using the socket
+			// can answer the challenge already
+			return nil
+		}
+		// otherwise, if the socket is not in use, something is wrong
+		return fmt.Errorf("could not start listener for TLS-ALPN challenge server: %v", err)
+	}
+
+	go func() {
+		for {
+			conn, err := si.listener.Accept()
+			if err != nil {
+				select {
+				case <-s.closing:
+					return
+				default:
+				}
+				log.Printf("[ERROR] TLS-ALPN challenge server: accept: %v", err)
+				continue
+			}
+			go s.handleConn(conn)
+		}
+	}()
+
 	return nil
 }
 
-// CleanUp removes the challenge certificate from the cache.
-func (s tlsALPNSolver) CleanUp(domain, token, keyAuth string) error {
-	s.certCache.mu.Lock()
-	delete(s.certCache.cache, tlsALPNCertKeyName(domain))
-	s.certCache.mu.Unlock()
+// handleConn completes the TLS handshake and then closes conn.
+func (*tlsALPNSolver) handleConn(conn net.Conn) {
+	defer conn.Close()
+	tlsConn, ok := conn.(*tls.Conn)
+	if !ok {
+		log.Printf("[ERROR] TLS-ALPN challenge server: expected tls.Conn but got %T: %#v", conn, conn)
+		return
+	}
+	err := tlsConn.Handshake()
+	if err != nil {
+		log.Printf("[ERROR] TLS-ALPN challenge server: handshake: %v", err)
+		return
+	}
+}
+
+// CleanUp removes the challenge certificate from the cache, and if
+// it is the last one to finish, stops the TLS server.
+func (s *tlsALPNSolver) CleanUp(domain, token, keyAuth string) error {
+	s.config.certCache.mu.Lock()
+	delete(s.config.certCache.cache, tlsALPNCertKeyName(domain))
+	s.config.certCache.mu.Unlock()
+
+	solversMu.Lock()
+	defer solversMu.Unlock()
+	si := getSolverInfo(s.address)
+	si.count--
+	if si.count == 0 {
+		// last one out turns off the lights
+		if s.closing != nil {
+			close(s.closing)
+		}
+		if si.listener != nil {
+			si.listener.Close()
+		}
+		delete(solvers, s.address)
+		close(si.done)
+	}
+
 	return nil
 }
 
@@ -101,13 +263,6 @@ type distributedSolver struct {
 // and also stores domain, token, and keyAuth to the storage
 // backing the certificate cache of dhs.config.
 func (dhs distributedSolver) Present(domain, token, keyAuth string) error {
-	if dhs.providerServer != nil {
-		err := dhs.providerServer.Present(domain, token, keyAuth)
-		if err != nil {
-			return fmt.Errorf("presenting with standard provider server: %v", err)
-		}
-	}
-
 	infoBytes, err := json.Marshal(challengeInfo{
 		Domain:  domain,
 		Token:   token,
@@ -117,19 +272,30 @@ func (dhs distributedSolver) Present(domain, token, keyAuth string) error {
 		return err
 	}
 
-	return dhs.config.Storage.Store(dhs.challengeTokensKey(domain), infoBytes)
+	err = dhs.config.Storage.Store(dhs.challengeTokensKey(domain), infoBytes)
+	if err != nil {
+		return err
+	}
+
+	err = dhs.providerServer.Present(domain, token, keyAuth)
+	if err != nil {
+		return fmt.Errorf("presenting with embedded provider: %v", err)
+	}
+	return nil
 }
 
 // CleanUp invokes the underlying solver's CleanUp method
 // and also cleans up any assets saved to storage.
 func (dhs distributedSolver) CleanUp(domain, token, keyAuth string) error {
-	if dhs.providerServer != nil {
-		err := dhs.providerServer.CleanUp(domain, token, keyAuth)
-		if err != nil {
-			log.Printf("[ERROR] Cleaning up standard provider server: %v", err)
-		}
+	err := dhs.config.Storage.Delete(dhs.challengeTokensKey(domain))
+	if err != nil {
+		return err
 	}
-	return dhs.config.Storage.Delete(dhs.challengeTokensKey(domain))
+	err = dhs.providerServer.CleanUp(domain, token, keyAuth)
+	if err != nil {
+		return fmt.Errorf("cleaning up embedded provider: %v", err)
+	}
+	return nil
 }
 
 // challengeTokensPrefix returns the key prefix for challenge info.
@@ -146,3 +312,30 @@ func (dhs distributedSolver) challengeTokensKey(domain string) string {
 type challengeInfo struct {
 	Domain, Token, KeyAuth string
 }
+
+// solverInfo associates a listener with the
+// number of challenges currently using it.
+type solverInfo struct {
+	count    int
+	listener net.Listener
+	done     chan struct{} // used to signal when cleanup is finished
+}
+
+// getSolverInfo gets a valid solverInfo struct for address.
+func getSolverInfo(address string) *solverInfo {
+	si, ok := solvers[address]
+	if !ok {
+		si = &solverInfo{done: make(chan struct{})}
+		solvers[address] = si
+	}
+	return si
+}
+
+// The active challenge solvers, keyed by listener address,
+// and protected by a mutex. Note that the creation of
+// solver listeners and the incrementing of their counts
+// are atomic operations guarded by this mutex.
+var (
+	solvers   = make(map[string]*solverInfo)
+	solversMu sync.Mutex
+)
