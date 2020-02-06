@@ -22,8 +22,8 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
-	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/go-acme/lego/v3/challenge"
 	"github.com/go-acme/lego/v3/challenge/tlsalpn01"
@@ -40,6 +40,7 @@ import (
 // can access the keyAuth material is by loading it
 // from storage, which is done by distributedSolver.
 type httpSolver struct {
+	closed  int32 // accessed atomically
 	config  *Config
 	address string
 }
@@ -79,7 +80,7 @@ func (s *httpSolver) serve(si *solverInfo) {
 	httpServer := &http.Server{Handler: s.config.HTTPChallengeHandler(http.NewServeMux())}
 	httpServer.SetKeepAlivesEnabled(false)
 	err := httpServer.Serve(si.listener)
-	if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
+	if err != nil && atomic.LoadInt32(&s.closed) != 1 {
 		log.Printf("[ERROR] key auth HTTP server: %v", err)
 	}
 	close(si.done)
@@ -93,6 +94,7 @@ func (s *httpSolver) CleanUp(domain, token, keyAuth string) error {
 	si.count--
 	if si.count == 0 {
 		// last one out turns off the lights
+		atomic.StoreInt32(&s.closed, 1)
 		if si.listener != nil {
 			si.listener.Close()
 		}
@@ -106,9 +108,9 @@ func (s *httpSolver) CleanUp(domain, token, keyAuth string) error {
 // It must have an associated config and address on which to
 // serve the challenge.
 type tlsALPNSolver struct {
+	closed  int32 // accessed atomically
 	config  *Config
 	address string
-	closing chan struct{}
 }
 
 // Present adds the certificate to the certificate cache and, if
@@ -161,10 +163,8 @@ func (s *tlsALPNSolver) Present(domain, token, keyAuth string) error {
 		for {
 			conn, err := si.listener.Accept()
 			if err != nil {
-				select {
-				case <-s.closing:
+				if atomic.LoadInt32(&s.closed) == 1 {
 					return
-				default:
 				}
 				log.Printf("[ERROR] TLS-ALPN challenge server: accept: %v", err)
 				continue
@@ -204,9 +204,7 @@ func (s *tlsALPNSolver) CleanUp(domain, token, keyAuth string) error {
 	si.count--
 	if si.count == 0 {
 		// last one out turns off the lights
-		if s.closing != nil {
-			close(s.closing)
-		}
+		atomic.StoreInt32(&s.closed, 1)
 		if si.listener != nil {
 			si.listener.Close()
 		}
