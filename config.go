@@ -79,6 +79,11 @@ type Config struct {
 	// challenge to succeed
 	AltTLSALPNPort int
 
+	// NextProtos is a list of supported application level protocols, in
+	// order of preference.
+	// The default NextProtos is ["h2", "http/1.1", "acme-tls/1"].
+	NextProtos []string
+
 	// The DNS provider to use when solving the
 	// ACME DNS challenge
 	DNSProvider challenge.Provider
@@ -495,10 +500,15 @@ func (cfg *Config) RevokeCert(ctx context.Context, domain string, interactive bo
 // fields unless you know what you're doing, as they're
 // necessary to solve the TLS-ALPN challenge.
 func (cfg *Config) TLSConfig() *tls.Config {
+	nextProtos := cfg.NextProtos
+	if len(nextProtos) == 0 {
+		nextProtos = []string{"h2", "http/1.1", tlsalpn01.ACMETLS1Protocol}
+	}
+
 	return &tls.Config{
 		// these two fields necessary for TLS-ALPN challenge
 		GetCertificate: cfg.GetCertificate,
-		NextProtos:     []string{"h2", "http/1.1", tlsalpn01.ACMETLS1Protocol},
+		NextProtos:     nextProtos,
 
 		// the rest recommended for modern TLS servers
 		MinVersion: tls.VersionTLS12,
