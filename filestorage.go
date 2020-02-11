@@ -15,7 +15,9 @@
 package certmagic
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -123,7 +125,6 @@ func (fs *FileStorage) Filename(key string) string {
 // Lock obtains a lock named by the given key. It blocks
 // until the lock can be obtained or an error is returned.
 func (fs *FileStorage) Lock(key string) error {
-	start := time.Now()
 	filename := fs.lockFilename(key)
 
 	for {
@@ -139,7 +140,16 @@ func (fs *FileStorage) Lock(key string) error {
 
 		// lock file already exists
 
-		info, err := os.Stat(filename)
+		var meta lockMeta
+		f, err := os.Open(filename)
+		if err == nil {
+			err2 := json.NewDecoder(f).Decode(&meta)
+			f.Close()
+			if err2 != nil {
+				return err2
+			}
+		}
+
 		switch {
 		case os.IsNotExist(err):
 			// must have just been removed; try again to create it
@@ -149,17 +159,12 @@ func (fs *FileStorage) Lock(key string) error {
 			// unexpected error
 			return fmt.Errorf("accessing lock file: %v", err)
 
-		case fileLockIsStale(info):
+		case fileLockIsStale(meta):
 			// lock file is stale - delete it and try again to create one
-			log.Printf("[INFO][%s] Lock for '%s' is stale; removing then retrying: %s",
-				fs, key, filename)
+			log.Printf("[INFO][%s] Lock for '%s' is stale (created: %s, last update: %s); removing then retrying: %s",
+				fs, key, filename, meta.Created, meta.Updated)
 			removeLockfile(filename)
 			continue
-
-		case time.Since(start) > staleLockDuration*2:
-			// should never happen, hopefully
-			return fmt.Errorf("possible deadlock: %s passed trying to obtain lock for %s",
-				time.Since(start), key)
 
 		default:
 			// lockfile exists and is not stale;
@@ -186,27 +191,34 @@ func (fs *FileStorage) lockDir() string {
 	return filepath.Join(fs.Path, "locks")
 }
 
-func fileLockIsStale(info os.FileInfo) bool {
-	if info == nil {
-		return true
+func fileLockIsStale(meta lockMeta) bool {
+	ref := meta.Updated
+	if ref.IsZero() {
+		ref = meta.Created
 	}
-	// TODO: consider updating the lock while it is active...?
-	return time.Since(info.ModTime()) > staleLockDuration
+	// since updates are exactly every lockFreshnessInterval,
+	// add a grace period for the actual file read+write to
+	// take place
+	return time.Since(ref) > lockFreshnessInterval*2
 }
 
 // createLockfile atomically creates the lockfile
 // identified by filename. A successfully created
 // lockfile should be removed with removeLockfile.
 func createLockfile(filename string) error {
-	err := atomicallyCreateFile(filename)
-	if err == nil {
-		// if the app crashes in removeLockfile(), there is a
-		// small chance the .unlock file is left behind; it's
-		// safe to simply remove it as it's a guard against
-		// double removal of the .lock file.
-		os.Remove(filename + ".unlock")
+	err := atomicallyCreateFile(filename, true)
+	if err != nil {
+		return err
 	}
-	return err
+
+	go keepLockfileFresh(filename)
+
+	// if the app crashes in removeLockfile(), there is a
+	// small chance the .unlock file is left behind; it's
+	// safe to simply remove it as it's a guard against
+	// double removal of the .lock file.
+	_ = os.Remove(filename + ".unlock")
+	return nil
 }
 
 // removeLockfile atomically removes filename,
@@ -215,7 +227,7 @@ func createLockfile(filename string) error {
 // https://github.com/mholt/certmagic/pull/7
 func removeLockfile(filename string) error {
 	unlockFilename := filename + ".unlock"
-	if err := atomicallyCreateFile(unlockFilename); err != nil {
+	if err := atomicallyCreateFile(unlockFilename, false); err != nil {
 		if os.IsExist(err) {
 			// another process is handling the unlocking
 			return nil
@@ -226,16 +238,85 @@ func removeLockfile(filename string) error {
 	return os.Remove(filename)
 }
 
+// keepLockfileFresh continuously updates the lock file
+// at filename with the current timestamp. It stops
+// when the file disappears (happy path = lock released),
+// or when there is an error at any point. Since it polls
+// every lockFreshnessInterval, this function might
+// not terminate until up to lockFreshnessInterval after
+// the lock is released.
+func keepLockfileFresh(filename string) {
+	for {
+		time.Sleep(lockFreshnessInterval)
+		done, err := updateLockfileFreshness(filename)
+		if err != nil {
+			log.Printf("[ERROR] Keeping lock file fresh: %v - terminating lock maintenance (lockfile: %s)", err, filename)
+			return
+		}
+		if done {
+			return
+		}
+	}
+}
+
+// updateLockfileFreshness updates the lock file at filename
+// with the current timestamp. It returns true if the parent
+// loop can terminate (i.e. no more need to update the lock).
+func updateLockfileFreshness(filename string) (bool, error) {
+	f, err := os.OpenFile(filename, os.O_RDWR, 0644)
+	if os.IsNotExist(err) {
+		return true, nil // lock released
+	}
+	if err != nil {
+		return true, err
+	}
+	defer f.Close()
+
+	// read contents
+	metaBytes, err := ioutil.ReadAll(io.LimitReader(f, 2048))
+	if err != nil {
+		return true, err
+	}
+	var meta lockMeta
+	if err := json.Unmarshal(metaBytes, &meta); err != nil {
+		return true, err
+	}
+
+	// truncate file and reset I/O offset to beginning
+	if err := f.Truncate(0); err != nil {
+		return true, err
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return true, err
+	}
+
+	// write updated timestamp
+	meta.Updated = time.Now()
+	return false, json.NewEncoder(f).Encode(meta)
+}
+
 // atomicallyCreateFile atomically creates the file
 // identified by filename if it doesn't already exist.
-func atomicallyCreateFile(filename string) error {
-	// no need to check this, we only really care about the file creation error
-	os.MkdirAll(filepath.Dir(filename), 0700)
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_EXCL, 0644)
-	if err == nil {
-		f.Close()
+func atomicallyCreateFile(filename string, writeLockInfo bool) error {
+	// no need to check this error, we only really care about the file creation error
+	_ = os.MkdirAll(filepath.Dir(filename), 0700)
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644)
+	if err != nil {
+		return err
 	}
-	return err
+	defer f.Close()
+	if writeLockInfo {
+		now := time.Now()
+		meta := lockMeta{
+			Created: now,
+			Updated: now,
+		}
+		err := json.NewEncoder(f).Encode(meta)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // homeDir returns the best guess of the current user's home
@@ -265,12 +346,22 @@ func dataDir() string {
 	return filepath.Join(baseDir, "certmagic")
 }
 
-// staleLockDuration is the length of time
-// before considering a lock to be stale.
-const staleLockDuration = 2 * time.Hour
+// lockMeta is written into a lock file.
+type lockMeta struct {
+	Created time.Time `json:"created,omitempty"`
+	Updated time.Time `json:"updated,omitempty"`
+}
+
+// lockFreshnessInterval is how often to update
+// a lock's timestamp. Locks with a timestamp
+// more than this duration in the past (plus a
+// grace period for latency) can be considered
+// stale.
+const lockFreshnessInterval = 5 * time.Second
 
 // fileLockPollInterval is how frequently
 // to check the existence of a lock file
 const fileLockPollInterval = 1 * time.Second
 
+// Interface guard
 var _ Storage = (*FileStorage)(nil)
