@@ -16,7 +16,6 @@ package certmagic
 
 import (
 	"log"
-	"net/url"
 	"path"
 	"regexp"
 	"strings"
@@ -82,7 +81,7 @@ type Locker interface {
 	// To prevent deadlocks, all implementations (where this concern
 	// is relevant) should put a reasonable expiration on the lock in
 	// case Unlock is unable to be called due to some sort of network
-	// or system failure or crash.
+	// failure or system crash.
 	Lock(key string) error
 
 	// Unlock releases the lock for key. This method must ONLY be
@@ -93,6 +92,12 @@ type Locker interface {
 }
 
 // KeyInfo holds information about a key in storage.
+// Key and IsTerminal are required; Modified and Size
+// are optional if the storage implementation is not
+// able to get that information. Setting them will
+// make certain operations more consistent or
+// predictable, but it is not crucial to basic
+// functionality.
 type KeyInfo struct {
 	Key        string
 	Modified   time.Time
@@ -125,62 +130,39 @@ type keyValue struct {
 // in a Storage implementation.
 type KeyBuilder struct{}
 
-// CAPrefix returns the storage key prefix for
-// the given certificate authority URL.
-func (keys KeyBuilder) CAPrefix(ca string) string {
-	caURL, err := url.Parse(ca)
-	if err != nil {
-		caURL = &url.URL{Host: ca}
-	}
-	return path.Join(prefixACME, keys.Safe(caURL.Host))
+// CertsPrefix returns the storage key prefix for
+// the given certificate issuer.
+func (keys KeyBuilder) CertsPrefix(issuerKey string) string {
+	return path.Join(prefixCerts, keys.Safe(issuerKey))
 }
 
-// SitePrefix returns a key prefix for items associated with
-// the site using the given CA URL.
-func (keys KeyBuilder) SitePrefix(ca, domain string) string {
-	return path.Join(keys.CAPrefix(ca), "sites", keys.Safe(domain))
+// CertsSitePrefix returns a key prefix for items associated with
+// the site given by domain using the given issuer key.
+func (keys KeyBuilder) CertsSitePrefix(issuerKey, domain string) string {
+	return path.Join(keys.CertsPrefix(issuerKey), keys.Safe(domain))
 }
 
-// SiteCert returns the path to the certificate file for domain.
-func (keys KeyBuilder) SiteCert(ca, domain string) string {
-	return path.Join(keys.SitePrefix(ca, domain), keys.Safe(domain)+".crt")
+// SiteCert returns the path to the certificate file for domain
+// that is associated with the issuer with the given issuerKey.
+func (keys KeyBuilder) SiteCert(issuerKey, domain string) string {
+	safeDomain := keys.Safe(domain)
+	return path.Join(keys.CertsSitePrefix(issuerKey, domain), safeDomain+".crt")
 }
 
-// SitePrivateKey returns the path to domain's private key file.
-func (keys KeyBuilder) SitePrivateKey(ca, domain string) string {
-	return path.Join(keys.SitePrefix(ca, domain), keys.Safe(domain)+".key")
+// SitePrivateKey returns the path to the private key file for domain
+// that is associated with the certificate from the given issuer with
+// the given issuerKey.
+func (keys KeyBuilder) SitePrivateKey(issuerKey, domain string) string {
+	safeDomain := keys.Safe(domain)
+	return path.Join(keys.CertsSitePrefix(issuerKey, domain), safeDomain+".key")
 }
 
-// SiteMeta returns the path to the domain's asset metadata file.
-func (keys KeyBuilder) SiteMeta(ca, domain string) string {
-	return path.Join(keys.SitePrefix(ca, domain), keys.Safe(domain)+".json")
-}
-
-// UsersPrefix returns a key prefix for items related to
-// users associated with the given CA URL.
-func (keys KeyBuilder) UsersPrefix(ca string) string {
-	return path.Join(keys.CAPrefix(ca), "users")
-}
-
-// UserPrefix returns a key prefix for items related to
-// the user with the given email for the given CA URL.
-func (keys KeyBuilder) UserPrefix(ca, email string) string {
-	if email == "" {
-		email = emptyEmail
-	}
-	return path.Join(keys.UsersPrefix(ca), keys.Safe(email))
-}
-
-// UserReg gets the path to the registration file for the user
-// with the given email address for the given CA URL.
-func (keys KeyBuilder) UserReg(ca, email string) string {
-	return keys.safeUserKey(ca, email, "registration", ".json")
-}
-
-// UserPrivateKey gets the path to the private key file for the
-// user with the given email address on the given CA URL.
-func (keys KeyBuilder) UserPrivateKey(ca, email string) string {
-	return keys.safeUserKey(ca, email, "private", ".key")
+// SiteMeta returns the path to the metadata file for domain that
+// is associated with the certificate from the given issuer with
+// the given issuerKey.
+func (keys KeyBuilder) SiteMeta(issuerKey, domain string) string {
+	safeDomain := keys.Safe(domain)
+	return path.Join(keys.CertsSitePrefix(issuerKey, domain), safeDomain+".json")
 }
 
 // OCSPStaple returns a key for the OCSP staple associated
@@ -196,35 +178,11 @@ func (keys KeyBuilder) OCSPStaple(cert *Certificate, pemBundle []byte) string {
 	return path.Join(prefixOCSP, ocspFileName)
 }
 
-// safeUserKey returns a key for the given email, with the default
-// filename, and the filename ending in the given extension.
-func (keys KeyBuilder) safeUserKey(ca, email, defaultFilename, extension string) string {
-	if email == "" {
-		email = emptyEmail
-	}
-	email = strings.ToLower(email)
-	filename := keys.emailUsername(email)
-	if filename == "" {
-		filename = defaultFilename
-	}
-	filename = keys.Safe(filename)
-	return path.Join(keys.UserPrefix(ca, email), filename+extension)
-}
-
-// emailUsername returns the username portion of an email address (part before
-// '@') or the original input if it can't find the "@" symbol.
-func (keys KeyBuilder) emailUsername(email string) string {
-	at := strings.Index(email, "@")
-	if at == -1 {
-		return email
-	} else if at == 0 {
-		return email[1:]
-	}
-	return email[:at]
-}
-
 // Safe standardizes and sanitizes str for use as
-// a storage key. This method is idempotent.
+// a storage key. This method is idempotent. It
+// accepts multiple components of a key, in other
+// words, str may have a separator (forward slash)
+// such as "a/b/c" as this does not replace slashes.
 func (keys KeyBuilder) Safe(str string) string {
 	str = strings.ToLower(str)
 	str = strings.TrimSpace(str)
@@ -234,6 +192,7 @@ func (keys KeyBuilder) Safe(str string) string {
 		" ", "_",
 		"+", "_plus_",
 		"*", "wildcard_",
+		":", "-",
 		"..", "", // prevent directory traversal (regex allows single dots)
 	)
 	str = repl.Replace(str)
@@ -247,7 +206,6 @@ func (keys KeyBuilder) Safe(str string) string {
 // this does not cancel the operations that
 // the locks are synchronizing, this should be
 // called only immediately before process exit.
-// TODO: have a way to properly cancel the active operations
 func CleanUpOwnLocks() {
 	locksMu.Lock()
 	defer locksMu.Unlock()
@@ -296,8 +254,8 @@ var locksMu sync.Mutex
 var StorageKeys KeyBuilder
 
 const (
-	prefixACME = "acme"
-	prefixOCSP = "ocsp"
+	prefixCerts = "certificates"
+	prefixOCSP  = "ocsp"
 )
 
 // safeKeyRE matches any undesirable characters in storage keys.

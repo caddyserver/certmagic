@@ -162,7 +162,7 @@ func (fs *FileStorage) Lock(key string) error {
 		case fileLockIsStale(meta):
 			// lock file is stale - delete it and try again to create one
 			log.Printf("[INFO][%s] Lock for '%s' is stale (created: %s, last update: %s); removing then retrying: %s",
-				fs, key, filename, meta.Created, meta.Updated)
+				fs, key, meta.Created, meta.Updated, filename)
 			removeLockfile(filename)
 			continue
 

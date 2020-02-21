@@ -60,7 +60,7 @@ func (u user) GetPrivateKey() crypto.PrivateKey {
 // user to disk or register it via ACME. If you want to use
 // a user account that might already exist, call getUser
 // instead. It does NOT prompt the user.
-func (cfg *Config) newUser(email string) (*user, error) {
+func (*ACMEManager) newUser(email string) (*user, error) {
 	user := &user{Email: email}
 	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {
@@ -77,47 +77,47 @@ func (cfg *Config) newUser(email string) (*user, error) {
 // the consequences of an empty email.) This function MAY prompt
 // the user for input. If allowPrompts is false, the user
 // will NOT be prompted and an empty email may be returned.
-func (cfg *Config) getEmail(allowPrompts bool) error {
-	leEmail := cfg.Email
+func (am *ACMEManager) getEmail(allowPrompts bool) error {
+	leEmail := am.Email
 
 	// First try package default email
 	if leEmail == "" {
-		leEmail = Default.Email // TODO: racey with line 108
+		leEmail = DefaultACME.Email // TODO: racey with line 108
 	}
 
 	// Then try to get most recent user email from storage
 	var gotRecentEmail bool
 	if leEmail == "" {
-		leEmail, gotRecentEmail = cfg.mostRecentUserEmail()
+		leEmail, gotRecentEmail = am.mostRecentUserEmail(am.CA)
 	}
 	if !gotRecentEmail && leEmail == "" && allowPrompts {
 		// Looks like there is no email address readily available,
 		// so we will have to ask the user if we can.
 		var err error
-		leEmail, err = cfg.promptUserForEmail()
+		leEmail, err = am.promptUserForEmail()
 		if err != nil {
 			return err
 		}
 
 		// User might have just signified their agreement
-		cfg.Agreed = Default.Agreed
+		am.Agreed = DefaultACME.Agreed
 	}
 
 	// save the email for later and ensure it is consistent
 	// for repeated use; then update cfg with the email
-	Default.Email = strings.TrimSpace(strings.ToLower(leEmail)) // TODO: this is racey with line 85
-	cfg.Email = Default.Email
+	DefaultACME.Email = strings.TrimSpace(strings.ToLower(leEmail)) // TODO: this is racey with line 85
+	am.Email = DefaultACME.Email
 
 	return nil
 }
 
-func (cfg *Config) getAgreementURL() (string, error) {
+func (am *ACMEManager) getAgreementURL() (string, error) {
 	if agreementTestURL != "" {
 		return agreementTestURL, nil
 	}
-	caURL := Default.CA
-	if cfg.CA != "" {
-		caURL = cfg.CA
+	caURL := am.CA
+	if caURL == "" {
+		caURL = DefaultACME.CA
 	}
 	response, err := http.Get(caURL)
 	if err != nil {
@@ -137,14 +137,14 @@ func (cfg *Config) getAgreementURL() (string, error) {
 // be the empty string). If no error is returned, then Agreed
 // will also be set to true, since continuing through the
 // prompt signifies agreement.
-func (cfg *Config) promptUserForEmail() (string, error) {
-	agreementURL, err := cfg.getAgreementURL()
+func (am *ACMEManager) promptUserForEmail() (string, error) {
+	agreementURL, err := am.getAgreementURL()
 	if err != nil {
 		return "", fmt.Errorf("get Agreement URL: %v", err)
 	}
 	// prompt the user for an email address and terms agreement
 	reader := bufio.NewReader(stdin)
-	cfg.promptUserAgreement(agreementURL)
+	am.promptUserAgreement(agreementURL)
 	fmt.Println("Please enter your email address to signify agreement and to be notified")
 	fmt.Println("in case of issues. You can leave it blank, but we don't recommend it.")
 	fmt.Print("  Email address: ")
@@ -153,7 +153,7 @@ func (cfg *Config) promptUserForEmail() (string, error) {
 		return "", fmt.Errorf("reading email address: %v", err)
 	}
 	leEmail = strings.TrimSpace(leEmail)
-	Default.Agreed = true
+	DefaultACME.Agreed = true
 	return leEmail, nil
 }
 
@@ -162,20 +162,20 @@ func (cfg *Config) promptUserForEmail() (string, error) {
 // it will create a new one, but it does NOT save new
 // users to the disk or register them via ACME. It does
 // NOT prompt the user.
-func (cfg *Config) getUser(email string) (*user, error) {
-	regBytes, err := cfg.Storage.Load(StorageKeys.UserReg(cfg.CA, email))
+func (am *ACMEManager) getUser(ca, email string) (*user, error) {
+	regBytes, err := am.config.Storage.Load(am.storageKeyUserReg(ca, email))
 	if err != nil {
 		if _, ok := err.(ErrNotExist); ok {
 			// create a new user
-			return cfg.newUser(email)
+			return am.newUser(email)
 		}
 		return nil, err
 	}
-	keyBytes, err := cfg.Storage.Load(StorageKeys.UserPrivateKey(cfg.CA, email))
+	keyBytes, err := am.config.Storage.Load(am.storageKeyUserPrivateKey(ca, email))
 	if err != nil {
 		if _, ok := err.(ErrNotExist); ok {
 			// create a new user
-			return cfg.newUser(email)
+			return am.newUser(email)
 		}
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func (cfg *Config) getUser(email string) (*user, error) {
 // or prompt the user. You must also pass in the storage
 // wherein the user should be saved. It should be the storage
 // for the CA with which user has an account.
-func (cfg *Config) saveUser(user *user) error {
+func (am *ACMEManager) saveUser(ca string, user *user) error {
 	regBytes, err := json.MarshalIndent(&user, "", "\t")
 	if err != nil {
 		return err
@@ -203,25 +203,23 @@ func (cfg *Config) saveUser(user *user) error {
 	if err != nil {
 		return err
 	}
-
 	all := []keyValue{
 		{
-			key:   StorageKeys.UserReg(cfg.CA, user.Email),
+			key:   am.storageKeyUserReg(ca, user.Email),
 			value: regBytes,
 		},
 		{
-			key:   StorageKeys.UserPrivateKey(cfg.CA, user.Email),
+			key:   am.storageKeyUserPrivateKey(ca, user.Email),
 			value: keyBytes,
 		},
 	}
-
-	return storeTx(cfg.Storage, all)
+	return storeTx(am.config.Storage, all)
 }
 
 // promptUserAgreement simply outputs the standard user
 // agreement prompt with the given agreement URL.
 // It outputs a newline after the message.
-func (cfg *Config) promptUserAgreement(agreementURL string) {
+func (am *ACMEManager) promptUserAgreement(agreementURL string) {
 	const userAgreementPrompt = `Your sites will be served over HTTPS automatically using Let's Encrypt.
 By continuing, you agree to the Let's Encrypt Subscriber Agreement at:`
 	fmt.Printf("\n\n%s\n  %s\n", userAgreementPrompt, agreementURL)
@@ -230,8 +228,8 @@ By continuing, you agree to the Let's Encrypt Subscriber Agreement at:`
 // askUserAgreement prompts the user to agree to the agreement
 // at the given agreement URL via stdin. It returns whether the
 // user agreed or not.
-func (cfg *Config) askUserAgreement(agreementURL string) bool {
-	cfg.promptUserAgreement(agreementURL)
+func (am *ACMEManager) askUserAgreement(agreementURL string) bool {
+	am.promptUserAgreement(agreementURL)
 	fmt.Print("Do you agree to the terms? (y/n): ")
 
 	reader := bufio.NewReader(stdin)
@@ -244,21 +242,71 @@ func (cfg *Config) askUserAgreement(agreementURL string) bool {
 	return answer == "y" || answer == "yes"
 }
 
+func (am *ACMEManager) storageKeyCAPrefix(caURL string) string {
+	return path.Join(prefixACME, StorageKeys.Safe(am.issuerKey(caURL)))
+}
+
+func (am *ACMEManager) storageKeyUsersPrefix(caURL string) string {
+	return path.Join(am.storageKeyCAPrefix(caURL), "users")
+}
+
+func (am *ACMEManager) storageKeyUserPrefix(caURL, email string) string {
+	if email == "" {
+		email = emptyEmail
+	}
+	return path.Join(am.storageKeyUsersPrefix(caURL), StorageKeys.Safe(email))
+}
+
+func (am *ACMEManager) storageKeyUserReg(caURL, email string) string {
+	return am.storageSafeUserKey(caURL, email, "registration", ".json")
+}
+
+func (am *ACMEManager) storageKeyUserPrivateKey(caURL, email string) string {
+	return am.storageSafeUserKey(caURL, email, "private", ".key")
+}
+
+// storageSafeUserKey returns a key for the given email, with the default
+// filename, and the filename ending in the given extension.
+func (am *ACMEManager) storageSafeUserKey(ca, email, defaultFilename, extension string) string {
+	if email == "" {
+		email = emptyEmail
+	}
+	email = strings.ToLower(email)
+	filename := am.emailUsername(email)
+	if filename == "" {
+		filename = defaultFilename
+	}
+	filename = StorageKeys.Safe(filename)
+	return path.Join(am.storageKeyUserPrefix(ca, email), filename+extension)
+}
+
+// emailUsername returns the username portion of an email address (part before
+// '@') or the original input if it can't find the "@" symbol.
+func (*ACMEManager) emailUsername(email string) string {
+	at := strings.Index(email, "@")
+	if at == -1 {
+		return email
+	} else if at == 0 {
+		return email[1:]
+	}
+	return email[:at]
+}
+
 // mostRecentUserEmail finds the most recently-written user file
-// in s. Since this is part of a complex sequence to get a user
+// in storage. Since this is part of a complex sequence to get a user
 // account, errors here are discarded to simplify code flow in
 // the caller, and errors are not important here anyway.
-func (cfg *Config) mostRecentUserEmail() (string, bool) {
-	userList, err := cfg.Storage.List(StorageKeys.UsersPrefix(cfg.CA), false)
+func (am *ACMEManager) mostRecentUserEmail(caURL string) (string, bool) {
+	userList, err := am.config.Storage.List(am.storageKeyUsersPrefix(caURL), false)
 	if err != nil || len(userList) == 0 {
 		return "", false
 	}
 	sort.Slice(userList, func(i, j int) bool {
-		iInfo, _ := cfg.Storage.Stat(userList[i])
-		jInfo, _ := cfg.Storage.Stat(userList[j])
+		iInfo, _ := am.config.Storage.Stat(userList[i])
+		jInfo, _ := am.config.Storage.Stat(userList[j])
 		return jInfo.Modified.Before(iInfo.Modified)
 	})
-	user, err := cfg.getUser(path.Base(userList[0]))
+	user, err := am.getUser(caURL, path.Base(userList[0]))
 	if err != nil {
 		return "", false
 	}

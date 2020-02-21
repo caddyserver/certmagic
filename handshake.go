@@ -37,9 +37,7 @@ import (
 //
 // This method is safe for use as a tls.Config.GetCertificate callback.
 func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	if cfg.OnEvent != nil {
-		cfg.OnEvent("tls_handshake_started", clientHello)
-	}
+	cfg.emit("tls_handshake_started", clientHello)
 
 	// special case: serve up the certificate for a TLS-ALPN ACME challenge
 	// (https://tools.ietf.org/html/draft-ietf-acme-tls-alpn-05)
@@ -70,8 +68,8 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 
 	// get the certificate and serve it up
 	cert, err := cfg.getCertDuringHandshake(clientHello, true, true)
-	if err == nil && cfg.OnEvent != nil {
-		cfg.OnEvent("tls_handshake_completed", clientHello)
+	if err == nil {
+		cfg.emit("tls_handshake_completed", clientHello)
 	}
 	return &cert.Certificate, err
 }
@@ -155,7 +153,7 @@ func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate,
 	}
 
 	// otherwise, we're bingo on ammo; see issues
-	// mholt/caddy#2035 and mholt/caddy#1303 (any
+	// caddyserver/caddy#2035 and caddyserver/caddy#1303 (any
 	// change to certificate matching behavior must
 	// account for hosts defined where the hostname
 	// is empty or a catch-all, like ":443" or
@@ -399,10 +397,15 @@ func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCe
 // tryDistributedChallengeSolver is to be called when the clientHello pertains to
 // a TLS-ALPN challenge and a certificate is required to solve it. This method
 // checks the distributed store of challenge info files and, if a matching ServerName
-// is present, it makes a certificate to solve this challenge and returns it.
+// is present, it makes a certificate to solve this challenge and returns it. For
+// this to succeed, it requires that cfg.Issuer is of type *ACMEManager.
 // A boolean true is returned if a valid certificate is returned.
 func (cfg *Config) tryDistributedChallengeSolver(clientHello *tls.ClientHelloInfo) (Certificate, bool, error) {
-	tokenKey := distributedSolver{config: cfg}.challengeTokensKey(clientHello.ServerName)
+	am, ok := cfg.Issuer.(*ACMEManager)
+	if !ok {
+		return Certificate{}, false, nil
+	}
+	tokenKey := distributedSolver{acmeManager: am, caURL: am.CA}.challengeTokensKey(clientHello.ServerName)
 	chalInfoBytes, err := cfg.Storage.Load(tokenKey)
 	if err != nil {
 		if _, ok := err.(ErrNotExist); ok {

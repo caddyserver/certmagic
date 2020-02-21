@@ -17,6 +17,9 @@ package certmagic
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
@@ -25,8 +28,8 @@ import (
 	"encoding/pem"
 	"fmt"
 	"hash/fnv"
+	"strings"
 
-	"github.com/go-acme/lego/v3/certificate"
 	"github.com/klauspost/cpuid"
 )
 
@@ -45,20 +48,48 @@ func encodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
 	case *rsa.PrivateKey:
 		pemType = "RSA"
 		keyBytes = x509.MarshalPKCS1PrivateKey(key)
+	case *ed25519.PrivateKey:
+		var err error
+		pemType = "ED25519"
+		keyBytes, err = x509.MarshalPKCS8PrivateKey(key)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported key type: %T", key)
 	}
 	pemKey := pem.Block{Type: pemType + " PRIVATE KEY", Bytes: keyBytes}
 	return pem.EncodeToMemory(&pemKey), nil
 }
 
 // decodePrivateKey loads a PEM-encoded ECC/RSA private key from an array of bytes.
+// Borrowed from Go standard library, to handle various private key and PEM block types.
+// https://github.com/golang/go/blob/693748e9fa385f1e2c3b91ca9acbb6c0ad2d133d/src/crypto/tls/tls.go#L291-L308
+// https://github.com/golang/go/blob/693748e9fa385f1e2c3b91ca9acbb6c0ad2d133d/src/crypto/tls/tls.go#L238)
 func decodePrivateKey(keyPEMBytes []byte) (crypto.PrivateKey, error) {
-	keyBlock, _ := pem.Decode(keyPEMBytes)
-	switch keyBlock.Type {
-	case "RSA PRIVATE KEY":
-		return x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
-	case "EC PRIVATE KEY":
-		return x509.ParseECPrivateKey(keyBlock.Bytes)
+	keyBlockDER, _ := pem.Decode(keyPEMBytes)
+
+	if keyBlockDER.Type != "PRIVATE KEY" && !strings.HasSuffix(keyBlockDER.Type, " PRIVATE KEY") {
+		return nil, fmt.Errorf("unknown PEM header %q", keyBlockDER.Type)
 	}
+
+	if key, err := x509.ParsePKCS1PrivateKey(keyBlockDER.Bytes); err == nil {
+		return key, nil
+	}
+
+	if key, err := x509.ParsePKCS8PrivateKey(keyBlockDER.Bytes); err == nil {
+		switch key := key.(type) {
+		case *rsa.PrivateKey, *ecdsa.PrivateKey, ed25519.PrivateKey:
+			return key, nil
+		default:
+			return nil, fmt.Errorf("found unknown private key type in PKCS#8 wrapping: %T", key)
+		}
+	}
+
+	if key, err := x509.ParseECPrivateKey(keyBlockDER.Bytes); err == nil {
+		return key, nil
+	}
+
 	return nil, fmt.Errorf("unknown private key type")
 }
 
@@ -98,23 +129,26 @@ func fastHash(input []byte) string {
 // saveCertResource saves the certificate resource to disk. This
 // includes the certificate file itself, the private key, and the
 // metadata file.
-func (cfg *Config) saveCertResource(cert *certificate.Resource) error {
-	metaBytes, err := json.MarshalIndent(&cert, "", "\t")
+func (cfg *Config) saveCertResource(cert CertificateResource) error {
+	metaBytes, err := json.MarshalIndent(cert, "", "\t")
 	if err != nil {
 		return fmt.Errorf("encoding certificate metadata: %v", err)
 	}
 
+	issuerKey := cfg.Issuer.IssuerKey()
+	certKey := cert.NamesKey()
+
 	all := []keyValue{
 		{
-			key:   StorageKeys.SiteCert(cfg.CA, cert.Domain),
-			value: cert.Certificate,
+			key:   StorageKeys.SiteCert(issuerKey, certKey),
+			value: cert.CertificatePEM,
 		},
 		{
-			key:   StorageKeys.SitePrivateKey(cfg.CA, cert.Domain),
-			value: cert.PrivateKey,
+			key:   StorageKeys.SitePrivateKey(issuerKey, certKey),
+			value: cert.PrivateKeyPEM,
 		},
 		{
-			key:   StorageKeys.SiteMeta(cfg.CA, cert.Domain),
+			key:   StorageKeys.SiteMeta(issuerKey, certKey),
 			value: metaBytes,
 		},
 	}
@@ -122,26 +156,27 @@ func (cfg *Config) saveCertResource(cert *certificate.Resource) error {
 	return storeTx(cfg.Storage, all)
 }
 
-func (cfg *Config) loadCertResource(domain string) (certificate.Resource, error) {
-	var certRes certificate.Resource
-	certBytes, err := cfg.Storage.Load(StorageKeys.SiteCert(cfg.CA, domain))
+func (cfg *Config) loadCertResource(certNamesKey string) (CertificateResource, error) {
+	var certRes CertificateResource
+	issuerKey := cfg.Issuer.IssuerKey()
+	certBytes, err := cfg.Storage.Load(StorageKeys.SiteCert(issuerKey, certNamesKey))
 	if err != nil {
-		return certRes, err
+		return CertificateResource{}, err
 	}
-	keyBytes, err := cfg.Storage.Load(StorageKeys.SitePrivateKey(cfg.CA, domain))
+	certRes.CertificatePEM = certBytes
+	keyBytes, err := cfg.Storage.Load(StorageKeys.SitePrivateKey(issuerKey, certNamesKey))
 	if err != nil {
-		return certRes, err
+		return CertificateResource{}, err
 	}
-	metaBytes, err := cfg.Storage.Load(StorageKeys.SiteMeta(cfg.CA, domain))
+	certRes.PrivateKeyPEM = keyBytes
+	metaBytes, err := cfg.Storage.Load(StorageKeys.SiteMeta(issuerKey, certNamesKey))
 	if err != nil {
-		return certRes, err
+		return CertificateResource{}, err
 	}
 	err = json.Unmarshal(metaBytes, &certRes)
 	if err != nil {
-		return certRes, fmt.Errorf("decoding certificate metadata: %v", err)
+		return CertificateResource{}, fmt.Errorf("decoding certificate metadata: %v", err)
 	}
-	certRes.Certificate = certBytes
-	certRes.PrivateKey = keyBytes
 	return certRes, nil
 }
 
@@ -154,6 +189,19 @@ func hashCertificateChain(certChain [][]byte) string {
 		h.Write(certInChain)
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func namesFromCSR(csr *x509.CertificateRequest) []string {
+	var nameSet []string
+	nameSet = append(nameSet, csr.DNSNames...)
+	nameSet = append(nameSet, csr.EmailAddresses...)
+	for _, v := range csr.IPAddresses {
+		nameSet = append(nameSet, v.String())
+	}
+	for _, v := range csr.URIs {
+		nameSet = append(nameSet, v.String())
+	}
+	return nameSet
 }
 
 // preferredDefaultCipherSuites returns an appropriate
@@ -185,4 +233,47 @@ var (
 		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 		tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 	}
+)
+
+// StandardKeyGenerator is the standard, in-memory key source
+// that uses crypto/rand.
+type StandardKeyGenerator struct {
+	// The type of keys to generate.
+	KeyType KeyType
+}
+
+// GenerateKey generates a new private key according to kg.KeyType.
+func (kg StandardKeyGenerator) GenerateKey() (crypto.PrivateKey, error) {
+	switch kg.KeyType {
+	case ED25519:
+		_, priv, err := ed25519.GenerateKey(rand.Reader)
+		return priv, err
+	case "", P256:
+		return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	case P384:
+		return ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	case RSA2048:
+		return rsa.GenerateKey(rand.Reader, 2048)
+	case RSA4096:
+		return rsa.GenerateKey(rand.Reader, 4096)
+	case RSA8192:
+		return rsa.GenerateKey(rand.Reader, 8192)
+	}
+	return nil, fmt.Errorf("unrecognized or unsupported key type: %s", kg.KeyType)
+}
+
+// DefaultKeyGenerator is the default key source.
+var DefaultKeyGenerator = StandardKeyGenerator{KeyType: P256}
+
+// KeyType enumerates the known/supported key types.
+type KeyType string
+
+// Constants for all key types we support.
+const (
+	ED25519 = KeyType("ed25519")
+	P256    = KeyType("p256")
+	P384    = KeyType("p384")
+	RSA2048 = KeyType("rsa2048")
+	RSA4096 = KeyType("rsa4096")
+	RSA8192 = KeyType("rsa8192")
 )

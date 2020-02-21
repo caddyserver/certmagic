@@ -10,9 +10,9 @@
 </p>
 
 
-Caddy's automagic TLS features, now for your own Go programs, in one powerful and easy-to-use library!
+Caddy's automagic TLS features&mdash;now for your own Go programs&mdash;in one powerful and easy-to-use library!
 
-CertMagic is the most mature, robust, and capable ACME client integration for Go.
+CertMagic is the most mature, robust, and capable ACME client integration for Go... and perhaps ever.
 
 With CertMagic, you can add one line to your Go application to serve securely over TLS, without ever having to touch certificates.
 
@@ -142,23 +142,25 @@ The `certmagic.Config` struct is how you can wield the power of this fully armed
 
 The default `Config` value is called `certmagic.Default`. Change its fields to suit your needs, then call `certmagic.NewDefault()` when you need a valid `Config` value. In other words, `certmagic.Default` is a template and is not valid for use directly.
 
-You can set the default values easily, for example: `certmagic.Default.Email = ...`.
+You can set the default values easily, for example: `certmagic.Default.Issuer = ...`.
+
+Similarly, to configure ACME-specific defaults, use `certmagic.DefaultACME`.
 
 The high-level functions in this package (`HTTPS()`, `Listen()`, `ManageSync()`, and `ManageAsync()`) use the default config exclusively. This is how most of you will interact with the package. This is suitable when all your certificates are managed the same way. However, if you need to manage certificates differently depending on their name, you will need to make your own cache and configs (keep reading).
 
 
 #### Providing an email address
 
-Although not strictly required, this is highly recommended best practice. It allows you to receive expiration emails if your certificates are expiring for some reason, and also allows the CA's engineers to potentially get in touch with you if something is wrong. I recommend setting `certmagic.Default.Email` or always setting the `Email` field of a new `Config` struct.
+Although not strictly required, this is highly recommended best practice. It allows you to receive expiration emails if your certificates are expiring for some reason, and also allows the CA's engineers to potentially get in touch with you if something is wrong. I recommend setting `certmagic.DefaultACME.Email` or always setting the `Email` field of a new `Config` struct.
 
 
 #### Rate limiting
 
-To avoid firehosing the CA's servers, CertMagic has built-in rate limiting. Currently, its default limit is up to 10 transactions (obtain or renew) every 1 minute (sliding window). This can be changed by setting the `RateLimitOrders` and `RateLimitOrdersWindow` variables, if desired.
+To avoid firehosing the CA's servers, CertMagic has built-in rate limiting. Currently, its default limit is up to 10 transactions (obtain or renew) every 1 minute (sliding window). This can be changed by setting the `RateLimitEvents` and `RateLimitEventsWindow` variables, if desired.
 
 The CA may still enforce their own rate limits, and there's nothing (well, nothing ethical) CertMagic can do to bypass them for you.
 
-Additionally, CertMagic will retry failed validations with exponential backoff for up to 30 days, with a maximum of 1 day between attempts. (An "attempt" means trying each enabled challenge type twice.)
+Additionally, CertMagic will retry failed validations with exponential backoff for up to 30 days, with a reasonable maximum interval between attempts (an "attempt" means trying each enabled challenge type once).
 
 
 ### Development and Testing
@@ -167,7 +169,7 @@ Note that Let's Encrypt imposes [strict rate limits](https://letsencrypt.org/doc
 
 While developing your application and testing it, use [their staging endpoint](https://letsencrypt.org/docs/staging-environment/) which has much higher rate limits. Even then, don't hammer it: but it's much safer for when you're testing. When deploying, though, use their production CA because their staging CA doesn't issue trusted certificates.
 
-To use staging, set `certmagic.Default.CA = certmagic.LetsEncryptStagingCA` or set `CA` of every `Config` struct.
+To use staging, set `certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA` or set `CA` of every `ACMEManager` struct.
 
 
 
@@ -175,19 +177,19 @@ To use staging, set `certmagic.Default.CA = certmagic.LetsEncryptStagingCA` or s
 
 There are many ways to use this library. We'll start with the highest-level (simplest) and work down (more control).
 
-All these high-level examples use `certmagic.Default` for the config and the default cache and storage for serving up certificates.
+All these high-level examples use `certmagic.Default` and `certmagic.DefaultACME` for the config and the default cache and storage for serving up certificates.
 
 First, we'll follow best practices and do the following:
 
 ```go
 // read and agree to your CA's legal documents
-certmagic.Default.Agreed = true
+certmagic.DefaultACME.Agreed = true
 
 // provide an email address
-certmagic.Default.Email = "you@yours.com"
+certmagic.DefaultACME.Email = "you@yours.com"
 
 // use the staging endpoint while we're developing
-certmagic.Default.CA = certmagic.LetsEncryptStagingCA
+certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
 ```
 
 For fully-functional program examples, check out [this Twitter thread](https://twitter.com/mholt6/status/1073103805112147968) (or read it [unrolled into a single post](https://threadreaderapp.com/thread/1073103805112147968.html)). (Note that the package API has changed slightly since these posts.)
@@ -244,11 +246,17 @@ cache := certmagic.NewCache(certmagic.CacheOptions{
 })
 
 magic := certmagic.New(cache, certmagic.Config{
+	// any customizations you need go here
+})
+
+myACME := certmagic.NewACMEManager(magic, ACMEManager{
 	CA:     certmagic.LetsEncryptStagingCA,
 	Email:  "you@yours.com",
 	Agreed: true,
-	// plus any other customization you want
+	// plus any other customizations you need
 })
+
+magic.Issuer = myACME
 
 // this obtains certificates or renews them if necessary
 err := magic.ManageSync([]string{"example.com", "sub.example.com"})
@@ -271,7 +279,7 @@ myTLSConfig.NextProtos = append(myTLSConfig.NextProtos, tlsalpn01.ACMETLS1Protoc
 // the HTTP challenge has to be handled by your HTTP server;
 // if you don't have one, you should have disabled it earlier
 // when you made the certmagic.Config
-httpMux = magic.HTTPChallengeHandler(httpMux)
+httpMux = myACME.HTTPChallengeHandler(httpMux)
 ```
 
 Great! This example grants you much more flexibility for advanced programs. However, _the vast majority of you will only use the high-level functions described earlier_, especially since you can still customize them by setting the package-level `Default` config.
@@ -318,16 +326,17 @@ mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Lookit my cool website over HTTPS!")
 })
 
-http.ListenAndServe(":80", magic.HTTPChallengeHandler(mux))
+http.ListenAndServe(":80", myACME.HTTPChallengeHandler(mux))
 ```
 
 If wrapping your handler is not a good solution, try this inside your `ServeHTTP()` instead:
 
 ```go
 magic := certmagic.NewDefault()
+myACME := certmagic.NewACMEManager(magic, certmagic.DefaultACME)
 
 func ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if magic.HandleHTTPChallenge(w, r) {
+	if myACME.HandleHTTPChallenge(w, r) {
 		return // challenge handled; nothing else to do
 	}
 	...
@@ -378,7 +387,7 @@ if err != nil {
 	return err
 }
 
-certmagic.Default.DNSProvider = provider
+certmagic.DefaultACME.DNSProvider = provider
 ```
 
 Now the DNS challenge will be used by default, and I can obtain certificates for wildcard domains. See the [godoc documentation for the provider you're using](https://godoc.org/github.com/go-acme/lego/providers/dns#pkg-subdirectories) to learn how to configure it. Most can be configured by env variables or by passing in a config struct. If you pass a config struct instead of using env variables, you will probably need to set some other defaults (that's just how lego works, currently):

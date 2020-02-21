@@ -21,9 +21,10 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"path/filepath"
+	"path"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/go-acme/lego/v3/challenge"
 	"github.com/go-acme/lego/v3/challenge/tlsalpn01"
@@ -40,9 +41,9 @@ import (
 // can access the keyAuth material is by loading it
 // from storage, which is done by distributedSolver.
 type httpSolver struct {
-	closed  int32 // accessed atomically
-	config  *Config
-	address string
+	closed      int32 // accessed atomically
+	acmeManager *ACMEManager
+	address     string
 }
 
 // Present starts an HTTP server if none is already listening on s.address.
@@ -77,7 +78,7 @@ func (s *httpSolver) Present(domain, token, keyAuth string) error {
 
 // serve is an HTTP server that serves only HTTP challenge responses.
 func (s *httpSolver) serve(si *solverInfo) {
-	httpServer := &http.Server{Handler: s.config.HTTPChallengeHandler(http.NewServeMux())}
+	httpServer := &http.Server{Handler: s.acmeManager.HTTPChallengeHandler(http.NewServeMux())}
 	httpServer.SetKeepAlivesEnabled(false)
 	err := httpServer.Serve(si.listener)
 	if err != nil && atomic.LoadInt32(&s.closed) != 1 {
@@ -108,7 +109,7 @@ func (s *httpSolver) CleanUp(domain, token, keyAuth string) error {
 // It must have an associated config and address on which to
 // serve the challenge.
 type tlsALPNSolver struct {
-	closed  int32 // accessed atomically
+	// closed  int32 // accessed atomically
 	config  *Config
 	address string
 }
@@ -163,7 +164,7 @@ func (s *tlsALPNSolver) Present(domain, token, keyAuth string) error {
 		for {
 			conn, err := si.listener.Accept()
 			if err != nil {
-				if atomic.LoadInt32(&s.closed) == 1 {
+				if atomic.LoadInt32(&si.closed) == 1 {
 					return
 				}
 				log.Printf("[ERROR] TLS-ALPN challenge server: accept: %v", err)
@@ -204,7 +205,7 @@ func (s *tlsALPNSolver) CleanUp(domain, token, keyAuth string) error {
 	si.count--
 	if si.count == 0 {
 		// last one out turns off the lights
-		atomic.StoreInt32(&s.closed, 1)
+		atomic.StoreInt32(&si.closed, 1)
 		if si.listener != nil {
 			si.listener.Close()
 		}
@@ -249,17 +250,21 @@ type distributedSolver struct {
 	// with a reference to the storage to
 	// use which is shared among all the
 	// instances in the cluster - REQUIRED.
-	config *Config
+	acmeManager *ACMEManager
 
 	// Since the distributedSolver is only a
 	// wrapper over an actual solver, place
 	// the actual solver here.
 	providerServer challenge.Provider
+
+	// The CA endpoint URL associated with
+	// this solver.
+	caURL string
 }
 
 // Present invokes the underlying solver's Present method
 // and also stores domain, token, and keyAuth to the storage
-// backing the certificate cache of dhs.config.
+// backing the certificate cache of dhs.acmeManager.
 func (dhs distributedSolver) Present(domain, token, keyAuth string) error {
 	infoBytes, err := json.Marshal(challengeInfo{
 		Domain:  domain,
@@ -270,7 +275,7 @@ func (dhs distributedSolver) Present(domain, token, keyAuth string) error {
 		return err
 	}
 
-	err = dhs.config.Storage.Store(dhs.challengeTokensKey(domain), infoBytes)
+	err = dhs.acmeManager.config.Storage.Store(dhs.challengeTokensKey(domain), infoBytes)
 	if err != nil {
 		return err
 	}
@@ -285,7 +290,7 @@ func (dhs distributedSolver) Present(domain, token, keyAuth string) error {
 // CleanUp invokes the underlying solver's CleanUp method
 // and also cleans up any assets saved to storage.
 func (dhs distributedSolver) CleanUp(domain, token, keyAuth string) error {
-	err := dhs.config.Storage.Delete(dhs.challengeTokensKey(domain))
+	err := dhs.acmeManager.config.Storage.Delete(dhs.challengeTokensKey(domain))
 	if err != nil {
 		return err
 	}
@@ -298,13 +303,13 @@ func (dhs distributedSolver) CleanUp(domain, token, keyAuth string) error {
 
 // challengeTokensPrefix returns the key prefix for challenge info.
 func (dhs distributedSolver) challengeTokensPrefix() string {
-	return filepath.Join(StorageKeys.CAPrefix(dhs.config.CA), "challenge_tokens")
+	return path.Join(dhs.acmeManager.storageKeyCAPrefix(dhs.caURL), "challenge_tokens")
 }
 
 // challengeTokensKey returns the key to use to store and access
 // challenge info for domain.
 func (dhs distributedSolver) challengeTokensKey(domain string) string {
-	return filepath.Join(dhs.challengeTokensPrefix(), StorageKeys.Safe(domain)+".json")
+	return path.Join(dhs.challengeTokensPrefix(), StorageKeys.Safe(domain)+".json")
 }
 
 type challengeInfo struct {
@@ -314,6 +319,7 @@ type challengeInfo struct {
 // solverInfo associates a listener with the
 // number of challenges currently using it.
 type solverInfo struct {
+	closed   int32 // accessed atomically
 	count    int
 	listener net.Listener
 	done     chan struct{} // used to signal when cleanup is finished
@@ -327,6 +333,16 @@ func getSolverInfo(address string) *solverInfo {
 		solvers[address] = si
 	}
 	return si
+}
+
+// listenerAddressInUse returns true if a TCP connection
+// can be made to addr within a short time interval.
+func listenerAddressInUse(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, 250*time.Millisecond)
+	if err == nil {
+		conn.Close()
+	}
+	return err == nil
 }
 
 // The active challenge solvers, keyed by listener address,

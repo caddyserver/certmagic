@@ -57,7 +57,7 @@ func (certCache *Cache) maintainAssets() {
 		case <-certCache.stopChan:
 			renewalTicker.Stop()
 			ocspTicker.Stop()
-			// TODO: stop any in-progress maintenance operations and clear locks we made
+			// TODO: stop any in-progress maintenance operations and clear locks we made (this might be done now with our use of context)
 			log.Printf("[INFO][cache:%p] Stopped certificate maintenance routine", certCache)
 			close(certCache.doneChan)
 			return
@@ -140,7 +140,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 	// Reload certificates that merely need to be updated in memory
 	for _, oldCert := range reloadQueue {
 		timeLeft := oldCert.NotAfter.Sub(time.Now().UTC())
-		log.Printf("[INFO] Certificate for %v expires in %v, but is already renewed in storage; reloading stored certificate",
+		log.Printf("[INFO] %v Maintenance routine: certificate expires in %v, but is already renewed in storage; reloading stored certificate",
 			oldCert.Names, timeLeft)
 
 		cfg := configs[oldCert.Names[0]]
@@ -155,32 +155,10 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 
 	// Renewal queue
 	for _, oldCert := range renewQueue {
-		timeLeft := oldCert.NotAfter.Sub(time.Now().UTC())
-		log.Printf("[INFO] Certificate for %v expires in %v; attempting renewal", oldCert.Names, timeLeft)
-
 		cfg := configs[oldCert.Names[0]]
-
-		// Get the name which we should use to renew this certificate;
-		// we only support managing certificates with one name per cert,
-		// so this should be easy.
-		renewName := oldCert.Names[0]
-
-		// perform renewal - crucially, this happens OUTSIDE a lock on certCache
-		err := cfg.RenewCert(ctx, renewName, false)
+		err := certCache.queueRenewalTask(ctx, oldCert, cfg)
 		if err != nil {
-			log.Printf("[ERROR][%s] %v", renewName, err)
-			if cfg.OnDemand != nil {
-				// loaded dynamically, remove dynamically
-				deleteQueue = append(deleteQueue, oldCert)
-			}
-			continue
-		}
-
-		// successful renewal, so update in-memory cache by loading
-		// renewed certificate so it will be used with handshakes
-		err = cfg.reloadManagedCertificate(oldCert)
-		if err != nil {
-			log.Printf("[ERROR][%s] %v", renewName, err)
+			log.Printf("[ERROR] %v", err)
 			continue
 		}
 	}
@@ -191,6 +169,44 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 		certCache.removeCertificate(cert)
 	}
 	certCache.mu.Unlock()
+
+	return nil
+}
+
+func (certCache *Cache) queueRenewalTask(ctx context.Context, oldCert Certificate, cfg *Config) error {
+	timeLeft := oldCert.NotAfter.Sub(time.Now().UTC())
+	log.Printf("[INFO] %v Maintenance routine: certificate expires in %v; queueing for renewal", oldCert.Names, timeLeft)
+
+	// Get the name which we should use to renew this certificate;
+	// we only support managing certificates with one name per cert,
+	// so this should be easy.
+	renewName := oldCert.Names[0]
+
+	// queue up this renewal job (is a no-op if already active or queued)
+	jm.Submit("renew_"+renewName, func() error {
+		timeLeft := oldCert.NotAfter.Sub(time.Now().UTC())
+		log.Printf("[INFO] %v Maintenance routine: attempting renewal with %v remaining", oldCert.Names, timeLeft)
+
+		// perform renewal - crucially, this happens OUTSIDE a lock on certCache
+		err := cfg.RenewCert(ctx, renewName, false)
+		if err != nil {
+			if cfg.OnDemand != nil {
+				// loaded dynamically, remove dynamically
+				certCache.mu.Lock()
+				certCache.removeCertificate(oldCert)
+				certCache.mu.Unlock()
+			}
+			return fmt.Errorf("%v %v", oldCert.Names, err)
+		}
+
+		// successful renewal, so update in-memory cache by loading
+		// renewed certificate so it will be used with handshakes
+		err = cfg.reloadManagedCertificate(oldCert)
+		if err != nil {
+			return ErrNoRetry{fmt.Errorf("%v %v", oldCert.Names, err)}
+		}
+		return nil
+	})
 
 	return nil
 }
@@ -298,6 +314,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		renewName := oldCert.Names[0]
 		cfg := configs[renewName]
 
+		// TODO: consider using a new key in this situation
 		err := cfg.RenewCert(ctx, renewName, false)
 		if err != nil {
 			// probably better to not serve a revoked certificate at all
@@ -307,7 +324,6 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 			certCache.mu.Unlock()
 			continue
 		}
-
 		err = cfg.reloadManagedCertificate(oldCert)
 		if err != nil {
 			log.Printf("[ERROR] After obtaining new certificate due to OCSP status of revoked: %v", err)

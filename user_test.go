@@ -50,14 +50,16 @@ func TestUser(t *testing.T) {
 	}
 }
 func TestNewUser(t *testing.T) {
+	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		CA:        "https://example.com/acme/directory",
+		Issuer:    am,
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
 		certCache: new(Cache),
 	}
+	am.config = testConfig
 
 	email := "me@foobar.com"
-	user, err := testConfig.newUser(email)
+	user, err := am.newUser(email)
 	if err != nil {
 		t.Fatalf("Error creating user: %v", err)
 	}
@@ -73,38 +75,48 @@ func TestNewUser(t *testing.T) {
 }
 
 func TestSaveUser(t *testing.T) {
+	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		CA:        "https://example.com/acme/directory",
+		Issuer:    am,
 		Storage:   &FileStorage{Path: "./_testdata1_tmp"},
 		certCache: new(Cache),
 	}
+	am.config = testConfig
+
 	testStorageDir := testConfig.Storage.(*FileStorage).Path
-	defer os.RemoveAll(testStorageDir)
+	defer func() {
+		err := os.RemoveAll(testStorageDir)
+		if err != nil {
+			t.Fatalf("Could not remove temporary storage directory (%s): %v", testStorageDir, err)
+		}
+	}()
 
 	email := "me@foobar.com"
-	user, err := testConfig.newUser(email)
+	user, err := am.newUser(email)
 	if err != nil {
 		t.Fatalf("Error creating user: %v", err)
 	}
 
-	err = testConfig.saveUser(user)
+	err = am.saveUser(am.CA, user)
 	if err != nil {
 		t.Fatalf("Error saving user: %v", err)
 	}
-	_, err = testConfig.getUser(email)
+	_, err = am.getUser(am.CA, email)
 	if err != nil {
 		t.Errorf("Cannot access user data, error: %v", err)
 	}
 }
 
 func TestGetUserDoesNotAlreadyExist(t *testing.T) {
+	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		CA:        "https://example.com/acme/directory",
+		Issuer:    am,
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
 		certCache: new(Cache),
 	}
+	am.config = testConfig
 
-	user, err := testConfig.getUser("user_does_not_exist@foobar.com")
+	user, err := am.getUser(am.CA, "user_does_not_exist@foobar.com")
 	if err != nil {
 		t.Fatalf("Error getting user: %v", err)
 	}
@@ -115,28 +127,36 @@ func TestGetUserDoesNotAlreadyExist(t *testing.T) {
 }
 
 func TestGetUserAlreadyExists(t *testing.T) {
+	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		CA:        "https://example.com/acme/directory",
+		Issuer:    am,
 		Storage:   &FileStorage{Path: "./_testdata2_tmp"},
 		certCache: new(Cache),
 	}
+	am.config = testConfig
+
 	testStorageDir := testConfig.Storage.(*FileStorage).Path
-	defer os.RemoveAll(testStorageDir)
+	defer func() {
+		err := os.RemoveAll(testStorageDir)
+		if err != nil {
+			t.Fatalf("Could not remove temporary storage directory (%s): %v", testStorageDir, err)
+		}
+	}()
 
 	email := "me@foobar.com"
 
 	// Set up test
-	user, err := testConfig.newUser(email)
+	user, err := am.newUser(email)
 	if err != nil {
 		t.Fatalf("Error creating user: %v", err)
 	}
-	err = testConfig.saveUser(user)
+	err = am.saveUser(am.CA, user)
 	if err != nil {
 		t.Fatalf("Error saving user: %v", err)
 	}
 
 	// Expect to load user from disk
-	user2, err := testConfig.getUser(email)
+	user2, err := am.getUser(am.CA, email)
 	if err != nil {
 		t.Fatalf("Error getting user: %v", err)
 	}
@@ -153,33 +173,37 @@ func TestGetUserAlreadyExists(t *testing.T) {
 }
 
 func TestGetEmailFromPackageDefault(t *testing.T) {
-	Default.Email = "tEsT2@foo.com"
+	DefaultACME.Email = "tEsT2@foo.com"
 	defer func() {
-		Default.Email = ""
+		DefaultACME.Email = ""
 	}()
 
+	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		CA:        "https://example.com/acme/directory",
-		Storage:   &FileStorage{Path: "./_testdata_tmp"},
+		Issuer:    am,
+		Storage:   &FileStorage{Path: "./_testdata2_tmp"},
 		certCache: new(Cache),
 	}
+	am.config = testConfig
 
-	err := testConfig.getEmail(true)
+	err := am.getEmail(true)
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}
-	lowerEmail := strings.ToLower(Default.Email)
-	if testConfig.Email != lowerEmail {
-		t.Errorf("Did not get correct email from memory; expected '%s' but got '%s'", lowerEmail, testConfig.Email)
+	lowerEmail := strings.ToLower(DefaultACME.Email)
+	if am.Email != lowerEmail {
+		t.Errorf("Did not get correct email from memory; expected '%s' but got '%s'", lowerEmail, am.Email)
 	}
 }
 
 func TestGetEmailFromUserInput(t *testing.T) {
+	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		CA:        "https://example.com/acme/directory",
+		Issuer:    am,
 		Storage:   &FileStorage{Path: "./_testdata3_tmp"},
 		certCache: new(Cache),
 	}
+	am.config = testConfig
 
 	// let's not clutter up the output
 	origStdout := os.Stdout
@@ -192,46 +216,54 @@ func TestGetEmailFromUserInput(t *testing.T) {
 
 	email := "test3@foo.com"
 	stdin = bytes.NewBufferString(email + "\n")
-	err := testConfig.getEmail(true)
+	err := am.getEmail(true)
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}
-	if testConfig.Email != email {
-		t.Errorf("Did not get correct email from user input prompt; expected '%s' but got '%s'", email, testConfig.Email)
+	if am.Email != email {
+		t.Errorf("Did not get correct email from user input prompt; expected '%s' but got '%s'", email, am.Email)
 	}
-	if !testConfig.Agreed {
+	if !am.Agreed {
 		t.Error("Expect Config.Agreed to be true, but got false")
 	}
 }
 
 func TestGetEmailFromRecent(t *testing.T) {
+	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		CA:        "https://example.com/acme/directory",
+		Issuer:    am,
 		Storage:   &FileStorage{Path: "./_testdata4_tmp"},
 		certCache: new(Cache),
 	}
-	testStorageDir := testConfig.Storage.(*FileStorage).Path
-	defer os.RemoveAll(testStorageDir)
+	am.config = testConfig
 
-	Default.Email = ""
+	testStorageDir := testConfig.Storage.(*FileStorage).Path
+	defer func() {
+		err := os.RemoveAll(testStorageDir)
+		if err != nil {
+			t.Fatalf("Could not remove temporary storage directory (%s): %v", testStorageDir, err)
+		}
+	}()
+
+	DefaultACME.Email = ""
 
 	for i, eml := range []string{
 		"test4-1@foo.com",
 		"test4-2@foo.com",
 		"TEST4-3@foo.com", // test case insensitivity
 	} {
-		u, err := testConfig.newUser(eml)
+		u, err := am.newUser(eml)
 		if err != nil {
 			t.Fatalf("Error creating user %d: %v", i, err)
 		}
-		err = testConfig.saveUser(u)
+		err = am.saveUser(am.CA, u)
 		if err != nil {
 			t.Fatalf("Error saving user %d: %v", i, err)
 		}
 
 		// Change modified time so they're all different and the test becomes more deterministic
 		fs := testConfig.Storage.(*FileStorage)
-		userFolder := filepath.Join(fs.Path, StorageKeys.UserPrefix(testConfig.CA, eml))
+		userFolder := filepath.Join(fs.Path, am.storageKeyUserPrefix(am.CA, eml))
 		f, err := os.Stat(userFolder)
 		if err != nil {
 			t.Fatalf("Could not access user folder for '%s': %v", eml, err)
@@ -241,11 +273,11 @@ func TestGetEmailFromRecent(t *testing.T) {
 			t.Fatalf("Could not change user folder mod time for '%s': %v", eml, err)
 		}
 	}
-	err := testConfig.getEmail(true)
+	err := am.getEmail(true)
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}
-	if testConfig.Email != "test4-3@foo.com" {
-		t.Errorf("Did not get correct email from storage; expected '%s' but got '%s'", "test4-3@foo.com", testConfig.Email)
+	if am.Email != "test4-3@foo.com" {
+		t.Errorf("Did not get correct email from storage; expected '%s' but got '%s'", "test4-3@foo.com", am.Email)
 	}
 }

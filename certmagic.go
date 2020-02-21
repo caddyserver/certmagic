@@ -36,16 +36,17 @@ package certmagic
 
 import (
 	"context"
+	"crypto"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/go-acme/lego/v3/certcrypto"
 )
 
 // HTTPS serves mux for all domainNames using the HTTP
@@ -69,7 +70,7 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 		mux = http.DefaultServeMux
 	}
 
-	Default.Agreed = true
+	DefaultACME.Agreed = true
 	cfg := NewDefault()
 
 	err := cfg.ManageSync(domainNames)
@@ -120,7 +121,9 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      5 * time.Second,
 		IdleTimeout:       5 * time.Second,
-		Handler:           cfg.HTTPChallengeHandler(http.HandlerFunc(httpRedirectHandler)),
+	}
+	if am, ok := cfg.Issuer.(*ACMEManager); ok {
+		httpServer.Handler = am.HTTPChallengeHandler(http.HandlerFunc(httpRedirectHandler))
 	}
 	httpsServer := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
@@ -167,8 +170,8 @@ func httpRedirectHandler(w http.ResponseWriter, r *http.Request) {
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
 func TLS(domainNames []string) (*tls.Config, error) {
-	Default.Agreed = true
-	Default.DisableHTTPChallenge = true
+	DefaultACME.Agreed = true
+	DefaultACME.DisableHTTPChallenge = true
 	cfg := NewDefault()
 	return cfg.TLSConfig(), cfg.ManageSync(domainNames)
 }
@@ -184,8 +187,8 @@ func TLS(domainNames []string) (*tls.Config, error) {
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
 func Listen(domainNames []string) (net.Listener, error) {
-	Default.Agreed = true
-	Default.DisableHTTPChallenge = true
+	DefaultACME.Agreed = true
+	DefaultACME.DisableHTTPChallenge = true
 	cfg := NewDefault()
 	err := cfg.ManageSync(domainNames)
 	if err != nil {
@@ -216,7 +219,7 @@ func Listen(domainNames []string) (net.Listener, error) {
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
 func ManageSync(domainNames []string) error {
-	Default.Agreed = true
+	DefaultACME.Agreed = true
 	return NewDefault().ManageSync(domainNames)
 }
 
@@ -229,7 +232,7 @@ func ManageSync(domainNames []string) error {
 // which is only recommended for automated/non-interactive
 // environments.
 func ManageAsync(ctx context.Context, domainNames []string) error {
-	Default.Agreed = true
+	DefaultACME.Agreed = true
 	return NewDefault().ManageAsync(ctx, domainNames)
 }
 
@@ -275,7 +278,7 @@ type OnDemandConfig struct {
 
 func (o *OnDemandConfig) whitelistContains(name string) bool {
 	for _, n := range o.hostWhitelist {
-		if strings.ToLower(n) == strings.ToLower(name) {
+		if strings.EqualFold(n, name) {
 			return true
 		}
 	}
@@ -328,6 +331,93 @@ func hostOnly(hostport string) string {
 	return host
 }
 
+// PreChecker is an interface that can be optionally implemented by
+// Issuers. Pre-checks are performed before each call (or batch of
+// identical calls) to Issue(), giving the issuer the option to ensure
+// it has all the necessary information/state, or to skip the given
+// operation.
+type PreChecker interface {
+	PreCheck(names []string, interactive bool) (skip bool, err error)
+}
+
+// Issuer is a type that can issue certificates.
+type Issuer interface {
+	// Issue obtains a certificate for the given CSR. It
+	// must honor context cancellation if it is long-running.
+	// It can also use the context to find out if the current
+	// call is part of a retry, via AttemptsCtxKey.
+	Issue(ctx context.Context, request *x509.CertificateRequest) (*IssuedCertificate, error)
+
+	// IssuerKey must return a string that uniquely identifies
+	// this particular configuration of the Issuer such that
+	// any certificates obtained by this Issuer will be treated
+	// as identical if they have the same SANs.
+	//
+	// Certificates obtained from Issuers with the same IssuerKey
+	// will overwrite others with the same SANs. For example, an
+	// Issuer might be able to obtain certificates from different
+	// CAs, say A and B. It is likely that the CAs have different
+	// use cases and purposes (e.g. testing and production), so
+	// their respective certificates should not overwrite eaach
+	// other.
+	IssuerKey() string
+}
+
+// Revoker can revoke certificates.
+type Revoker interface {
+	Revoke(ctx context.Context, cert CertificateResource) error
+}
+
+// KeyGenerator can generate a private key.
+type KeyGenerator interface {
+	// GenerateKey generates a private key. The returned
+	// PrivateKey must be able to expose its associated
+	// public key.
+	GenerateKey() (crypto.PrivateKey, error)
+}
+
+// IssuedCertificate represents a certificate that was just issued.
+type IssuedCertificate struct {
+	// The PEM-encoding of DER-encoded ASN.1 data.
+	Certificate []byte
+
+	// Any extra information to serialize alongside the
+	// certificate in storage.
+	Metadata interface{}
+}
+
+// CertificateResource associates a certificate with its private
+// key and other useful information, for use in maintaining the
+// certificate.
+type CertificateResource struct {
+	// The list of names on the certificate;
+	// for convenience only.
+	SANs []string `json:"sans,omitempty"`
+
+	// The PEM-encoding of DER-encoded ASN.1 data
+	// for the cert or chain.
+	CertificatePEM []byte `json:"-"`
+
+	// The PEM-encoding of the certificate's private key.
+	PrivateKeyPEM []byte `json:"-"`
+
+	// Any extra information associated with the certificate,
+	// usually provided by the issuer implementation.
+	IssuerData interface{} `json:"issuer_data,omitempty"`
+}
+
+// NamesKey returns the list of SANs as a single string,
+// truncated to some ridiculously long size limit. It
+// can act as a key for the set of names on the resource.
+func (cr *CertificateResource) NamesKey() string {
+	sort.Strings(cr.SANs)
+	result := strings.Join(cr.SANs, ",")
+	if len(result) > 1024 {
+		result = result[1018:] + "_trunc"
+	}
+	return result
+}
+
 // Default contains the package defaults for the
 // various Config fields. This is used as a template
 // when creating your own Configs with New(), and it
@@ -344,10 +434,9 @@ func hostOnly(hostport string) string {
 // cache). This is the only Config which can access
 // the default certificate cache.
 var Default = Config{
-	CA:                  LetsEncryptProductionCA,
 	RenewDurationBefore: DefaultRenewDurationBefore,
-	KeyType:             certcrypto.EC256,
 	Storage:             defaultFileStorage,
+	KeySource:           DefaultKeyGenerator,
 }
 
 const (
@@ -358,12 +447,6 @@ const (
 	// TLSALPNChallengePort is the officially-designated port for
 	// the TLS-ALPN challenge according to the ACME spec.
 	TLSALPNChallengePort = 443
-)
-
-// Some well-known CA endpoints available to use.
-const (
-	LetsEncryptStagingCA    = "https://acme-staging-v02.api.letsencrypt.org/directory"
-	LetsEncryptProductionCA = "https://acme-v02.api.letsencrypt.org/directory"
 )
 
 // Port variables must remain their defaults unless you

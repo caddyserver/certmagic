@@ -29,53 +29,53 @@ import (
 // the challenge state is stored between initiation and solution.
 //
 // If a request is not an ACME HTTP challenge, h will be invoked.
-func (cfg *Config) HTTPChallengeHandler(h http.Handler) http.Handler {
+func (am *ACMEManager) HTTPChallengeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if cfg.HandleHTTPChallenge(w, r) {
+		if am.HandleHTTPChallenge(w, r) {
 			return
 		}
 		h.ServeHTTP(w, r)
 	})
 }
 
-// HandleHTTPChallenge uses cfg to solve challenge requests from an ACME
+// HandleHTTPChallenge uses am to solve challenge requests from an ACME
 // server that were initiated by this instance or any other instance in
-// this cluster (being, any instances using the same storage cfg does).
+// this cluster (being, any instances using the same storage am does).
 //
 // If the HTTP challenge is disabled, this function is a no-op.
 //
-// If cfg is nil or if cfg does not have a certificate cache backed by
+// If am is nil or if am does not have a certificate cache backed by
 // usable storage, solving the HTTP challenge will fail.
 //
 // It returns true if it handled the request; if so, the response has
 // already been written. If false is returned, this call was a no-op and
 // the request has not been handled.
-func (cfg *Config) HandleHTTPChallenge(w http.ResponseWriter, r *http.Request) bool {
-	if cfg == nil {
+func (am *ACMEManager) HandleHTTPChallenge(w http.ResponseWriter, r *http.Request) bool {
+	if am == nil {
 		return false
 	}
-	if cfg.DisableHTTPChallenge {
+	if am.DisableHTTPChallenge {
 		return false
 	}
 	if !LooksLikeHTTPChallenge(r) {
 		return false
 	}
-	return cfg.distributedHTTPChallengeSolver(w, r)
+	return am.distributedHTTPChallengeSolver(w, r)
 }
 
 // distributedHTTPChallengeSolver checks to see if this challenge
 // request was initiated by this or another instance which uses the
-// same storage as cfg does, and attempts to complete the challenge for
+// same storage as am does, and attempts to complete the challenge for
 // it. It returns true if the request was handled; false otherwise.
-func (cfg *Config) distributedHTTPChallengeSolver(w http.ResponseWriter, r *http.Request) bool {
-	if cfg == nil {
+func (am *ACMEManager) distributedHTTPChallengeSolver(w http.ResponseWriter, r *http.Request) bool {
+	if am == nil {
 		return false
 	}
 
 	host := hostOnly(r.Host)
 
-	tokenKey := distributedSolver{config: cfg}.challengeTokensKey(host)
-	chalInfoBytes, err := cfg.Storage.Load(tokenKey)
+	tokenKey := distributedSolver{acmeManager: am, caURL: am.CA}.challengeTokensKey(host)
+	chalInfoBytes, err := am.config.Storage.Load(tokenKey)
 	if err != nil {
 		if _, ok := err.(ErrNotExist); !ok {
 			log.Printf("[ERROR][%s] Opening distributed HTTP challenge token file: %v", host, err)

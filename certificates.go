@@ -109,9 +109,7 @@ func (cfg *Config) CacheManagedCertificate(domain string) (Certificate, error) {
 		return cert, err
 	}
 	cfg.certCache.cacheCertificate(cert)
-	if cfg.OnEvent != nil {
-		cfg.OnEvent("cached_managed_cert", cert.Names)
-	}
+	cfg.emit("cached_managed_cert", cert.Names)
 	return cert, nil
 }
 
@@ -122,7 +120,7 @@ func (cfg *Config) loadManagedCertificate(domain string) (Certificate, error) {
 	if err != nil {
 		return Certificate{}, err
 	}
-	cert, err := makeCertificateWithOCSP(cfg.Storage, certRes.Certificate, certRes.PrivateKey)
+	cert, err := makeCertificateWithOCSP(cfg.Storage, certRes.CertificatePEM, certRes.PrivateKeyPEM)
 	if err != nil {
 		return cert, err
 	}
@@ -142,9 +140,7 @@ func (cfg *Config) CacheUnmanagedCertificatePEMFile(certFile, keyFile string, ta
 	}
 	cert.CertMetadata.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
-	if cfg.OnEvent != nil {
-		cfg.OnEvent("cached_unmanaged_cert", cert.Names)
-	}
+	cfg.emit("cached_unmanaged_cert", cert.Names)
 	return nil
 }
 
@@ -162,9 +158,7 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(tlsCert tls.Certificate, tags []
 	if err != nil {
 		log.Printf("[WARNING] Stapling OCSP: %v", err)
 	}
-	if cfg.OnEvent != nil {
-		cfg.OnEvent("cached_unmanaged_cert", cert.Names)
-	}
+	cfg.emit("cached_unmanaged_cert", cert.Names)
 	cert.CertMetadata.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
 	return nil
@@ -181,9 +175,7 @@ func (cfg *Config) CacheUnmanagedCertificatePEMBytes(certBytes, keyBytes []byte,
 	}
 	cert.CertMetadata.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
-	if cfg.OnEvent != nil {
-		cfg.OnEvent("cached_unmanaged_cert", cert.Names)
-	}
+	cfg.emit("cached_unmanaged_cert", cert.Names)
 	return nil
 }
 
@@ -271,6 +263,11 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 			cert.Names = append(cert.Names, strings.ToLower(email))
 		}
 	}
+	for _, u := range leaf.URIs {
+		if u.String() != leaf.Subject.CommonName { // TODO: CommonName is deprecated
+			cert.Names = append(cert.Names, u.String())
+		}
+	}
 	if len(cert.Names) == 0 {
 		return fmt.Errorf("certificate has no names")
 	}
@@ -306,7 +303,7 @@ func (cfg *Config) managedCertInStorageExpiresSoon(cert Certificate) (bool, erro
 	if err != nil {
 		return false, err
 	}
-	tlsCert, err := tls.X509KeyPair(certRes.Certificate, certRes.PrivateKey)
+	tlsCert, err := tls.X509KeyPair(certRes.CertificatePEM, certRes.PrivateKeyPEM)
 	if err != nil {
 		return false, err
 	}

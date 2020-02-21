@@ -23,14 +23,15 @@ import (
 )
 
 func TestSaveCertResource(t *testing.T) {
+	am := &ACMEManager{CA: "https://example.com/acme/directory"}
 	testConfig := &Config{
-		CA:        "https://example.com/acme/directory",
+		Issuer:    am,
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
 		certCache: new(Cache),
 	}
+	am.config = testConfig
 
 	testStorageDir := testConfig.Storage.(*FileStorage).Path
-
 	defer func() {
 		err := os.RemoveAll(testStorageDir)
 		if err != nil {
@@ -42,12 +43,15 @@ func TestSaveCertResource(t *testing.T) {
 	certContents := "certificate"
 	keyContents := "private key"
 
-	cert := &certificate.Resource{
-		Domain:        domain,
-		CertURL:       "https://example.com/cert",
-		CertStableURL: "https://example.com/cert/stable",
-		PrivateKey:    []byte(keyContents),
-		Certificate:   []byte(certContents),
+	cert := CertificateResource{
+		SANs:           []string{domain},
+		PrivateKeyPEM:  []byte(keyContents),
+		CertificatePEM: []byte(certContents),
+		IssuerData: &certificate.Resource{
+			Domain:        domain,
+			CertURL:       "https://example.com/cert",
+			CertStableURL: "https://example.com/cert/stable",
+		},
 	}
 
 	err := testConfig.saveCertResource(cert)
@@ -55,11 +59,19 @@ func TestSaveCertResource(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
+	// the result of our test will be a map, since we have
+	// no choice but to decode it into an interface
+	cert.IssuerData = map[string]interface{}{
+		"domain":        domain,
+		"certUrl":       "https://example.com/cert",
+		"certStableUrl": "https://example.com/cert/stable",
+	}
+
 	siteData, err := testConfig.loadCertResource(domain)
 	if err != nil {
 		t.Fatalf("Expected no error reading site, got: %v", err)
 	}
-	if !reflect.DeepEqual(*cert, siteData) {
+	if !reflect.DeepEqual(cert, siteData) {
 		t.Errorf("Expected '%+v' to match '%+v'", cert, siteData)
 	}
 }

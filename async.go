@@ -1,0 +1,153 @@
+package certmagic
+
+import (
+	"context"
+	"errors"
+	"log"
+	"sync"
+	"time"
+)
+
+var jm = &jobManager{maxConcurrentJobs: 1000}
+
+type jobManager struct {
+	mu                sync.Mutex
+	maxConcurrentJobs int
+	activeWorkers     int
+	queue             []namedJob
+	names             map[string]struct{}
+}
+
+type namedJob struct {
+	name string
+	job  func() error
+}
+
+func (jm *jobManager) Submit(name string, job func() error) {
+	jm.mu.Lock()
+	defer jm.mu.Unlock()
+	if jm.names == nil {
+		jm.names = make(map[string]struct{})
+	}
+	if _, ok := jm.names[name]; ok {
+		return // prevent duplicate jobs
+	}
+	jm.names[name] = struct{}{}
+	jm.queue = append(jm.queue, namedJob{name, job})
+	if jm.activeWorkers < jm.maxConcurrentJobs {
+		jm.activeWorkers++
+		go jm.worker()
+	}
+}
+
+func (jm *jobManager) worker() {
+	for {
+		jm.mu.Lock()
+		if len(jm.queue) == 0 {
+			jm.activeWorkers--
+			jm.mu.Unlock()
+			return
+		}
+		next := jm.queue[0]
+		jm.queue = jm.queue[1:]
+		jm.mu.Unlock()
+		if err := next.job(); err != nil {
+			log.Printf("[ERROR] %v", err)
+		}
+		jm.mu.Lock()
+		delete(jm.names, next.name)
+		jm.mu.Unlock()
+	}
+}
+
+func doWithRetry(ctx context.Context, f func(context.Context) error) error {
+	var attempts int
+	ctx = context.WithValue(ctx, AttemptsCtxKey, &attempts)
+
+	// the initial intervalIndex is -1, signaling
+	// that we should not wait for the first attempt
+	start, intervalIndex := time.Now(), -1
+	var err error
+
+	for time.Since(start) < maxRetryDuration {
+		var wait time.Duration
+		if intervalIndex >= 0 {
+			wait = retryIntervals[intervalIndex]
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return context.Canceled
+		case <-timer.C:
+			err = f(ctx)
+			attempts++
+			if err == nil || errors.Is(err, context.Canceled) {
+				return err
+			}
+			var errNoRetry ErrNoRetry
+			if errors.As(err, &errNoRetry) {
+				return err
+			}
+			if intervalIndex < len(retryIntervals)-1 {
+				intervalIndex++
+			}
+			if time.Since(start) < maxRetryDuration {
+				log.Printf("[ERROR] attempt %d: %v - retrying in %s (%s/%s elapsed)...",
+					attempts, err, retryIntervals[intervalIndex], time.Since(start), maxRetryDuration)
+			} else {
+				log.Printf("[ERROR] final attempt: %v - giving up (%s/%s elapsed)...",
+					err, time.Since(start), maxRetryDuration)
+				return nil
+			}
+		}
+	}
+	return err
+}
+
+// ErrNoRetry is an error type which signals
+// to stop retries early.
+type ErrNoRetry struct{ Err error }
+
+// Unwrap makes it so that e wraps e.Err.
+func (e ErrNoRetry) Unwrap() error { return e.Err }
+func (e ErrNoRetry) Error() string { return e.Err.Error() }
+
+type retryStateCtxKey struct{}
+
+// AttemptsCtxKey is the context key for the value
+// that holds the attempt counter. The value counts
+// how many times the operation has been attempted.
+// A value of 0 means first attempt.
+var AttemptsCtxKey retryStateCtxKey
+
+// retryIntervals are based on the idea of exponential
+// backoff, but weighed a little more heavily to the
+// front. We figure that intermittent errors would be
+// resolved after the first retry, but any errors after
+// that would probably require at least a few minutes
+// to clear up: either for DNS to propagate, for the
+// administrator to fix their DNS or network properties,
+// or some other external factor needs to change. We
+// chose intervals that we think will be most useful
+// without introducing unnecessary delay. The last
+// interval in this list will be used until the time
+// of maxRetryDuration has elapsed.
+var retryIntervals = []time.Duration{
+	1 * time.Minute,
+	2 * time.Minute,
+	2 * time.Minute,
+	5 * time.Minute, // elapsed: 10 min
+	10 * time.Minute,
+	20 * time.Minute,
+	20 * time.Minute, // elapsed: 1 hr
+	30 * time.Minute,
+	30 * time.Minute, // elapsed: 2 hr
+	1 * time.Hour,
+	3 * time.Hour, // elapsed: 6 hr
+	6 * time.Hour, // for up to maxRetryDuration
+}
+
+// maxRetryDuration is the maximum duration to try
+// doing retries using the above intervals.
+const maxRetryDuration = 24 * time.Hour * 30
