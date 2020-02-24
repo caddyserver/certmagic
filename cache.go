@@ -155,10 +155,10 @@ type CacheOptions struct {
 	RenewCheckInterval time.Duration
 }
 
-// ConfigGetter is a function that returns a config that
-// should be used when managing the given certificate
-// or its assets.
-type ConfigGetter func(Certificate) (Config, error)
+// ConfigGetter is a function that returns a prepared,
+// valid config that should be used when managing the
+// given certificate or its assets.
+type ConfigGetter func(Certificate) (*Config, error)
 
 // cacheCertificate calls unsyncedCacheCertificate with a write lock.
 //
@@ -258,7 +258,7 @@ func (certCache *Cache) getConfig(cert Certificate) (*Config, error) {
 		return nil, fmt.Errorf("config returned for certificate %v is not nil and points to different cache; got %p, expected %p (this one)",
 			cert.Names, cfg.certCache, certCache)
 	}
-	return New(certCache, cfg), nil
+	return cfg, nil
 }
 
 // AllMatchingCertificates returns a list of all certificates that could

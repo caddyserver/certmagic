@@ -17,7 +17,7 @@ package certmagic
 import "testing"
 
 func TestNewCache(t *testing.T) {
-	noop := func(Certificate) (Config, error) { return Config{}, nil }
+	noop := func(Certificate) (*Config, error) { return new(Config), nil }
 	c := NewCache(CacheOptions{GetConfigForCert: noop})
 	defer c.Stop()
 

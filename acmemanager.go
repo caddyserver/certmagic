@@ -94,6 +94,9 @@ type ACMEManager struct {
 // NewACMEManager constructs a valid ACMEManager based on a template
 // configuration; any empty values will be filled in by defaults in
 // DefaultACME. The associated config is also required.
+//
+// Typically, you'll create the Config first, then call NewACMEManager(),
+// then assign the return value to the Issuer/Revoker fields of the Config.
 func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
 	if cfg == nil {
 		panic("cannot make valid ACMEManager without an associated CertMagic config")
@@ -187,6 +190,10 @@ func (am *ACMEManager) PreCheck(names []string, interactive bool) (skip bool, er
 // Issue implements the Issuer interface. It obtains a certificate for the given csr using
 // the ACME configuration am.
 func (am *ACMEManager) Issue(ctx context.Context, csr *x509.CertificateRequest) (*IssuedCertificate, error) {
+	if am.config == nil {
+		panic("missing config pointer (must use NewACMEManager)")
+	}
+
 	var isRetry bool
 	if attempts, ok := ctx.Value(AttemptsCtxKey).(*int); ok {
 		isRetry = *attempts > 0
@@ -199,8 +206,9 @@ func (am *ACMEManager) Issue(ctx context.Context, csr *x509.CertificateRequest) 
 
 	// important to note that usedTestCA is not necessarily the same as isRetry
 	// (usedTestCA can be true if the main CA and the test CA happen to be the same)
-	if isRetry && usedTestCA {
+	if isRetry && usedTestCA && am.CA != am.TestCA {
 		// succeeded with testing endpoint, so try again with production endpoint
+		// (only if the production endpoint is different from the testing endpoint)
 		// TODO: This logic is imperfect and could benefit from some refinement.
 		// The two CA endpoints likely have different states, which could cause one
 		// to succeed and the other to fail, even if it's not a validation error.
@@ -219,7 +227,7 @@ func (am *ACMEManager) Issue(ctx context.Context, csr *x509.CertificateRequest) 
 		// other endpoint. This is more likely to happen if a user is testing with
 		// the staging CA as the main CA, then changes their configuration once they
 		// think they are ready for the production endpoint.
-		cert, usedTestCA, err = am.doIssue(ctx, csr, false)
+		cert, _, err = am.doIssue(ctx, csr, false)
 		if err != nil {
 			// succeeded with test CA but failed just now with the production CA;
 			// either we are observing differing internal states of each CA that will

@@ -120,8 +120,8 @@ func NewDefault() *Config {
 			// correct config with which to manage the cert,
 			// but if the user does not provide one, we can only
 			// assume that we are to use the default config
-			GetConfigForCert: func(Certificate) (Config, error) {
-				return Default, nil
+			GetConfigForCert: func(Certificate) (*Config, error) {
+				return NewDefault(), nil
 			},
 		})
 	}

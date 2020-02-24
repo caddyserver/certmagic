@@ -109,7 +109,6 @@ func (s *httpSolver) CleanUp(domain, token, keyAuth string) error {
 // It must have an associated config and address on which to
 // serve the challenge.
 type tlsALPNSolver struct {
-	// closed  int32 // accessed atomically
 	config  *Config
 	address string
 }

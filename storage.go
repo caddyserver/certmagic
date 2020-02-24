@@ -32,6 +32,9 @@ import (
 // in order to share certificates and other TLS resources
 // with the cluster.
 //
+// The Load, Delete, List, and Stat methods should return
+// ErrNotExist if the key does not exist.
+//
 // Implementations of Storage must be safe for concurrent use.
 type Storage interface {
 	// Locker provides atomic synchronization
@@ -179,10 +182,8 @@ func (keys KeyBuilder) OCSPStaple(cert *Certificate, pemBundle []byte) string {
 }
 
 // Safe standardizes and sanitizes str for use as
-// a storage key. This method is idempotent. It
-// accepts multiple components of a key, in other
-// words, str may have a separator (forward slash)
-// such as "a/b/c" as this does not replace slashes.
+// a single component of a storage key. This method
+// is idempotent.
 func (keys KeyBuilder) Safe(str string) string {
 	str = strings.ToLower(str)
 	str = strings.TrimSpace(str)
