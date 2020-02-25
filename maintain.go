@@ -44,16 +44,12 @@ func (certCache *Cache) maintainAssets() {
 	for {
 		select {
 		case <-renewalTicker.C:
-			log.Printf("[INFO][cache:%p] Scanning for expiring certificates", certCache)
 			err := certCache.RenewManagedCertificates(ctx)
 			if err != nil {
 				log.Printf("[ERROR][cache:%p] Renewing managed certificates: %v", certCache, err)
 			}
-			log.Printf("[INFO][cache:%p] Done scanning certificates", certCache)
 		case <-ocspTicker.C:
-			log.Printf("[INFO][cache:%p] Scanning for stale OCSP staples", certCache)
 			certCache.updateOCSPStaples(ctx)
-			log.Printf("[INFO][cache:%p] Done checking OCSP staples", certCache)
 		case <-certCache.stopChan:
 			renewalTicker.Stop()
 			ocspTicker.Stop()
@@ -107,10 +103,11 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 			log.Printf("[ERROR] No configuration associated with certificate for names %v; unable to manage", cert.Names)
 			continue
 		}
-		configs[cert.Names[0]] = cfg
 
 		// if time is up or expires soon, we need to try to renew it
 		if cert.NeedsRenewal(cfg) {
+			configs[cert.Names[0]] = cfg
+
 			// see if the certificate in storage has already been renewed, possibly by another
 			// instance that didn't coordinate with this one; if so, just load it (this
 			// might happen if another instance already renewed it - kinda sloppy but checking disk
@@ -140,7 +137,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 	// Reload certificates that merely need to be updated in memory
 	for _, oldCert := range reloadQueue {
 		timeLeft := oldCert.NotAfter.Sub(time.Now().UTC())
-		log.Printf("[INFO] %v Maintenance routine: certificate expires in %v, but is already renewed in storage; reloading stored certificate",
+		log.Printf("[INFO] %v Maintenance routine: certificate expires in %s, but is already renewed in storage; reloading stored certificate",
 			oldCert.Names, timeLeft)
 
 		cfg := configs[oldCert.Names[0]]
@@ -462,11 +459,17 @@ func deleteExpiredCerts(storage Storage, gracePeriod time.Duration) error {
 }
 
 const (
-	// DefaultRenewCheckInterval is how often to check certificates for renewal.
-	DefaultRenewCheckInterval = 12 * time.Hour
+	// DefaultRenewCheckInterval is how often to check certificates for expiration.
+	// Scans are very lightweight, so this can be semi-frequent. This default should
+	// be smaller than <Minimum Cert Lifetime>*DefaultRenewalWindowRatio/3, which
+	// gives certificates plenty of chance to be renewed on time.
+	DefaultRenewCheckInterval = 10 * time.Minute
 
-	// DefaultRenewDurationBefore is how long before expiration to renew certificates.
-	DefaultRenewDurationBefore = (24 * time.Hour) * 30
+	// DefaultRenewalWindowRatio is how much of a certificate's lifetime becomes the
+	// renewal window. The renewal window is the span of time at the end of the
+	// certificate's validity period in which it should be renewed. A default value
+	// of ~1/3 is pretty safe and recommended for most certificates.
+	DefaultRenewalWindowRatio = 1.0 / 3.0
 
 	// DefaultOCSPCheckInterval is how often to check if OCSP stapling needs updating.
 	DefaultOCSPCheckInterval = 1 * time.Hour

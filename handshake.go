@@ -315,8 +315,8 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 func (cfg *Config) handshakeMaintenance(hello *tls.ClientHelloInfo, cert Certificate) (Certificate, error) {
 	// Check cert expiration
 	timeLeft := cert.NotAfter.Sub(time.Now().UTC())
-	if timeLeft < cfg.RenewDurationBefore {
-		log.Printf("[INFO] Certificate for %v expires in %v; attempting renewal", cert.Names, timeLeft)
+	if currentlyInRenewalWindow(cert.NotBefore, cert.NotAfter, cfg.RenewalWindowRatio) {
+		log.Printf("[INFO] Certificate for %v expires in %s; attempting renewal", cert.Names, timeLeft)
 		return cfg.renewDynamicCertificate(hello, cert)
 	}
 

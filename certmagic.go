@@ -434,9 +434,9 @@ func (cr *CertificateResource) NamesKey() string {
 // cache). This is the only Config which can access
 // the default certificate cache.
 var Default = Config{
-	RenewDurationBefore: DefaultRenewDurationBefore,
-	Storage:             defaultFileStorage,
-	KeySource:           DefaultKeyGenerator,
+	RenewalWindowRatio: DefaultRenewalWindowRatio,
+	Storage:            defaultFileStorage,
+	KeySource:          DefaultKeyGenerator,
 }
 
 const (

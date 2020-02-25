@@ -38,8 +38,13 @@ import (
 // An empty Config is not valid: use New() to obtain
 // a valid Config.
 type Config struct {
-	// How long before expiration to renew certificates
-	RenewDurationBefore time.Duration
+	// How much of a certificate's lifetime becomes the
+	// renewal window, which is the span of time at the
+	// end of the certificate's validity period in which
+	// it should be renewed; for most certificates, the
+	// global default is good, but for exremely short-
+	// lived certs, you may want to raise this to ~0.5.
+	RenewalWindowRatio float64
 
 	// An optional event callback clients can set
 	// to subscribe to certain things happening
@@ -167,8 +172,8 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	if cfg.OnDemand == nil {
 		cfg.OnDemand = Default.OnDemand
 	}
-	if cfg.RenewDurationBefore == 0 {
-		cfg.RenewDurationBefore = Default.RenewDurationBefore
+	if cfg.RenewalWindowRatio == 0 {
+		cfg.RenewalWindowRatio = Default.RenewalWindowRatio
 	}
 	if cfg.OnEvent == nil {
 		cfg.OnEvent = Default.OnEvent

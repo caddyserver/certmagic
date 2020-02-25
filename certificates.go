@@ -40,8 +40,8 @@ type Certificate struct {
 	// The first is the CommonName (if any), the rest are SAN.
 	Names []string
 
-	// NotAfter is when the certificate expires.
-	NotAfter time.Time
+	// The certificate's validity period.
+	NotBefore, NotAfter time.Time
 
 	// OCSP contains the certificate's parsed OCSP response.
 	ocsp *ocsp.Response
@@ -62,14 +62,24 @@ type Certificate struct {
 // NeedsRenewal returns true if the certificate is
 // expiring soon (according to cfg) or has expired.
 func (cert Certificate) NeedsRenewal(cfg *Config) bool {
-	if cert.NotAfter.IsZero() {
+	return currentlyInRenewalWindow(cert.NotBefore, cert.NotAfter, cfg.RenewalWindowRatio)
+}
+
+// currentlyInRenewalWindow returns true if the current time is
+// within the renewal window, according to the given start/end
+// dates and the ratio of the renewal window. If true is returned,
+// the certificate being considered is due for renewal.
+func currentlyInRenewalWindow(notBefore, notAfter time.Time, renewalWindowRatio float64) bool {
+	if notAfter.IsZero() {
 		return false
 	}
-	renewDurationBefore := DefaultRenewDurationBefore
-	if cfg.RenewDurationBefore > 0 {
-		renewDurationBefore = cfg.RenewDurationBefore
+	lifetime := notAfter.Sub(notBefore)
+	if renewalWindowRatio == 0 {
+		renewalWindowRatio = DefaultRenewalWindowRatio
 	}
-	return time.Until(cert.NotAfter) < renewDurationBefore
+	renewalWindow := time.Duration(float64(lifetime) * renewalWindowRatio)
+	renewalWindowStart := notAfter.Add(-renewalWindow)
+	return time.Now().After(renewalWindowStart)
 }
 
 // CertMetadata is data extracted from a parsed x509
@@ -275,6 +285,7 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 	// save the hash of this certificate (chain) and
 	// expiration date, for necessity and efficiency
 	cert.hash = hashCertificateChain(cert.Certificate.Certificate)
+	cert.NotBefore = leaf.NotBefore
 	cert.NotAfter = leaf.NotAfter
 
 	// these other fields are strictly optional to
@@ -311,8 +322,7 @@ func (cfg *Config) managedCertInStorageExpiresSoon(cert Certificate) (bool, erro
 	if err != nil {
 		return false, err
 	}
-	timeLeft := leaf.NotAfter.Sub(time.Now().UTC())
-	return timeLeft < cfg.RenewDurationBefore, nil
+	return currentlyInRenewalWindow(leaf.NotBefore, leaf.NotAfter, cfg.RenewalWindowRatio), nil
 }
 
 // reloadManagedCertificate reloads the certificate corresponding to the name(s)
