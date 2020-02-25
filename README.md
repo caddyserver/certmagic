@@ -1,10 +1,10 @@
 <p align="center">
-	<a href="https://godoc.org/github.com/mholt/certmagic"><img src="https://user-images.githubusercontent.com/1128849/49704830-49d37200-fbd5-11e8-8385-767e0cd033c3.png" alt="CertMagic" width="550"></a>
+	<a href="https://pkg.go.dev/github.com/mholt/certmagic?tab=doc"><img src="https://user-images.githubusercontent.com/1128849/49704830-49d37200-fbd5-11e8-8385-767e0cd033c3.png" alt="CertMagic" width="550"></a>
 </p>
 <h3 align="center">Easy and Powerful TLS Automation</h3>
 <p align="center">The same library used by the <a href="https://caddyserver.com">Caddy Web Server</a></p>
 <p align="center">
-	<a href="https://godoc.org/github.com/mholt/certmagic"><img src="https://img.shields.io/badge/godoc-reference-blue.svg"></a>
+	<a href="https://pkg.go.dev/github.com/mholt/certmagic?tab=doc"><img src="https://img.shields.io/badge/godoc-reference-blue.svg"></a>
 	<a href="https://dev.azure.com/mholt-dev/CertMagic/_build"><img src="https://img.shields.io/azure-devops/build/mholt-dev/3511431f-630c-43ac-833f-be949b4f4ee7/3.svg?label=cross-platform%20tests"></a>
 	<a href="https://sourcegraph.com/github.com/mholt/certmagic?badge"><img src="https://sourcegraph.com/github.com/mholt/certmagic/-/badge.svg"></a>
 </p>
@@ -298,7 +298,7 @@ To do so, simply ensure that each instance is using the same Storage. That is th
 
 The default Storage is implemented using the file system, so mounting the same shared folder is sufficient (see [Storage](#storage) for more on that)! If you need an alternate Storage implementation, feel free to use one, provided that all the instances use the _same_ one. :)
 
-See [Storage](#storage) and the associated [godoc](https://godoc.org/github.com/mholt/certmagic#Storage) for more information!
+See [Storage](#storage) and the associated [pkg.go.dev](https://pkg.go.dev/github.com/mholt/certmagic?tab=doc#Storage) for more information!
 
 
 ## The ACME Challenges
@@ -390,7 +390,7 @@ if err != nil {
 certmagic.DefaultACME.DNSProvider = provider
 ```
 
-Now the DNS challenge will be used by default, and I can obtain certificates for wildcard domains. See the [godoc documentation for the provider you're using](https://godoc.org/github.com/go-acme/lego/providers/dns#pkg-subdirectories) to learn how to configure it. Most can be configured by env variables or by passing in a config struct. If you pass a config struct instead of using env variables, you will probably need to set some other defaults (that's just how lego works, currently):
+Now the DNS challenge will be used by default, and I can obtain certificates for wildcard domains. See the [pkg.go.dev documentation for the provider you're using](https://pkg.go.dev/github.com/go-acme/lego/providers/dns?tab=subdirectories) to learn how to configure it. Most can be configured by env variables or by passing in a config struct. If you pass a config struct instead of using env variables, you will probably need to set some other defaults (that's just how lego works, currently):
 
 ```go
 PropagationTimeout: dns01.DefaultPollingInterval,
@@ -432,7 +432,7 @@ certmagic.Default.OnDemand = &certmagic.OnDemandConfig{
 }
 ```
 
-The [godoc](https://godoc.org/github.com/mholt/certmagic#OnDemandConfig) describes how to use this in full detail, so please check it out!
+The [pkg.go.dev](https://pkg.go.dev/github.com/mholt/certmagic?tab=doc#OnDemandConfig) describes how to use this in full detail, so please check it out!
 
 
 ## Storage
@@ -443,7 +443,7 @@ By default, CertMagic stores assets on the local file system in `$HOME/.local/sh
 
 The notion of a "cluster" or "fleet" of instances that may be serving the same site and sharing certificates, etc, is tied to storage. Simply, any instances that use the same storage facilities are considered part of the cluster. So if you deploy 100 instances of CertMagic behind a load balancer, they are all part of the same cluster if they share the same storage configuration. Sharing storage could be mounting a shared folder, or implementing some other distributed storage system such as a database server or KV store.
 
-The easiest way to change the storage being used is to set `certmagic.DefaultStorage` to a value that satisfies the [Storage interface](https://godoc.org/github.com/mholt/certmagic#Storage). Keep in mind that a valid `Storage` must be able to implement some operations atomically in order to provide locking and synchronization.
+The easiest way to change the storage being used is to set `certmagic.DefaultStorage` to a value that satisfies the [Storage interface](https://pkg.go.dev/github.com/mholt/certmagic?tab=doc#Storage). Keep in mind that a valid `Storage` must be able to implement some operations atomically in order to provide locking and synchronization.
 
 If you write a Storage implementation, please add it to the [project wiki](https://github.com/mholt/certmagic/wiki/Storage-Implementations) so people can find it!
 
@@ -463,9 +463,9 @@ Again, if you're needing to do this, you've probably over-complicated your appli
 
 Yes, just call the relevant method on the `Config` to add your own certificate to the cache:
 
-- [`CacheUnmanagedCertificatePEMBytes()`](https://godoc.org/github.com/mholt/certmagic#Config.CacheUnmanagedCertificatePEMBytes)
-- [`CacheUnmanagedCertificatePEMFile()`](https://godoc.org/github.com/mholt/certmagic#Config.CacheUnmanagedCertificatePEMFile)
-- [`CacheUnmanagedTLSCertificate()`](https://godoc.org/github.com/mholt/certmagic#Config.CacheUnmanagedTLSCertificate)
+- [`CacheUnmanagedCertificatePEMBytes()`](https://pkg.go.dev/github.com/mholt/certmagic?tab=doc#Config.CacheUnmanagedCertificatePEMBytes)
+- [`CacheUnmanagedCertificatePEMFile()`](https://pkg.go.dev/github.com/mholt/certmagic?tab=doc#Config.CacheUnmanagedCertificatePEMFile)
+- [`CacheUnmanagedTLSCertificate()`](https://pkg.go.dev/github.com/mholt/certmagic?tab=doc#Config.CacheUnmanagedTLSCertificate)
 
 Keep in mind that unmanaged certificates are (obviously) not renewed for you, so you'll have to replace them when you do. However, OCSP stapling is performed even for unmanaged certificates that qualify.
 
