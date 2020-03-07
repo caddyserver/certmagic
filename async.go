@@ -23,6 +23,9 @@ type namedJob struct {
 	job  func() error
 }
 
+// Submit enqueues the given job with the given name. If a job
+// with name is already enqueued or running, this is a no-op.
+// The job manager will then run this job as soon as it is able.
 func (jm *jobManager) Submit(name string, job func() error) {
 	jm.mu.Lock()
 	defer jm.mu.Unlock()

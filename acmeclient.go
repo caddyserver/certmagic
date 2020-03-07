@@ -291,7 +291,7 @@ func (c *acmeClient) nextChallenge(available []challenge.Type) (challenge.Type, 
 
 func (c *acmeClient) throttle(ctx context.Context, names []string) error {
 	// throttling is scoped to CA + account email
-	rateLimiterKey := c.mgr.CA + "," + c.mgr.Email
+	rateLimiterKey := c.caURL + "," + c.mgr.Email
 	rateLimitersMu.Lock()
 	rl, ok := rateLimiters[rateLimiterKey]
 	if !ok {

@@ -311,7 +311,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		renewName := oldCert.Names[0]
 		cfg := configs[renewName]
 
-		// TODO: consider using a new key in this situation
+		// TODO: consider using a new key in this situation, but we don't know if key storage has been compromised...
 		err := cfg.RenewCert(ctx, renewName, false)
 		if err != nil {
 			// probably better to not serve a revoked certificate at all
@@ -386,14 +386,14 @@ func deleteOldOCSPStaples(storage Storage) error {
 }
 
 func deleteExpiredCerts(storage Storage, gracePeriod time.Duration) error {
-	acmeKeys, err := storage.List(prefixACME, false)
+	issuerKeys, err := storage.List(prefixCerts, false)
 	if err != nil {
 		// maybe just hasn't been created yet; no big deal
 		return nil
 	}
 
-	for _, acmeKey := range acmeKeys {
-		siteKeys, err := storage.List(path.Join(acmeKey, "sites"), false)
+	for _, issuerKey := range issuerKeys {
+		siteKeys, err := storage.List(issuerKey, false)
 		if err != nil {
 			continue
 		}

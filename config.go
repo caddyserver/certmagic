@@ -203,7 +203,8 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 		}
 		// issuer and revoker go together; if user
 		// specifies their own issuer, we don't want
-		// to override their revoker
+		// to override their revoker, hence we only
+		// do this if Issuer was also nil
 		if cfg.Revoker == nil {
 			cfg.Revoker = Default.Revoker
 			if cfg.Revoker == nil {
