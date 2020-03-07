@@ -224,7 +224,7 @@ func createLockfile(filename string) error {
 // removeLockfile atomically removes filename,
 // which must be a lockfile created by createLockfile.
 // See discussion in PR #7 for more background:
-// https://github.com/mholt/certmagic/pull/7
+// https://github.com/caddyserver/certmagic/pull/7
 func removeLockfile(filename string) error {
 	unlockFilename := filename + ".unlock"
 	if err := atomicallyCreateFile(unlockFilename, false); err != nil {
