@@ -645,12 +645,9 @@ func (cfg *Config) getPrecheckedIssuer(names []string, interactive bool) (Issuer
 		return nil, fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
 	}
 	if prechecker, ok := cfg.Issuer.(PreChecker); ok {
-		skip, err := prechecker.PreCheck(names, interactive)
+		err := prechecker.PreCheck(names, interactive)
 		if err != nil {
 			return nil, err
-		}
-		if skip {
-			return nil, nil
 		}
 	}
 	return cfg.Issuer, nil

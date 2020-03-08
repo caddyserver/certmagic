@@ -340,34 +340,36 @@ func (cfg *Config) reloadManagedCertificate(oldCert Certificate) error {
 	return nil
 }
 
-// HostQualifies returns true if the hostname alone
-// appears eligible for automagic TLS. For example:
-// localhost, empty hostname, and IP addresses are
-// not eligible because we cannot obtain certificates
-// for those names. Wildcard names are allowed, as long
-// as they conform to CABF requirements (only one wildcard
-// label, and it must be the left-most label). Names with
-// certain special characters that are commonly accidental
-// are also rejected.
-func HostQualifies(hostname string) bool {
-	return hostname != "localhost" && // localhost is ineligible
+// HostQualifiesForPublicCert returns true if the subject
+// name appears eligible for automagic TLS with a public
+// CA such as Let's Encrypt. For example: localhost, empty
+// string, and IP addresses are not eligible because we
+// cannot obtain certificates for those names with a public
+// CA. Wildcard names are allowed, as long as they conform
+// to CABF requirements (only one wildcard label, and it
+// must be the left-most label). Names with certain special
+// characters that are commonly accidental are also rejected.
+func HostQualifiesForPublicCert(host string) bool {
+	return host != "localhost" && // localhost is ineligible
+
+		!strings.HasSuffix(host, ".localhost") && // localhost TLD is ineligible
 
 		// hostname must not be empty
-		strings.TrimSpace(hostname) != "" &&
+		strings.TrimSpace(host) != "" &&
 
 		// only one wildcard label allowed, and it must be left-most
-		(!strings.Contains(hostname, "*") ||
-			(strings.Count(hostname, "*") == 1 &&
-				strings.HasPrefix(hostname, "*."))) &&
+		(!strings.Contains(host, "*") ||
+			(strings.Count(host, "*") == 1 &&
+				strings.HasPrefix(host, "*."))) &&
 
 		// must not start or end with a dot
-		!strings.HasPrefix(hostname, ".") &&
-		!strings.HasSuffix(hostname, ".") &&
+		!strings.HasPrefix(host, ".") &&
+		!strings.HasSuffix(host, ".") &&
 
 		// must not contain other common special characters
-		!strings.ContainsAny(hostname, "()[]{}<>\\/!@#$%^&|:;+='\"") &&
+		!strings.ContainsAny(host, "()[]{}<>\\/!@#$%^&|:;+='\"") &&
 
-		// cannot be an IP address, see
+		// cannot be an IP address (as of yet), see
 		// https://community.letsencrypt.org/t/certificate-for-static-ip/84/2?u=mholt
-		net.ParseIP(hostname) == nil
+		net.ParseIP(host) == nil
 }

@@ -334,10 +334,9 @@ func hostOnly(hostport string) string {
 // PreChecker is an interface that can be optionally implemented by
 // Issuers. Pre-checks are performed before each call (or batch of
 // identical calls) to Issue(), giving the issuer the option to ensure
-// it has all the necessary information/state, or to skip the given
-// operation.
+// it has all the necessary information/state.
 type PreChecker interface {
-	PreCheck(names []string, interactive bool) (skip bool, err error)
+	PreCheck(names []string, interactive bool) error
 }
 
 // Issuer is a type that can issue certificates.

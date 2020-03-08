@@ -174,17 +174,18 @@ func (am *ACMEManager) issuerKey(ca string) string {
 
 // PreCheck performs a few simple checks before obtaining or
 // renewing a certificate with ACME, and returns whether this
-// batch should be skipped as well as any error. It ensures
-// that the names qualify for a certificate, and that an email
-// address is available.
-func (am *ACMEManager) PreCheck(names []string, interactive bool) (skip bool, err error) {
-	for _, name := range names {
-		// TODO: move these checks ("skips") into our actual obtain logic, deeper?
-		if !HostQualifies(name) {
-			return true, nil
+// batch is eligible for certificates if using Let's Encrypt.
+// It also ensures that an email address is available.
+func (am *ACMEManager) PreCheck(names []string, interactive bool) error {
+	letsEncrypt := strings.Contains(am.CA, "api.letsencrypt.org")
+	if letsEncrypt {
+		for _, name := range names {
+			if !HostQualifiesForPublicCert(name) {
+				return fmt.Errorf("subject does not qualify for a Let's Encrypt certificate: %s", name)
+			}
 		}
 	}
-	return false, am.getEmail(interactive)
+	return am.getEmail(interactive)
 }
 
 // Issue implements the Issuer interface. It obtains a certificate for the given csr using
