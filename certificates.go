@@ -340,7 +340,7 @@ func (cfg *Config) reloadManagedCertificate(oldCert Certificate) error {
 	return nil
 }
 
-// HostQualifiesForPublicCert returns true if the subject
+// SubjectQualifiesForPublicCert returns true if the subject
 // name appears eligible for automagic TLS with a public
 // CA such as Let's Encrypt. For example: localhost, empty
 // string, and IP addresses are not eligible because we
@@ -349,10 +349,11 @@ func (cfg *Config) reloadManagedCertificate(oldCert Certificate) error {
 // to CABF requirements (only one wildcard label, and it
 // must be the left-most label). Names with certain special
 // characters that are commonly accidental are also rejected.
-func HostQualifiesForPublicCert(host string) bool {
+func SubjectQualifiesForPublicCert(host string) bool {
 	return host != "localhost" && // localhost is ineligible
 
-		!strings.HasSuffix(host, ".localhost") && // localhost TLD is ineligible
+		// localhost TLD is ineligible
+		!strings.HasSuffix(host, ".localhost") &&
 
 		// hostname must not be empty
 		strings.TrimSpace(host) != "" &&

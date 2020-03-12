@@ -79,7 +79,7 @@ func TestCacheCertificate(t *testing.T) {
 	}
 }
 
-func TestHostQualifiesForPublicCert(t *testing.T) {
+func TestSubjectQualifiesForPublicCert(t *testing.T) {
 	for i, test := range []struct {
 		host   string
 		expect bool
@@ -120,9 +120,9 @@ func TestHostQualifiesForPublicCert(t *testing.T) {
 		{`"hostname"`, false},
 		{"hostname:", false},
 	} {
-		actual := HostQualifiesForPublicCert(test.host)
+		actual := SubjectQualifiesForPublicCert(test.host)
 		if actual != test.expect {
-			t.Errorf("Test %d: Expected HostQualifies(%s)=%v, but got %v",
+			t.Errorf("Test %d: Expected SubjectQualifiesForPublicCert(%s)=%v, but got %v",
 				i, test.host, test.expect, actual)
 		}
 	}

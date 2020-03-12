@@ -180,7 +180,7 @@ func (am *ACMEManager) PreCheck(names []string, interactive bool) error {
 	letsEncrypt := strings.Contains(am.CA, "api.letsencrypt.org")
 	if letsEncrypt {
 		for _, name := range names {
-			if !HostQualifiesForPublicCert(name) {
+			if !SubjectQualifiesForPublicCert(name) {
 				return fmt.Errorf("subject does not qualify for a Let's Encrypt certificate: %s", name)
 			}
 		}

@@ -351,6 +351,7 @@ func CleanStorage(storage Storage, opts CleanStorageOptions) {
 			log.Printf("[ERROR] Deleting expired certificates: %v", err)
 		}
 	}
+	// TODO: delete stale locks?
 }
 
 func deleteOldOCSPStaples(storage Storage) error {
