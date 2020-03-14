@@ -79,6 +79,54 @@ func TestCacheCertificate(t *testing.T) {
 	}
 }
 
+func TestSubjectQualifiesForCert(t *testing.T) {
+	for i, test := range []struct {
+		host   string
+		expect bool
+	}{
+		{"hostname", true},
+		{"example.com", true},
+		{"sub.example.com", true},
+		{"Sub.Example.COM", true},
+		{"127.0.0.1", true},
+		{"127.0.1.5", true},
+		{"69.123.43.94", true},
+		{"::1", true},
+		{"::", true},
+		{"0.0.0.0", true},
+		{"", false},
+		{" ", false},
+		{"*.example.com", true},
+		{"*.*.example.com", true},
+		{"sub.*.example.com", false},
+		{"*sub.example.com", false},
+		{".com", false},
+		{"example.com.", false},
+		{"localhost", true},
+		{"foo.localhost", true},
+		{"local", true},
+		{"192.168.1.3", true},
+		{"10.0.2.1", true},
+		{"169.112.53.4", true},
+		{"$hostname", false},
+		{"%HOSTNAME%", false},
+		{"{hostname}", false},
+		{"hostname!", false},
+		{"<hostname>", false},
+		{"# hostname", false},
+		{"// hostname", false},
+		{"user@hostname", false},
+		{"hostname;", false},
+		{`"hostname"`, false},
+	} {
+		actual := SubjectQualifiesForCert(test.host)
+		if actual != test.expect {
+			t.Errorf("Test %d: Expected SubjectQualifiesForCert(%s)=%v, but got %v",
+				i, test.host, test.expect, actual)
+		}
+	}
+}
+
 func TestSubjectQualifiesForPublicCert(t *testing.T) {
 	for i, test := range []struct {
 		host   string
@@ -118,7 +166,6 @@ func TestSubjectQualifiesForPublicCert(t *testing.T) {
 		{"user@hostname", false},
 		{"hostname;", false},
 		{`"hostname"`, false},
-		{"hostname:", false},
 	} {
 		actual := SubjectQualifiesForPublicCert(test.host)
 		if actual != test.expect {

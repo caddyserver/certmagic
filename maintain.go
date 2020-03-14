@@ -396,13 +396,14 @@ func deleteExpiredCerts(storage Storage, gracePeriod time.Duration) error {
 	for _, issuerKey := range issuerKeys {
 		siteKeys, err := storage.List(issuerKey, false)
 		if err != nil {
+			log.Printf("[ERROR] Listing contents of %s: %v", issuerKey, err)
 			continue
 		}
 
 		for _, siteKey := range siteKeys {
 			siteAssets, err := storage.List(siteKey, false)
 			if err != nil {
-				log.Printf("[INFO] Listing contents of %s: %v", siteKey, err)
+				log.Printf("[ERROR] Listing contents of %s: %v", siteKey, err)
 				continue
 			}
 

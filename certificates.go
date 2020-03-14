@@ -340,37 +340,50 @@ func (cfg *Config) reloadManagedCertificate(oldCert Certificate) error {
 	return nil
 }
 
-// SubjectQualifiesForPublicCert returns true if the subject
-// name appears eligible for automagic TLS with a public
-// CA such as Let's Encrypt. For example: localhost, empty
-// string, and IP addresses are not eligible because we
-// cannot obtain certificates for those names with a public
-// CA. Wildcard names are allowed, as long as they conform
-// to CABF requirements (only one wildcard label, and it
-// must be the left-most label). Names with certain special
-// characters that are commonly accidental are also rejected.
-func SubjectQualifiesForPublicCert(host string) bool {
-	return host != "localhost" && // localhost is ineligible
-
-		// localhost TLD is ineligible
-		!strings.HasSuffix(host, ".localhost") &&
-
-		// hostname must not be empty
-		strings.TrimSpace(host) != "" &&
-
-		// only one wildcard label allowed, and it must be left-most
-		(!strings.Contains(host, "*") ||
-			(strings.Count(host, "*") == 1 &&
-				strings.HasPrefix(host, "*."))) &&
+// SubjectQualifiesForCert returns true if subj is a name which,
+// as a quick sanity check, looks like it could be the subject
+// of a certificate. Requirements are:
+// - must not be empty
+// - must not start or end with a dot (RFC 1034)
+// - must not contain common accidental special characters
+func SubjectQualifiesForCert(subj string) bool {
+	// must not be empty
+	return strings.TrimSpace(subj) != "" &&
 
 		// must not start or end with a dot
-		!strings.HasPrefix(host, ".") &&
-		!strings.HasSuffix(host, ".") &&
+		!strings.HasPrefix(subj, ".") &&
+		!strings.HasSuffix(subj, ".") &&
+
+		// if it has a wildcard, must be a left-most label
+		(!strings.Contains(subj, "*") || strings.HasPrefix(subj, "*.")) &&
 
 		// must not contain other common special characters
-		!strings.ContainsAny(host, "()[]{}<>\\/!@#$%^&|:;+='\"") &&
+		!strings.ContainsAny(subj, "()[]{}<> \t\n\"\\!@#$%^&|;'+=")
+}
+
+// SubjectQualifiesForPublicCert returns true if the subject
+// name appears eligible for automagic TLS with a public
+// CA such as Let's Encrypt. For example: localhost and IP
+// addresses are not eligible because we cannot obtain certs
+// for those names with a public CA. Wildcard names are
+// allowed, as long as they conform to CABF requirements (only
+// one wildcard label, and it must be the left-most label).
+func SubjectQualifiesForPublicCert(subj string) bool {
+	// must at least qualify for certificate
+	return SubjectQualifiesForCert(subj) &&
+
+		// localhost is ineligible
+		subj != "localhost" &&
+
+		// localhost TLD is ineligible
+		!strings.HasSuffix(subj, ".localhost") &&
+
+		// only one wildcard label allowed, and it must be left-most
+		(!strings.Contains(subj, "*") ||
+			(strings.Count(subj, "*") == 1 &&
+				strings.HasPrefix(subj, "*."))) &&
 
 		// cannot be an IP address (as of yet), see
 		// https://community.letsencrypt.org/t/certificate-for-static-ip/84/2?u=mholt
-		net.ParseIP(host) == nil
+		net.ParseIP(subj) == nil
 }
