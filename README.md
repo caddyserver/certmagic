@@ -82,24 +82,34 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 - Fully automated certificate management including issuance and renewal
 - One-liner, fully managed HTTPS servers
 - Full control over almost every aspect of the system
-- HTTP->HTTPS redirects (for HTTP applications)
+- HTTP->HTTPS redirects
 - Solves all 3 ACME challenges: HTTP, TLS-ALPN, and DNS
-	- Challenge randomization and rotation
-	- Robust retries
+- Most robust error handling of _any_ ACME client
+	- Challenges are randomized to avoid accidental dependence
+	- Challenges are rotated to overcome certain network blockages
+	- Robust retries for up to 30 days
+	- Exponential backoff with carefully-tuned intervals
+	- Retries with optional test/staging CA endpoint instead of production, to avoid rate limits
 - Over 50 DNS providers work out-of-the-box (powered by [lego](https://github.com/go-acme/lego)!)
+- Written in Go, a language with memory-safety guarantees
 - Pluggable storage implementations (default: file system)
-- Wildcard certificates (requires DNS challenge)
-- OCSP stapling for each qualifying certificate ([done right](https://gist.github.com/sleevi/5efe9ef98961ecfb4da8#gistcomment-2336055))
+- Wildcard certificates
+- Automatic OCSP stapling ([done right](https://gist.github.com/sleevi/5efe9ef98961ecfb4da8#gistcomment-2336055)) [keeps your sites online!](https://twitter.com/caddyserver/status/1234874273724084226)
+	- Will [automatically attempt](https://twitter.com/mholt6/status/1235577699541762048) to replace [revoked certificates](https://community.letsencrypt.org/t/2020-02-29-caa-rechecking-bug/114591/3?u=mholt)!
+	- Staples stored to disk in case of responder outages
 - Distributed solving of all challenges (works behind load balancers)
+	- Highly efficient, coordinated management in a fleet
+	- Active locking
+	- Smart queueing
 - Supports "on-demand" issuance of certificates (during TLS handshakes!)
 	- Caddy / CertMagic pioneered this technology
-	- Custom decision functions to regulate on-demand behavior
+	- Custom decision functions to regulate and throttle on-demand behavior
 - Optional event hooks for observation
 - Works with any certificate authority (CA) compliant with the ACME specification
 - Certificate revocation (please, only if private key is compromised)
 - Must-Staple (optional; not default)
 - Cross-platform support! Mac, Windows, Linux, BSD, Android...
-- Scales well to thousands of names/certificates per instance
+- Scales to hundreds of thousands of names/certificates per instance
 - Use in conjunction with your own certificates
 
 
