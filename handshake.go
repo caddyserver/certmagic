@@ -198,13 +198,13 @@ func (cfg *Config) selectCert(hello *tls.ClientHelloInfo, name string) (Certific
 //
 // This function is safe for concurrent use.
 func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNecessary, obtainIfNecessary bool) (Certificate, error) {
-	name := NormalizedName(hello.ServerName)
-
 	// First check our in-memory cache to see if we've already loaded it
 	cert, matched, defaulted := cfg.getCertificate(hello)
 	if matched {
 		return cert, nil
 	}
+
+	name := cfg.getNameFromClientHello(hello)
 
 	// If OnDemand is enabled, then we might be able to load or
 	// obtain a needed certificate
@@ -247,6 +247,9 @@ func (cfg *Config) checkIfCertShouldBeObtained(name string) error {
 	if cfg.OnDemand == nil {
 		return fmt.Errorf("not configured for on-demand certificate issuance")
 	}
+	if !SubjectQualifiesForCert(name) {
+		return fmt.Errorf("subject name does not qualify for certificate: %s", name)
+	}
 	if cfg.OnDemand.DecisionFunc != nil {
 		return cfg.OnDemand.DecisionFunc(name)
 	}
@@ -263,7 +266,7 @@ func (cfg *Config) checkIfCertShouldBeObtained(name string) error {
 //
 // This function is safe for use by multiple concurrent goroutines.
 func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certificate, error) {
-	name := NormalizedName(hello.ServerName)
+	name := cfg.getNameFromClientHello(hello)
 
 	// We must protect this process from happening concurrently, so synchronize.
 	obtainCertWaitChansMu.Lock()
@@ -343,7 +346,7 @@ func (cfg *Config) handshakeMaintenance(hello *tls.ClientHelloInfo, cert Certifi
 //
 // This function is safe for use by multiple concurrent goroutines.
 func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCert Certificate) (Certificate, error) {
-	name := NormalizedName(hello.ServerName)
+	name := cfg.getNameFromClientHello(hello)
 
 	obtainCertWaitChansMu.Lock()
 	wait, ok := obtainCertWaitChans[name]
@@ -438,6 +441,24 @@ func (cfg *Config) tryDistributedChallengeSolver(clientHello *tls.ClientHelloInf
 	}
 
 	return Certificate{Certificate: *cert}, true, nil
+}
+
+// getNameFromClientHello returns a normalized form of hello.ServerName.
+// If hello.ServerName is empty (i.e. client did not use SNI), then the
+// associated connection's local address is used to extract an IP address.
+func (*Config) getNameFromClientHello(hello *tls.ClientHelloInfo) string {
+	name := NormalizedName(hello.ServerName)
+	if name != "" || hello.Conn == nil {
+		return name
+	}
+
+	// if no SNI, try using IP address on the connection
+	localAddr := hello.Conn.LocalAddr().String()
+	localAddrHost, _, err := net.SplitHostPort(localAddr)
+	if err == nil {
+		return localAddrHost
+	}
+	return localAddr
 }
 
 // NormalizedName returns a cleaned form of serverName that is
