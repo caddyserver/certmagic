@@ -165,11 +165,17 @@ func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate,
 // selectCert uses hello to select a certificate from the
 // cache for name. If cfg.CertSelection is set, it will be
 // used to make the decision. Otherwise, the first matching
-// unexpired cert is returned.
+// unexpired cert is returned. As a special case, if no
+// certificates match name and cfg.CertSelection is set,
+// then all certificates in the cache will be passed in
+// for the cfg.CertSelection to make the final decision.
 func (cfg *Config) selectCert(hello *tls.ClientHelloInfo, name string) (Certificate, bool) {
 	choices := cfg.certCache.getAllMatchingCerts(name)
 	if len(choices) == 0 {
-		return Certificate{}, false
+		if cfg.CertSelection == nil {
+			return Certificate{}, false
+		}
+		choices = cfg.certCache.getAllCerts()
 	}
 	if cfg.CertSelection == nil {
 		// by default, choose first non-expired cert

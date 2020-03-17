@@ -249,6 +249,16 @@ func (certCache *Cache) getAllMatchingCerts(name string) []Certificate {
 	return certs
 }
 
+func (certCache *Cache) getAllCerts() []Certificate {
+	certCache.mu.RLock()
+	defer certCache.mu.RUnlock()
+	certs := make([]Certificate, 0, len(certCache.cache))
+	for _, cert := range certCache.cache {
+		certs = append(certs, cert)
+	}
+	return certs
+}
+
 func (certCache *Cache) getConfig(cert Certificate) (*Config, error) {
 	cfg, err := certCache.options.GetConfigForCert(cert)
 	if err != nil {
