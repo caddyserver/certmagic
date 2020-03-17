@@ -293,9 +293,7 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 
 	// obtain the certificate
 	log.Printf("[INFO] Obtaining new certificate for %s", name)
-	ctx, cancel := context.WithTimeout(context.TODO(), 2*time.Minute) // TODO: use a proper context; we use one with timeout because retries are enabled
-	defer cancel()
-	err := cfg.ObtainCert(ctx, name, false) // TODO: Should we set interactive=true to disable retries?
+	err := cfg.ObtainCert(context.TODO(), name, true) // TODO: use proper context
 
 	// immediately unblock anyone waiting for it; doing this in
 	// a defer would risk deadlock because of the recursive call
@@ -381,9 +379,7 @@ func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCe
 
 	// renew and reload the certificate
 	log.Printf("[INFO] Renewing certificate for %s", name)
-	ctx, cancel := context.WithTimeout(context.TODO(), 2*time.Minute) // TODO: use a proper context; we use one with timeout because retries are enabled
-	defer cancel()
-	err = cfg.RenewCert(ctx, name, false) // TODO: Should we set interactive=true to disable retries?
+	err = cfg.RenewCert(context.TODO(), name, true) // TODO: use proper context
 	if err == nil {
 		// even though the recursive nature of the dynamic cert loading
 		// would just call this function anyway, we do it here to
