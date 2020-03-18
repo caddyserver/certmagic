@@ -381,6 +381,7 @@ func SubjectQualifiesForPublicCert(subj string) bool {
 		// only one wildcard label allowed, and it must be left-most
 		(!strings.Contains(subj, "*") ||
 			(strings.Count(subj, "*") == 1 &&
+				len(subj) > 2 &&
 				strings.HasPrefix(subj, "*."))) &&
 
 		// cannot be an IP address (as of yet), see
