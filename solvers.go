@@ -78,13 +78,13 @@ func (s *httpSolver) Present(domain, token, keyAuth string) error {
 
 // serve is an HTTP server that serves only HTTP challenge responses.
 func (s *httpSolver) serve(si *solverInfo) {
+	defer close(si.done)
 	httpServer := &http.Server{Handler: s.acmeManager.HTTPChallengeHandler(http.NewServeMux())}
 	httpServer.SetKeepAlivesEnabled(false)
 	err := httpServer.Serve(si.listener)
 	if err != nil && atomic.LoadInt32(&s.closed) != 1 {
 		log.Printf("[ERROR] key auth HTTP server: %v", err)
 	}
-	close(si.done)
 }
 
 // CleanUp cleans up the HTTP server if it is the last one to finish.
@@ -98,9 +98,9 @@ func (s *httpSolver) CleanUp(domain, token, keyAuth string) error {
 		atomic.StoreInt32(&s.closed, 1)
 		if si.listener != nil {
 			si.listener.Close()
+			<-si.done
 		}
 		delete(solvers, s.address)
-		<-si.done
 	}
 	return nil
 }
@@ -161,6 +161,7 @@ func (s *tlsALPNSolver) Present(domain, token, keyAuth string) error {
 
 	go func() {
 		for {
+			defer close(si.done)
 			conn, err := si.listener.Accept()
 			if err != nil {
 				if atomic.LoadInt32(&si.closed) == 1 {
@@ -207,9 +208,9 @@ func (s *tlsALPNSolver) CleanUp(domain, token, keyAuth string) error {
 		atomic.StoreInt32(&si.closed, 1)
 		if si.listener != nil {
 			si.listener.Close()
+			<-si.done
 		}
 		delete(solvers, s.address)
-		close(si.done)
 	}
 
 	return nil
@@ -321,7 +322,7 @@ type solverInfo struct {
 	closed   int32 // accessed atomically
 	count    int
 	listener net.Listener
-	done     chan struct{} // used to signal when cleanup is finished
+	done     chan struct{} // used to signal when our own solver server is done
 }
 
 // getSolverInfo gets a valid solverInfo struct for address.
