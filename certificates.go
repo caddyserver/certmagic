@@ -375,8 +375,11 @@ func SubjectQualifiesForPublicCert(subj string) bool {
 		// localhost is ineligible
 		subj != "localhost" &&
 
-		// localhost TLD is ineligible
+		// .localhost TLD is ineligible
 		!strings.HasSuffix(subj, ".localhost") &&
+
+		// .local TLD is ineligible
+		!strings.HasSuffix(subj, ".local") &&
 
 		// only one wildcard label allowed, and it must be left-most
 		(!strings.Contains(subj, "*") ||

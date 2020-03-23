@@ -47,7 +47,9 @@ type Storage interface {
 	// Load retrieves the value at key.
 	Load(key string) ([]byte, error)
 
-	// Delete deletes key.
+	// Delete deletes key. An error should be
+	// returned only if the key still exists
+	// when the method returns.
 	Delete(key string) error
 
 	// Exists returns true if the key exists
