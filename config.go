@@ -61,6 +61,7 @@ type Config struct {
 	// if non-nil, on-demand TLS is enabled and
 	// certificate operations are deferred to
 	// TLS handshakes (or as-needed)
+	// TODO: Can we call this feature "Reactive/Lazy/Passive TLS" instead?
 	OnDemand *OnDemandConfig
 
 	// Add the must staple TLS extension to the
@@ -354,6 +355,8 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 // It only obtains and stores certificates (and their keys),
 // it does not load them into memory. If interactive is true,
 // the user may be shown a prompt.
+// TODO: consider moving interactive param into the Config struct,
+// and maybe retry settings into the Config struct as well? (same for RenewCert)
 func (cfg *Config) ObtainCert(ctx context.Context, name string, interactive bool) error {
 	if cfg.storageHasCertResources(name) {
 		return nil
