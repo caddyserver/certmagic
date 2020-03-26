@@ -301,15 +301,39 @@ func (am *ACMEManager) mostRecentUserEmail(caURL string) (string, bool) {
 	if err != nil || len(userList) == 0 {
 		return "", false
 	}
+
+	// get all the key infos ahead of sorting, because
+	// we might filter some out
+	stats := make(map[string]KeyInfo)
+	for i, u := range userList {
+		keyInfo, err := am.config.Storage.Stat(u)
+		if err != nil {
+			continue
+		}
+		if keyInfo.IsTerminal {
+			// I found a bug when macOS created a .DS_Store file in
+			// the users folder, and CertMagic tried to use that as
+			// the user email because it was newer than the other one
+			// which existed... sure, this isn't a perfect fix but
+			// frankly one's OS shouldn't mess with the data folder
+			// in the first place.
+			userList = append(userList[:i], userList[i+1:]...)
+			continue
+		}
+		stats[u] = keyInfo
+	}
+
 	sort.Slice(userList, func(i, j int) bool {
-		iInfo, _ := am.config.Storage.Stat(userList[i])
-		jInfo, _ := am.config.Storage.Stat(userList[j])
+		iInfo := stats[userList[i]]
+		jInfo := stats[userList[j]]
 		return jInfo.Modified.Before(iInfo.Modified)
 	})
+
 	user, err := am.getUser(caURL, path.Base(userList[0]))
 	if err != nil {
 		return "", false
 	}
+
 	return user.Email, true
 }
 
