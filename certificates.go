@@ -391,3 +391,27 @@ func SubjectQualifiesForPublicCert(subj string) bool {
 		// https://community.letsencrypt.org/t/certificate-for-static-ip/84/2?u=mholt
 		net.ParseIP(subj) == nil
 }
+
+// MatchWildcard returns true if subject (a candidate DNS name)
+// matches wildcard (a reference DNS name), mostly according to
+// RFC-compliant wildcard rules.
+func MatchWildcard(subject, wildcard string) bool {
+	if subject == wildcard {
+		return true
+	}
+	if !strings.Contains(wildcard, "*") {
+		return false
+	}
+	labels := strings.Split(subject, ".")
+	for i := range labels {
+		if labels[i] == "" {
+			continue // invalid label
+		}
+		labels[i] = "*"
+		candidate := strings.Join(labels, ".")
+		if candidate == wildcard {
+			return true
+		}
+	}
+	return false
+}

@@ -176,3 +176,33 @@ func TestSubjectQualifiesForPublicCert(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchWildcard(t *testing.T) {
+	for i, test := range []struct {
+		subject, wildcard string
+		expect            bool
+	}{
+		{"hostname", "hostname", true},
+		{"foo.localhost", "foo.localhost", true},
+		{"foo.localhost", "bar.localhost", false},
+		{"foo.localhost", "*.localhost", true},
+		{"bar.localhost", "*.localhost", true},
+		{"foo.bar.localhost", "*.localhost", false},
+		{".localhost", "*.localhost", false},
+		{"foo.bar.local", "foo.*.local", false},
+		{"foo.bar.local", "*.bar.local", true},
+		{"1.2.3.4.5.6", "*.2.3.4.5.6", true},
+		{"1.2.3.4.5.6", "*.*.3.4.5.6", true},
+		{"1.2.3.4.5.6", "*.*.*.4.5.6", true},
+		{"1.2.3.4.5.6", "*.*.*.*.5.6", true},
+		{"1.2.3.4.5.6", "*.*.*.*.*.6", true},
+		{"1.2.3.4.5.6", "*.*.*.*.*.*", true},
+		{"0.1.2.3.4.5.6", "*.*.*.*.*.*", false},
+	} {
+		actual := MatchWildcard(test.subject, test.wildcard)
+		if actual != test.expect {
+			t.Errorf("Test %d: Expected MatchWildcard(%s, %s)=%v, but got %v",
+				i, test.subject, test.wildcard, test.expect, actual)
+		}
+	}
+}
