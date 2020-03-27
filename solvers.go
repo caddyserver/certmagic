@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -60,14 +61,7 @@ func (s *httpSolver) Present(domain, token, keyAuth string) error {
 	var err error
 	si.listener, err = net.Listen("tcp", s.address)
 	if err != nil {
-		if listenerAddressInUse(s.address) {
-			// if it failed just because the socket is already in use, we
-			// have no choice but to assume that whatever is using the socket
-			// can answer the challenge already
-			return nil
-		}
-		// otherwise, if the socket is not in use, something is wrong
-		return fmt.Errorf("could not start listener for HTTP challenge server: %v", err)
+		return handleListenErr(s.address, err)
 	}
 
 	// successfully bound socket, so start key auth HTTP server
@@ -149,14 +143,7 @@ func (s *tlsALPNSolver) Present(domain, token, keyAuth string) error {
 
 	si.listener, err = tls.Listen("tcp", s.address, s.config.TLSConfig())
 	if err != nil {
-		if listenerAddressInUse(s.address) {
-			// if it failed just because the socket is already in use, we
-			// have no choice but to assume that whatever is using the socket
-			// can answer the challenge already
-			return nil
-		}
-		// otherwise, if the socket is not in use, something is wrong
-		return fmt.Errorf("could not start listener for TLS-ALPN challenge server: %v", err)
+		return handleListenErr(s.address, err)
 	}
 
 	go func() {
@@ -343,6 +330,41 @@ func listenerAddressInUse(addr string) bool {
 		conn.Close()
 	}
 	return err == nil
+}
+
+// handleListenErr handles an error that occurs when trying to start
+// our own listener to solve a challenge. There are some edge cases
+// it considers: 1) if caddy is already listening on that socket, it
+// finds that out by dialing the socket and if it succeeds, assumes
+// it is and that caddy will finish solving the challenge, thus this
+// returns with no error, and 2) on Windows, the OS gives an
+// inconsistent report of the socket: it is both active and not
+// active, in which case we ignore the error and assume that whatever
+// is using the socket can solve the challenge just like in (1) but
+// with a log... otherwise, this returns an actual error.
+func handleListenErr(addr string, err error) error {
+	// if it failed just because the socket is already in use, we
+	// have no choice but to assume that whatever is using the socket
+	// can answer the challenge already
+	if listenerAddressInUse(addr) {
+		return nil
+	}
+
+	// Annoyingly, if the socket is in use already, it has been
+	// reported that Windows will (sometimes?) fail to dial to it.
+	// It is a contradiction: first, Windows is saying the socket
+	// is already active, then it is saying it is not. So, as a
+	// workaround, we ignore the error from our dialing it and
+	// simply assume that whatever is using the socket can solve
+	// the challenge. I would like a proper fix for this though.
+	// See: https://caddy.community/t/caddy-retry-error/7317
+	if runtime.GOOS == "windows" {
+		log.Printf("[WARNING] OS reports a contradiction: %v - but we cannot connect to it; continuing anyway 🤞", err)
+		return nil
+	}
+
+	// otherwise, if the socket is not in use, something is wrong
+	return fmt.Errorf("could not start listener at %s for challenge server: %v", addr, err)
 }
 
 // The active challenge solvers, keyed by listener address,
