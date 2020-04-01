@@ -43,6 +43,10 @@ type ACMEManager struct {
 	// subscriber agreement
 	Agreed bool
 
+	// An optional external account to associate
+	// with this ACME account
+	ExternalAccount *ExternalAccountBinding
+
 	// Disable all HTTP challenges
 	DisableHTTPChallenge bool
 
@@ -322,6 +326,13 @@ func (am *ACMEManager) Revoke(ctx context.Context, cert CertificateResource) err
 	}
 
 	return client.revoke(ctx, cr)
+}
+
+// ExternalAccountBinding contains information for
+// binding an external account to an ACME account.
+type ExternalAccountBinding struct {
+	KeyID string
+	HMAC  []byte
 }
 
 // DefaultACME specifies the default settings

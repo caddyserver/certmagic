@@ -17,6 +17,7 @@ package certmagic
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"log"
 	weakrand "math/rand"
@@ -73,7 +74,7 @@ func (am *ACMEManager) newACMEClientWithRetry(useTestCA bool) (*acmeClient, erro
 			}
 		}
 		log.Printf("[ERROR] Making new ACME client: %v (attempt %d/%d)", err, i+1, maxTries)
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 	return client, err
 }
@@ -167,7 +168,18 @@ func (am *ACMEManager) newACMEClient(useTestCA, interactive bool) (*acmeClient, 
 			}
 		}
 
-		reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: am.Agreed})
+		var reg *registration.Resource
+		if am.ExternalAccount != nil {
+			reg, err = client.Registration.RegisterWithExternalAccountBinding(registration.RegisterEABOptions{
+				TermsOfServiceAgreed: am.Agreed,
+				Kid:                  am.ExternalAccount.KeyID,
+				HmacEncoded:          base64.StdEncoding.EncodeToString(am.ExternalAccount.HMAC),
+			})
+		} else {
+			reg, err = client.Registration.Register(registration.RegisterOptions{
+				TermsOfServiceAgreed: am.Agreed,
+			})
+		}
 		if err != nil {
 			return nil, err
 		}
