@@ -178,18 +178,35 @@ func (cfg *Config) selectCert(hello *tls.ClientHelloInfo, name string) (Certific
 		choices = cfg.certCache.getAllCerts()
 	}
 	if cfg.CertSelection == nil {
-		// by default, choose first non-expired cert
-		now := time.Now()
-		for _, choice := range choices {
-			if now.Before(choice.NotAfter) {
-				return choice, true
-			}
-		}
-		// all matching certs are expired, oh well
-		return choices[0], true
+		cert, err := DefaultCertificateSelector(hello, choices)
+		return cert, err == nil
 	}
 	cert, err := cfg.CertSelection.SelectCertificate(hello, choices)
 	return cert, err == nil
+}
+
+// DefaultCertificateSelector is the default certificate selection logic
+// given a choice of certificates. If there is at least one certificate in
+// choices, it always returns a certificate without error. It chooses the
+// first non-expired certificate that the client supports if possible,
+// otherwise it returns an expired certificate that the client supports,
+// otherwise it just returns the first certificate in the list of choices.
+func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificate) (Certificate, error) {
+	if len(choices) == 0 {
+		return Certificate{}, fmt.Errorf("no certificates available")
+	}
+	now := time.Now()
+	best := choices[0]
+	for _, choice := range choices {
+		if err := hello.SupportsCertificate(&choice.Certificate); err != nil {
+			continue
+		}
+		best = choice // at least the client supports it...
+		if now.After(choice.Leaf.NotBefore) && now.Before(choice.Leaf.NotAfter) {
+			return choice, nil // ...and unexpired, great! "Certificate, I choose you!"
+		}
+	}
+	return best, nil // all matching certs are expired or incompatible, oh well
 }
 
 // getCertDuringHandshake will get a certificate for hello. It first tries
@@ -321,8 +338,8 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 // This function is safe for use by multiple concurrent goroutines.
 func (cfg *Config) handshakeMaintenance(hello *tls.ClientHelloInfo, cert Certificate) (Certificate, error) {
 	// Check cert expiration
-	timeLeft := cert.NotAfter.Sub(time.Now().UTC())
-	if currentlyInRenewalWindow(cert.NotBefore, cert.NotAfter, cfg.RenewalWindowRatio) {
+	timeLeft := cert.Leaf.NotAfter.Sub(time.Now().UTC())
+	if currentlyInRenewalWindow(cert.Leaf.NotBefore, cert.Leaf.NotAfter, cfg.RenewalWindowRatio) {
 		log.Printf("[INFO] Certificate for %v expires in %s; attempting renewal", cert.Names, timeLeft)
 		return cfg.renewDynamicCertificate(hello, cert)
 	}

@@ -136,7 +136,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 
 	// Reload certificates that merely need to be updated in memory
 	for _, oldCert := range reloadQueue {
-		timeLeft := oldCert.NotAfter.Sub(time.Now().UTC())
+		timeLeft := oldCert.Leaf.NotAfter.Sub(time.Now().UTC())
 		log.Printf("[INFO] %v Maintenance routine: certificate expires in %s, but is already renewed in storage; reloading stored certificate",
 			oldCert.Names, timeLeft)
 
@@ -171,7 +171,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 }
 
 func (certCache *Cache) queueRenewalTask(ctx context.Context, oldCert Certificate, cfg *Config) error {
-	timeLeft := oldCert.NotAfter.Sub(time.Now().UTC())
+	timeLeft := oldCert.Leaf.NotAfter.Sub(time.Now().UTC())
 	log.Printf("[INFO] %v Maintenance routine: certificate expires in %v; queueing for renewal", oldCert.Names, timeLeft)
 
 	// Get the name which we should use to renew this certificate;
@@ -181,7 +181,7 @@ func (certCache *Cache) queueRenewalTask(ctx context.Context, oldCert Certificat
 
 	// queue up this renewal job (is a no-op if already active or queued)
 	jm.Submit("renew_"+renewName, func() error {
-		timeLeft := oldCert.NotAfter.Sub(time.Now().UTC())
+		timeLeft := oldCert.Leaf.NotAfter.Sub(time.Now().UTC())
 		log.Printf("[INFO] %v Maintenance routine: attempting renewal with %v remaining", oldCert.Names, timeLeft)
 
 		// perform renewal - crucially, this happens OUTSIDE a lock on certCache
@@ -235,7 +235,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	certCache.mu.RLock()
 	for certHash, cert := range certCache.cache {
 		// no point in updating OCSP for expired certificates
-		if time.Now().After(cert.NotAfter) {
+		if time.Now().After(cert.Leaf.NotAfter) {
 			continue
 		}
 		var lastNextUpdate time.Time
@@ -306,7 +306,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	// Crucially, this happens OUTSIDE a lock on the certCache.
 	for _, oldCert := range renewQueue {
 		log.Printf("[INFO] OCSP status for managed certificate %v (expiration=%s) is REVOKED; attempting to replace with new certificate",
-			oldCert.Names, oldCert.NotAfter)
+			oldCert.Names, oldCert.Leaf.NotAfter)
 
 		renewName := oldCert.Names[0]
 		cfg := configs[renewName]

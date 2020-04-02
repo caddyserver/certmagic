@@ -85,8 +85,8 @@ type Config struct {
 
 	// CertSelection chooses one of the certificates
 	// with which the ClientHello will be completed;
-	// if not set, the first matching certificate
-	// will be selected
+	// if not set, DefaultCertificateSelector will
+	// be used
 	CertSelection CertificateSelector
 
 	// The storage to access when storing or
@@ -720,7 +720,7 @@ func (cfg *Config) managedCertNeedsRenewal(certRes CertificateResource) (time.Du
 	if err != nil {
 		return 0, true
 	}
-	return time.Until(cert.NotAfter), cert.NeedsRenewal(cfg)
+	return time.Until(cert.Leaf.NotAfter), cert.NeedsRenewal(cfg)
 }
 
 func (cfg *Config) emit(eventName string, data interface{}) {
