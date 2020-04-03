@@ -147,8 +147,8 @@ func (s *tlsALPNSolver) Present(domain, token, keyAuth string) error {
 	}
 
 	go func() {
+		defer close(si.done)
 		for {
-			defer close(si.done)
 			conn, err := si.listener.Accept()
 			if err != nil {
 				if atomic.LoadInt32(&si.closed) == 1 {
