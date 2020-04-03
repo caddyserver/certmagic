@@ -61,9 +61,7 @@ func (s *httpSolver) Present(domain, token, keyAuth string) error {
 	var err error
 	si.listener, err = net.Listen("tcp", s.address)
 	if err != nil {
-		if err = handleListenErr(s.address, err); err != nil {
-			return err
-		}
+		return handleListenErr(s.address, err)
 	}
 
 	// successfully bound socket, so start key auth HTTP server
@@ -145,9 +143,7 @@ func (s *tlsALPNSolver) Present(domain, token, keyAuth string) error {
 
 	si.listener, err = tls.Listen("tcp", s.address, s.config.TLSConfig())
 	if err != nil {
-		if err = handleListenErr(s.address, err); err != nil {
-			return err
-		}
+		return handleListenErr(s.address, err)
 	}
 
 	go func() {
