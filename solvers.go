@@ -22,7 +22,7 @@ import (
 	"net"
 	"net/http"
 	"path"
-	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -55,16 +55,19 @@ func (s *httpSolver) Present(domain, token, keyAuth string) error {
 	si := getSolverInfo(s.address)
 	si.count++
 	if si.listener != nil {
-		return nil
+		return nil // already be served by us
 	}
 
-	var err error
-	si.listener, err = net.Listen("tcp", s.address)
-	if err != nil {
-		return handleListenErr(s.address, err)
+	// notice the unusual error handling here; we
+	// only continue to start a challenge server if
+	// we got a listener; in all other cases return
+	ln, err := robustTryListen(s.address)
+	if ln == nil {
+		return err
 	}
 
-	// successfully bound socket, so start key auth HTTP server
+	// successfully bound socket, so save listener and start key auth HTTP server
+	si.listener = ln
 	go s.serve(si)
 
 	return nil
@@ -138,13 +141,22 @@ func (s *tlsALPNSolver) Present(domain, token, keyAuth string) error {
 	si := getSolverInfo(s.address)
 	si.count++
 	if si.listener != nil {
-		return nil
+		return nil // already be served by us
 	}
 
-	si.listener, err = tls.Listen("tcp", s.address, s.config.TLSConfig())
-	if err != nil {
-		return handleListenErr(s.address, err)
+	// notice the unusual error handling here; we
+	// only continue to start a challenge server if
+	// we got a listener; in all other cases return
+	ln, err := robustTryListen(s.address)
+	if ln == nil {
+		return err
 	}
+
+	// we were able to bind the socket, so make it into a TLS
+	// listener, store it with the solverInfo, and start the
+	// challenge server
+
+	si.listener = tls.NewListener(ln, s.config.TLSConfig())
 
 	go func() {
 		defer close(si.done)
@@ -322,49 +334,72 @@ func getSolverInfo(address string) *solverInfo {
 	return si
 }
 
-// listenerAddressInUse returns true if a TCP connection
-// can be made to addr within a short time interval.
-func listenerAddressInUse(addr string) bool {
+// robustTryListen calls net.Listen for a TCP socket at addr.
+// This function may return both a nil listener and a nil error!
+// If it was able to bind the socket, it returns the listener
+// and no error. If it wasn't able to bind the socket because
+// the socket is already in use, then it returns a nil listener
+// and nil error. If it had any other error, it returns the
+// error. The intended error handling logic for this function
+// is to proceed if the returned listener is not nil; otherwise
+// return err (which may also be nil). In other words, this
+// function ignores errors if the socket is already in use,
+// which is useful for our challenge servers, where we assume
+// that whatever is already listening can solve the challenges.
+func robustTryListen(addr string) (net.Listener, error) {
+	var listenErr error
+	for i := 0; i < 2; i++ {
+		// doesn't hurt to sleep briefly before the second
+		// attempt in case the OS has timing issues
+		if i > 0 {
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		// if we can bind the socket right away, great!
+		var ln net.Listener
+		ln, listenErr = net.Listen("tcp", addr)
+		if listenErr == nil {
+			return ln, nil
+		}
+
+		// if it failed just because the socket is already in use, we
+		// have no choice but to assume that whatever is using the socket
+		// can answer the challenge already, so we ignore the error
+		connectErr := dialTCPSocket(addr)
+		if connectErr == nil {
+			return nil, nil
+		}
+
+		// hmm, we couldn't connect to the socket, so something else must
+		// be wrong, right? wrong!! we've had reports across multiple OSes
+		// now that sometimes connections fail even though the OS told us
+		// that the address was already in use; either the listener is
+		// fluctuating between open and closed very, very quickly, or the
+		// OS is inconsistent and contradicting itself; I have been unable
+		// to reproduce this, so I'm now resorting to hard-coding substring
+		// matching in error messages as a really hacky and unreliable
+		// safeguard against this, until we can idenify exactly what was
+		// happening; see the following threads for more info:
+		// https://caddy.community/t/caddy-retry-error/7317
+		// https://caddy.community/t/v2-upgrade-to-caddy2-failing-with-errors/7423
+		if strings.Contains(listenErr.Error(), "address already in use") ||
+			strings.Contains(listenErr.Error(), "one usage of each socket address") {
+			log.Printf("[WARNING] OS reports a contradiction: %v - but we cannot connect to it, with this error: %v; continuing anyway 🤞", listenErr, connectErr)
+			return nil, nil
+		}
+	}
+	return nil, fmt.Errorf("could not start listener for challenge server at %s: %v", addr, listenErr)
+}
+
+// dialTCPSocket connects to a TCP address just for the sake of
+// seeing if it is open. It returns a nil error if a TCP connection
+// can successfully be made to addr within a short timeout.
+func dialTCPSocket(addr string) error {
 	conn, err := net.DialTimeout("tcp", addr, 250*time.Millisecond)
 	if err == nil {
 		conn.Close()
 	}
-	return err == nil
-}
-
-// handleListenErr handles an error that occurs when trying to start
-// our own listener to solve a challenge. There are some edge cases
-// it considers: 1) if caddy is already listening on that socket, it
-// finds that out by dialing the socket and if it succeeds, assumes
-// it is and that caddy will finish solving the challenge, thus this
-// returns with no error, and 2) on Windows, the OS gives an
-// inconsistent report of the socket: it is both active and not
-// active, in which case we ignore the error and assume that whatever
-// is using the socket can solve the challenge just like in (1) but
-// with a log... otherwise, this returns an actual error.
-func handleListenErr(addr string, err error) error {
-	// if it failed just because the socket is already in use, we
-	// have no choice but to assume that whatever is using the socket
-	// can answer the challenge already
-	if listenerAddressInUse(addr) {
-		return nil
-	}
-
-	// Annoyingly, if the socket is in use already, it has been
-	// reported that Windows will (sometimes?) fail to dial to it.
-	// It is a contradiction: first, Windows is saying the socket
-	// is already active, then it is saying it is not. So, as a
-	// workaround, we ignore the error from our dialing it and
-	// simply assume that whatever is using the socket can solve
-	// the challenge. I would like a proper fix for this though.
-	// See: https://caddy.community/t/caddy-retry-error/7317
-	if runtime.GOOS == "windows" {
-		log.Printf("[WARNING] OS reports a contradiction: %v - but we cannot connect to it; continuing anyway 🤞", err)
-		return nil
-	}
-
-	// otherwise, if the socket is not in use, something is wrong
-	return fmt.Errorf("could not start listener at %s for challenge server: %v", addr, err)
+	return err
 }
 
 // The active challenge solvers, keyed by listener address,
