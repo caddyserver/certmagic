@@ -384,7 +384,7 @@ func robustTryListen(addr string) (net.Listener, error) {
 		// https://caddy.community/t/v2-upgrade-to-caddy2-failing-with-errors/7423
 		if strings.Contains(listenErr.Error(), "address already in use") ||
 			strings.Contains(listenErr.Error(), "one usage of each socket address") {
-			log.Printf("[WARNING] OS reports a contradiction: %v - but we cannot connect to it, with this error: %v; continuing anyway 🤞", listenErr, connectErr)
+			log.Printf("[WARNING] OS reports a contradiction: %v - but we cannot connect to it, with this error: %v; continuing anyway 🤞 (I don't know what causes this... if you do, please help?)", listenErr, connectErr)
 			return nil, nil
 		}
 	}

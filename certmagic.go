@@ -412,7 +412,8 @@ func (cr *CertificateResource) NamesKey() string {
 	sort.Strings(cr.SANs)
 	result := strings.Join(cr.SANs, ",")
 	if len(result) > 1024 {
-		result = result[:1024-len("_trunc")] + "_trunc"
+		const trunc = "_trunc"
+		result = result[:1024-len(trunc)] + trunc
 	}
 	return result
 }
