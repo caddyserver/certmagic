@@ -64,6 +64,9 @@ func (am *ACMEManager) newACMEClientWithRetry(useTestCA bool) (*acmeClient, erro
 	var err error
 	const maxTries = 2
 	for i := 0; i < maxTries; i++ {
+		if i > 0 {
+			time.Sleep(2 * time.Second)
+		}
 		client, err = am.newACMEClient(useTestCA, false) // TODO: move logic that requires interactivity to way before this part of the process...
 		if err == nil {
 			break
@@ -74,7 +77,6 @@ func (am *ACMEManager) newACMEClientWithRetry(useTestCA bool) (*acmeClient, erro
 			}
 		}
 		log.Printf("[ERROR] Making new ACME client: %v (attempt %d/%d)", err, i+1, maxTries)
-		time.Sleep(2 * time.Second)
 	}
 	return client, err
 }

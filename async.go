@@ -23,19 +23,23 @@ type namedJob struct {
 	job  func() error
 }
 
-// Submit enqueues the given job with the given name. If a job
-// with name is already enqueued or running, this is a no-op.
-// The job manager will then run this job as soon as it is able.
+// Submit enqueues the given job with the given name. If name is non-empty
+// and a job with the same name is already enqueued or running, this is a
+// no-op. If name is empty, no duplicate prevention will occur. The job
+// manager will then run this job as soon as it is able.
 func (jm *jobManager) Submit(name string, job func() error) {
 	jm.mu.Lock()
 	defer jm.mu.Unlock()
 	if jm.names == nil {
 		jm.names = make(map[string]struct{})
 	}
-	if _, ok := jm.names[name]; ok {
-		return // prevent duplicate jobs
+	if name != "" {
+		// prevent duplicate jobs
+		if _, ok := jm.names[name]; ok {
+			return
+		}
+		jm.names[name] = struct{}{}
 	}
-	jm.names[name] = struct{}{}
 	jm.queue = append(jm.queue, namedJob{name, job})
 	if jm.activeWorkers < jm.maxConcurrentJobs {
 		jm.activeWorkers++
@@ -57,9 +61,11 @@ func (jm *jobManager) worker() {
 		if err := next.job(); err != nil {
 			log.Printf("[ERROR] %v", err)
 		}
-		jm.mu.Lock()
-		delete(jm.names, next.name)
-		jm.mu.Unlock()
+		if next.name != "" {
+			jm.mu.Lock()
+			delete(jm.names, next.name)
+			jm.mu.Unlock()
+		}
 	}
 }
 

@@ -316,7 +316,19 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 			return nil
 		}
 		if async {
-			jm.Submit("obtain_"+domainName, obtain)
+			// Leave the job name empty so as to allow duplicate 'obtain'
+			// jobs; this is because Caddy calls ManageAsync() before the
+			// previous config is stopped (and before its context is
+			// canceled), which means that if an obtain job is still
+			// running for the same domain, Submit() would not queue the
+			// new one because it is still running, even though it is
+			// (probably) about to be canceled (it might not if the new
+			// config fails to finish loading, however). In any case, we
+			// presume it is safe to enqueue a duplicate obtain job because
+			// either the old one (or sometimes the new one) is about to be
+			// canceled. This seems like reasonable logic for any consumer
+			// of this lib. See https://github.com/caddyserver/caddy/issues/3202
+			jm.Submit("", obtain)
 			return nil
 		}
 		return obtain()
