@@ -15,6 +15,7 @@
 package certmagic
 
 import (
+	"context"
 	"log"
 	"path"
 	"regexp"
@@ -86,8 +87,11 @@ type Locker interface {
 	// To prevent deadlocks, all implementations (where this concern
 	// is relevant) should put a reasonable expiration on the lock in
 	// case Unlock is unable to be called due to some sort of network
-	// failure or system crash.
-	Lock(key string) error
+	// failure or system crash. Additionally, implementations should
+	// honor context cancellation as much as possible (in case the
+	// caller wishes to give up and free resources before the lock
+	// can be obtained).
+	Lock(ctx context.Context, key string) error
 
 	// Unlock releases the lock for key. This method must ONLY be
 	// called after a successful call to Lock, and only after the
@@ -223,8 +227,8 @@ func CleanUpOwnLocks() {
 	}
 }
 
-func obtainLock(storage Storage, lockKey string) error {
-	err := storage.Lock(lockKey)
+func obtainLock(ctx context.Context, storage Storage, lockKey string) error {
+	err := storage.Lock(ctx, lockKey)
 	if err == nil {
 		locksMu.Lock()
 		locks[lockKey] = storage
