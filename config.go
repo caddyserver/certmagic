@@ -42,7 +42,7 @@ type Config struct {
 	// renewal window, which is the span of time at the
 	// end of the certificate's validity period in which
 	// it should be renewed; for most certificates, the
-	// global default is good, but for exremely short-
+	// global default is good, but for extremely short-
 	// lived certs, you may want to raise this to ~0.5.
 	RenewalWindowRatio float64
 
