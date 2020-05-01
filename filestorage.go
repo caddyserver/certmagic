@@ -15,6 +15,7 @@
 package certmagic
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -124,7 +125,7 @@ func (fs *FileStorage) Filename(key string) string {
 
 // Lock obtains a lock named by the given key. It blocks
 // until the lock can be obtained or an error is returned.
-func (fs *FileStorage) Lock(key string) error {
+func (fs *FileStorage) Lock(ctx context.Context, key string) error {
 	filename := fs.lockFilename(key)
 
 	for {
@@ -168,8 +169,13 @@ func (fs *FileStorage) Lock(key string) error {
 
 		default:
 			// lockfile exists and is not stale;
-			// just wait a moment and try again
-			time.Sleep(fileLockPollInterval)
+			// just wait a moment and try again,
+			// or return if context cancelled
+			select {
+			case <-time.After(fileLockPollInterval):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 	}
 }
@@ -246,6 +252,14 @@ func removeLockfile(filename string) error {
 // not terminate until up to lockFreshnessInterval after
 // the lock is released.
 func keepLockfileFresh(filename string) {
+	defer func() {
+		if err := recover(); err != nil {
+			buf := make([]byte, stackTraceBufferSize)
+			buf = buf[:runtime.Stack(buf, false)]
+			log.Printf("panic: active locking: %v\n%s", err, buf)
+		}
+	}()
+
 	for {
 		time.Sleep(lockFreshnessInterval)
 		done, err := updateLockfileFreshness(filename)

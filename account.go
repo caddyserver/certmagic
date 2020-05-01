@@ -16,58 +16,86 @@ package certmagic
 
 import (
 	"bufio"
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path"
 	"sort"
 	"strings"
 
-	"github.com/go-acme/lego/v3/acme"
-	"github.com/go-acme/lego/v3/registration"
+	"github.com/mholt/acmez/acme"
 )
 
-// user represents a Let's Encrypt user account.
-type user struct {
-	Email        string
-	Registration *registration.Resource
-	key          crypto.PrivateKey
-}
-
-// GetEmail gets u's email.
-func (u user) GetEmail() string {
-	return u.Email
-}
-
-// GetRegistration gets u's registration resource.
-func (u user) GetRegistration() *registration.Resource {
-	return u.Registration
-}
-
-// GetPrivateKey gets u's private key.
-func (u user) GetPrivateKey() crypto.PrivateKey {
-	return u.key
-}
-
-// newUser creates a new User for the given email address
-// with a new private key. This function does NOT save the
-// user to disk or register it via ACME. If you want to use
-// a user account that might already exist, call getUser
-// instead. It does NOT prompt the user.
-func (*ACMEManager) newUser(email string) (*user, error) {
-	user := &user{Email: email}
-	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+// getAccount either loads or creates a new account, depending on if
+// an account can be found in storage for the given CA + email combo.
+func (am *ACMEManager) getAccount(ca, email string) (acme.Account, error) {
+	regBytes, err := am.config.Storage.Load(am.storageKeyUserReg(ca, email))
 	if err != nil {
-		return user, fmt.Errorf("generating private key: %v", err)
+		if _, ok := err.(ErrNotExist); ok {
+			return am.newAccount(email)
+		}
+		return acme.Account{}, err
 	}
-	user.key = privateKey
-	return user, nil
+	keyBytes, err := am.config.Storage.Load(am.storageKeyUserPrivateKey(ca, email))
+	if err != nil {
+		if _, ok := err.(ErrNotExist); ok {
+			return am.newAccount(email)
+		}
+		return acme.Account{}, err
+	}
+
+	var acct acme.Account
+	err = json.Unmarshal(regBytes, &acct)
+	if err != nil {
+		return acct, err
+	}
+	acct.PrivateKey, err = decodePrivateKey(keyBytes)
+	return acct, err
+}
+
+// newAccount generates a new private key for a new ACME account, but
+// it does not register or save the account.
+func (*ACMEManager) newAccount(email string) (acme.Account, error) {
+	var acct acme.Account
+	if email != "" {
+		acct.Contact = []string{"mailto:" + email} // TODO: should we abstract the contact scheme?
+	}
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return acct, fmt.Errorf("generating private key: %v", err)
+	}
+	acct.PrivateKey = privateKey
+	return acct, nil
+}
+
+// saveAccount persists an ACME account's info and private key to storage.
+// It does NOT register the account via ACME or prompt the user.
+func (am *ACMEManager) saveAccount(ca string, account acme.Account) error {
+	regBytes, err := json.MarshalIndent(account, "", "\t")
+	if err != nil {
+		return err
+	}
+	keyBytes, err := encodePrivateKey(account.PrivateKey)
+	if err != nil {
+		return err
+	}
+	// extract primary contact (email), without scheme (e.g. "mailto:")
+	primaryContact := getPrimaryContact(account)
+	all := []keyValue{
+		{
+			key:   am.storageKeyUserReg(ca, primaryContact),
+			value: regBytes,
+		},
+		{
+			key:   am.storageKeyUserPrivateKey(ca, primaryContact),
+			value: keyBytes,
+		},
+	}
+	return storeTx(am.config.Storage, all)
 }
 
 // getEmail does everything it can to obtain an email address
@@ -82,13 +110,13 @@ func (am *ACMEManager) getEmail(allowPrompts bool) error {
 
 	// First try package default email
 	if leEmail == "" {
-		leEmail = DefaultACME.Email // TODO: racey with line 108
+		leEmail = DefaultACME.Email // TODO: racey with line 122 (or whichever line assigns to DefaultACME.Email below)
 	}
 
 	// Then try to get most recent user email from storage
 	var gotRecentEmail bool
 	if leEmail == "" {
-		leEmail, gotRecentEmail = am.mostRecentUserEmail(am.CA)
+		leEmail, gotRecentEmail = am.mostRecentAccountEmail(am.CA)
 	}
 	if !gotRecentEmail && leEmail == "" && allowPrompts {
 		// Looks like there is no email address readily available,
@@ -105,31 +133,10 @@ func (am *ACMEManager) getEmail(allowPrompts bool) error {
 
 	// save the email for later and ensure it is consistent
 	// for repeated use; then update cfg with the email
-	DefaultACME.Email = strings.TrimSpace(strings.ToLower(leEmail)) // TODO: this is racey with line 85
+	DefaultACME.Email = strings.TrimSpace(strings.ToLower(leEmail)) // TODO: this is racey with line 99
 	am.Email = DefaultACME.Email
 
 	return nil
-}
-
-func (am *ACMEManager) getAgreementURL() (string, error) {
-	if agreementTestURL != "" {
-		return agreementTestURL, nil
-	}
-	caURL := am.CA
-	if caURL == "" {
-		caURL = DefaultACME.CA
-	}
-	response, err := http.Get(caURL)
-	if err != nil {
-		return "", err
-	}
-	defer response.Body.Close()
-	var dir acme.Directory
-	err = json.NewDecoder(response.Body).Decode(&dir)
-	if err != nil {
-		return "", err
-	}
-	return dir.Meta.TermsOfService, nil
 }
 
 // promptUserForEmail prompts the user for an email address
@@ -138,13 +145,9 @@ func (am *ACMEManager) getAgreementURL() (string, error) {
 // will also be set to true, since continuing through the
 // prompt signifies agreement.
 func (am *ACMEManager) promptUserForEmail() (string, error) {
-	agreementURL, err := am.getAgreementURL()
-	if err != nil {
-		return "", fmt.Errorf("get Agreement URL: %v", err)
-	}
 	// prompt the user for an email address and terms agreement
 	reader := bufio.NewReader(stdin)
-	am.promptUserAgreement(agreementURL)
+	am.promptUserAgreement("")
 	fmt.Println("Please enter your email address to signify agreement and to be notified")
 	fmt.Println("in case of issues. You can leave it blank, but we don't recommend it.")
 	fmt.Print("  Email address: ")
@@ -157,72 +160,17 @@ func (am *ACMEManager) promptUserForEmail() (string, error) {
 	return leEmail, nil
 }
 
-// getUser loads the user with the given email from disk
-// using the provided storage. If the user does not exist,
-// it will create a new one, but it does NOT save new
-// users to the disk or register them via ACME. It does
-// NOT prompt the user.
-func (am *ACMEManager) getUser(ca, email string) (*user, error) {
-	regBytes, err := am.config.Storage.Load(am.storageKeyUserReg(ca, email))
-	if err != nil {
-		if _, ok := err.(ErrNotExist); ok {
-			// create a new user
-			return am.newUser(email)
-		}
-		return nil, err
-	}
-	keyBytes, err := am.config.Storage.Load(am.storageKeyUserPrivateKey(ca, email))
-	if err != nil {
-		if _, ok := err.(ErrNotExist); ok {
-			// create a new user
-			return am.newUser(email)
-		}
-		return nil, err
-	}
-
-	var u *user
-	err = json.Unmarshal(regBytes, &u)
-	if err != nil {
-		return u, err
-	}
-	u.key, err = decodePrivateKey(keyBytes)
-	return u, err
-}
-
-// saveUser persists a user's key and account registration
-// to the file system. It does NOT register the user via ACME
-// or prompt the user. You must also pass in the storage
-// wherein the user should be saved. It should be the storage
-// for the CA with which user has an account.
-func (am *ACMEManager) saveUser(ca string, user *user) error {
-	regBytes, err := json.MarshalIndent(&user, "", "\t")
-	if err != nil {
-		return err
-	}
-	keyBytes, err := encodePrivateKey(user.key)
-	if err != nil {
-		return err
-	}
-	all := []keyValue{
-		{
-			key:   am.storageKeyUserReg(ca, user.Email),
-			value: regBytes,
-		},
-		{
-			key:   am.storageKeyUserPrivateKey(ca, user.Email),
-			value: keyBytes,
-		},
-	}
-	return storeTx(am.config.Storage, all)
-}
-
 // promptUserAgreement simply outputs the standard user
 // agreement prompt with the given agreement URL.
 // It outputs a newline after the message.
 func (am *ACMEManager) promptUserAgreement(agreementURL string) {
-	const userAgreementPrompt = `Your sites will be served over HTTPS automatically using Let's Encrypt.
-By continuing, you agree to the Let's Encrypt Subscriber Agreement at:`
-	fmt.Printf("\n\n%s\n  %s\n", userAgreementPrompt, agreementURL)
+	userAgreementPrompt := `Your sites will be served over HTTPS automatically using an automated CA.
+By continuing, you agree to the CA's terms of service`
+	if agreementURL == "" {
+		fmt.Printf("\n\n%s.\n", userAgreementPrompt)
+		return
+	}
+	fmt.Printf("\n\n%s at:\n  %s\n", userAgreementPrompt, agreementURL)
 }
 
 // askUserAgreement prompts the user to agree to the agreement
@@ -292,20 +240,20 @@ func (*ACMEManager) emailUsername(email string) string {
 	return email[:at]
 }
 
-// mostRecentUserEmail finds the most recently-written user file
+// mostRecentAccountEmail finds the most recently-written account file
 // in storage. Since this is part of a complex sequence to get a user
 // account, errors here are discarded to simplify code flow in
 // the caller, and errors are not important here anyway.
-func (am *ACMEManager) mostRecentUserEmail(caURL string) (string, bool) {
-	userList, err := am.config.Storage.List(am.storageKeyUsersPrefix(caURL), false)
-	if err != nil || len(userList) == 0 {
+func (am *ACMEManager) mostRecentAccountEmail(caURL string) (string, bool) {
+	accountList, err := am.config.Storage.List(am.storageKeyUsersPrefix(caURL), false)
+	if err != nil || len(accountList) == 0 {
 		return "", false
 	}
 
 	// get all the key infos ahead of sorting, because
 	// we might filter some out
 	stats := make(map[string]KeyInfo)
-	for i, u := range userList {
+	for i, u := range accountList {
 		keyInfo, err := am.config.Storage.Stat(u)
 		if err != nil {
 			continue
@@ -317,24 +265,42 @@ func (am *ACMEManager) mostRecentUserEmail(caURL string) (string, bool) {
 			// which existed... sure, this isn't a perfect fix but
 			// frankly one's OS shouldn't mess with the data folder
 			// in the first place.
-			userList = append(userList[:i], userList[i+1:]...)
+			accountList = append(accountList[:i], accountList[i+1:]...)
 			continue
 		}
 		stats[u] = keyInfo
 	}
 
-	sort.Slice(userList, func(i, j int) bool {
-		iInfo := stats[userList[i]]
-		jInfo := stats[userList[j]]
+	sort.Slice(accountList, func(i, j int) bool {
+		iInfo := stats[accountList[i]]
+		jInfo := stats[accountList[j]]
 		return jInfo.Modified.Before(iInfo.Modified)
 	})
 
-	user, err := am.getUser(caURL, path.Base(userList[0]))
+	if len(accountList) == 0 {
+		return "", false
+	}
+
+	account, err := am.getAccount(caURL, path.Base(accountList[0]))
 	if err != nil {
 		return "", false
 	}
 
-	return user.Email, true
+	return getPrimaryContact(account), true
+}
+
+// getPrimaryContact returns the first contact on the account (if any)
+// without the scheme. (I guess we assume an email address.)
+func getPrimaryContact(account acme.Account) string {
+	// TODO: should this be abstracted with some lower-level helper?
+	var primaryContact string
+	if len(account.Contact) > 0 {
+		primaryContact = account.Contact[0]
+		if idx := strings.Index(primaryContact, ":"); idx >= 0 {
+			primaryContact = primaryContact[idx+1:]
+		}
+	}
+	return primaryContact
 }
 
 // agreementTestURL is set during tests to skip requiring

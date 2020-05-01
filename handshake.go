@@ -25,7 +25,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-acme/lego/v3/challenge/tlsalpn01"
+	"github.com/mholt/acmez"
+	"github.com/mholt/acmez/acme"
 )
 
 // GetCertificate gets a certificate to satisfy clientHello. In getting
@@ -42,7 +43,7 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 	// special case: serve up the certificate for a TLS-ALPN ACME challenge
 	// (https://tools.ietf.org/html/draft-ietf-acme-tls-alpn-05)
 	for _, proto := range clientHello.SupportedProtos {
-		if proto == tlsalpn01.ACMETLS1Protocol {
+		if proto == acmez.ACMETLS1Protocol {
 			cfg.certCache.mu.RLock()
 			challengeCert, ok := cfg.certCache.cache[tlsALPNCertKeyName(clientHello.ServerName)]
 			cfg.certCache.mu.RUnlock()
@@ -56,12 +57,14 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 					log.Printf("[ERROR][%s] TLS-ALPN challenge: %v", clientHello.ServerName, err)
 				}
 				if ok {
-					log.Printf("[INFO][%s] Served key authentication certificate (distributed TLS-ALPN challenge)", clientHello.ServerName)
+					log.Printf("[INFO][%s] Served key authentication certificate to %s (distributed TLS-ALPN challenge)",
+						clientHello.ServerName, clientHello.Conn.RemoteAddr().String())
 					return &challengeCert.Certificate, nil
 				}
 				return nil, fmt.Errorf("no certificate to complete TLS-ALPN challenge for SNI name: %s", clientHello.ServerName)
 			}
-			log.Printf("[INFO][%s] Served key authentication certificate (TLS-ALPN challenge)", clientHello.ServerName)
+			log.Printf("[INFO][%s] Served key authentication certificate to %s (TLS-ALPN challenge)",
+				clientHello.ServerName, clientHello.Conn.RemoteAddr().String())
 			return &challengeCert.Certificate, nil
 		}
 	}
@@ -451,13 +454,13 @@ func (cfg *Config) tryDistributedChallengeSolver(clientHello *tls.ClientHelloInf
 		return Certificate{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)
 	}
 
-	var chalInfo challengeInfo
+	var chalInfo acme.Challenge
 	err = json.Unmarshal(chalInfoBytes, &chalInfo)
 	if err != nil {
 		return Certificate{}, false, fmt.Errorf("decoding challenge token file %s (corrupted?): %v", tokenKey, err)
 	}
 
-	cert, err := tlsalpn01.ChallengeCert(chalInfo.Domain, chalInfo.KeyAuth)
+	cert, err := acmez.TLSALPN01ChallengeCert(chalInfo)
 	if err != nil {
 		return Certificate{}, false, fmt.Errorf("making TLS-ALPN challenge certificate: %v", err)
 	}

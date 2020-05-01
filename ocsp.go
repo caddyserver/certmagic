@@ -124,7 +124,7 @@ func stapleOCSP(storage Storage, cert *Certificate, pemBundle []byte) (*ocsp.Res
 // IssuingCertificateURL in the certificate. If the []byte and/or ocsp.Response return
 // values are nil, the OCSP status may be assumed OCSPUnknown.
 //
-// Borrowed from github.com/go-acme/lego
+// Borrowed from xenolf.
 func getOCSPForCert(bundle []byte) ([]byte, *ocsp.Response, error) {
 	// TODO: Perhaps this should be synchronized too, with a Locker?
 

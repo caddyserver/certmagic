@@ -1,9 +1,9 @@
 module github.com/caddyserver/certmagic
 
-go 1.13
+go 1.14
 
 require (
-	github.com/go-acme/lego/v3 v3.4.0
-	github.com/klauspost/cpuid v1.2.3
-	golang.org/x/crypto v0.0.0-20200302210943-78000ba7a073
+	github.com/klauspost/cpuid v1.2.5
+	github.com/mholt/acmez v0.0.0-20200727220025-4d718f4df0cf
+	golang.org/x/crypto v0.0.0-20200427165652-729f1e841bcc
 )

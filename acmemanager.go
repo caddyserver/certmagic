@@ -5,16 +5,13 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/go-acme/lego/v3/acme"
-	"github.com/go-acme/lego/v3/certificate"
-	"github.com/go-acme/lego/v3/challenge"
-	"github.com/go-acme/lego/v3/challenge/dns01"
+	"github.com/mholt/acmez"
+	"github.com/mholt/acmez/acme"
 )
 
 // ACMEManager gets certificates using ACME. It implements the PreChecker,
@@ -45,7 +42,7 @@ type ACMEManager struct {
 
 	// An optional external account to associate
 	// with this ACME account
-	ExternalAccount *ExternalAccountBinding
+	ExternalAccount *acme.EAB
 
 	// Disable all HTTP challenges
 	DisableHTTPChallenge bool
@@ -72,12 +69,7 @@ type ACMEManager struct {
 
 	// The DNS provider to use when solving the
 	// ACME DNS challenge
-	DNSProvider challenge.Provider
-
-	// The ChallengeOption struct to provide
-	// custom precheck or name resolution options
-	// for DNS challenge validation and execution
-	DNSChallengeOption dns01.ChallengeOption
+	DNSProvider acmez.Solver
 
 	// TrustedRoots specifies a pool of root CA
 	// certificates to trust when communicating
@@ -86,13 +78,17 @@ type ACMEManager struct {
 
 	// The maximum amount of time to allow for
 	// obtaining a certificate. If empty, the
-	// default from the underlying lego lib is
+	// default from the underlying ACME lib is
 	// used. If set, it must not be too low so
-	// as to cancel orders too early, running
-	// the risk of rate limiting.
+	// as to cancel challenges too early.
 	CertObtainTimeout time.Duration
 
-	config *Config
+	// Address of custom DNS resolver to be used
+	// when communicating with ACME server
+	Resolver string
+
+	config     *Config
+	httpClient *http.Client
 }
 
 // NewACMEManager constructs a valid ACMEManager based on a template
@@ -108,7 +104,11 @@ func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
 	if template.CA == "" {
 		template.CA = DefaultACME.CA
 	}
-	if template.TestCA == "" {
+	if template.TestCA == "" && template.CA == DefaultACME.CA {
+		// only use the default test CA if the CA is also
+		// the default CA; no point in testing against
+		// Let's Encrypt's staging server if we are not
+		// using their production server too
 		template.TestCA = DefaultACME.TestCA
 	}
 	if template.Email == "" {
@@ -134,9 +134,6 @@ func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
 	}
 	if template.DNSProvider == nil {
 		template.DNSProvider = DefaultACME.DNSProvider
-	}
-	if template.DNSChallengeOption == nil {
-		template.DNSChallengeOption = DefaultACME.DNSChallengeOption
 	}
 	if template.TrustedRoots == nil {
 		template.TrustedRoots = DefaultACME.TrustedRoots
@@ -180,7 +177,7 @@ func (am *ACMEManager) issuerKey(ca string) string {
 // renewing a certificate with ACME, and returns whether this
 // batch is eligible for certificates if using Let's Encrypt.
 // It also ensures that an email address is available.
-func (am *ACMEManager) PreCheck(names []string, interactive bool) error {
+func (am *ACMEManager) PreCheck(_ context.Context, names []string, interactive bool) error {
 	letsEncrypt := strings.Contains(am.CA, "api.letsencrypt.org")
 	if letsEncrypt {
 		for _, name := range names {
@@ -240,9 +237,9 @@ func (am *ACMEManager) Issue(ctx context.Context, csr *x509.CertificateRequest) 
 			// externally; it is hard to tell which! one easy cue is whether the
 			// error is specifically a 429 (Too Many Requests); if so, we should
 			// probably keep retrying
-			var acmeErr acme.ProblemDetails
-			if errors.As(err, &acmeErr) {
-				if acmeErr.HTTPStatus == http.StatusTooManyRequests {
+			var problem acme.Problem
+			if errors.As(err, &problem) {
+				if problem.Status == http.StatusTooManyRequests {
 					// DON'T abort retries; the test CA succeeded (even
 					// if it's cached, it recently succeeded!) so we just
 					// need to keep trying (with backoff) until this CA's
@@ -261,7 +258,7 @@ func (am *ACMEManager) Issue(ctx context.Context, csr *x509.CertificateRequest) 
 }
 
 func (am *ACMEManager) doIssue(ctx context.Context, csr *x509.CertificateRequest, useTestCA bool) (*IssuedCertificate, bool, error) {
-	client, err := am.newACMEClientWithRetry(useTestCA)
+	client, err := am.newACMEClient(ctx, useTestCA, false)
 	if err != nil {
 		return nil, false, err
 	}
@@ -275,64 +272,34 @@ func (am *ACMEManager) doIssue(ctx context.Context, csr *x509.CertificateRequest
 		}
 	}
 
-	certRes, err := client.tryAllEnabledChallenges(ctx, csr)
+	certChains, err := client.acmeClient.ObtainCertificateUsingCSR(ctx, client.account, csr)
 	if err != nil {
 		return nil, usingTestCA, fmt.Errorf("%v %w", nameSet, err)
 	}
 
+	// TODO: ACME server could in theory issue a cert with multiple chains,
+	// but we don't (yet) have a way to choose one, so just use first one
 	ic := &IssuedCertificate{
-		Certificate: certRes.Certificate,
-		Metadata:    certRes,
+		Certificate: certChains[0].ChainPEM,
+		Metadata:    certChains[0],
 	}
 
 	return ic, usingTestCA, nil
 }
 
-func (c *acmeClient) tryAllEnabledChallenges(ctx context.Context, csr *x509.CertificateRequest) (*certificate.Resource, error) {
-	// start with all enabled challenges
-	challenges := c.initialChallenges()
-	if len(challenges) == 0 {
-		return nil, fmt.Errorf("no challenge types enabled")
-	}
-
-	// try while a challenge type is still available
-	var cert *certificate.Resource
-	var err error
-	for len(challenges) > 0 {
-		var chosenChallenge challenge.Type
-		chosenChallenge, challenges = c.nextChallenge(challenges)
-		cert, err = c.acmeClient.Certificate.ObtainForCSR(*csr, true)
-		if err == nil {
-			return cert, nil
-		}
-		log.Printf("[ERROR] %s (challenge=%s remaining=%v)", err, chosenChallenge, challenges)
-		time.Sleep(2 * time.Second)
-	}
-	return cert, err
-}
-
 // Revoke implements the Revoker interface. It revokes the given certificate.
-func (am *ACMEManager) Revoke(ctx context.Context, cert CertificateResource) error {
-	client, err := am.newACMEClient(false, false)
+func (am *ACMEManager) Revoke(ctx context.Context, cert CertificateResource, reason int) error {
+	client, err := am.newACMEClient(ctx, false, false)
 	if err != nil {
 		return err
 	}
 
-	meta := cert.IssuerData.(map[string]interface{})
-	cr := certificate.Resource{
-		Domain:        meta["domain"].(string),
-		CertURL:       meta["certUrl"].(string),
-		CertStableURL: meta["certStableURL"].(string),
+	certs, err := parseCertsFromPEMBundle(cert.CertificatePEM)
+	if err != nil {
+		return err
 	}
 
-	return client.revoke(ctx, cr)
-}
-
-// ExternalAccountBinding contains information for
-// binding an external account to an ACME account.
-type ExternalAccountBinding struct {
-	KeyID string
-	HMAC  []byte
+	return client.revoke(ctx, certs[0], reason)
 }
 
 // DefaultACME specifies the default settings

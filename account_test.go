@@ -16,40 +16,16 @@ package certmagic
 
 import (
 	"bytes"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
+	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/go-acme/lego/v3/registration"
 )
 
-func TestUser(t *testing.T) {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	if err != nil {
-		t.Fatalf("Could not generate test private key: %v", err)
-	}
-	u := user{
-		Email:        "me@mine.com",
-		Registration: new(registration.Resource),
-		key:          privateKey,
-	}
-
-	if expected, actual := "me@mine.com", u.GetEmail(); actual != expected {
-		t.Errorf("Expected email '%s' but got '%s'", expected, actual)
-	}
-	if u.GetRegistration() == nil {
-		t.Error("Expected a registration resource, but got nil")
-	}
-	if expected, actual := privateKey, u.GetPrivateKey(); actual != expected {
-		t.Errorf("Expected the private key at address %p but got one at %p instead ", expected, actual)
-	}
-}
-func TestNewUser(t *testing.T) {
+func TestNewAccount(t *testing.T) {
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
 		Issuer:    am,
@@ -59,22 +35,22 @@ func TestNewUser(t *testing.T) {
 	am.config = testConfig
 
 	email := "me@foobar.com"
-	user, err := am.newUser(email)
+	account, err := am.newAccount(email)
 	if err != nil {
-		t.Fatalf("Error creating user: %v", err)
+		t.Fatalf("Error creating account: %v", err)
 	}
-	if user.key == nil {
+	if account.PrivateKey == nil {
 		t.Error("Private key is nil")
 	}
-	if user.Email != email {
-		t.Errorf("Expected email to be %s, but was %s", email, user.Email)
+	if account.Contact[0] != "mailto:"+email {
+		t.Errorf("Expected email to be %s, but was %s", email, account.Contact[0])
 	}
-	if user.Registration != nil {
-		t.Error("New user already has a registration resource; it shouldn't")
+	if account.Status != "" {
+		t.Error("New account already has a status; it shouldn't")
 	}
 }
 
-func TestSaveUser(t *testing.T) {
+func TestSaveAccount(t *testing.T) {
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
 		Issuer:    am,
@@ -92,22 +68,22 @@ func TestSaveUser(t *testing.T) {
 	}()
 
 	email := "me@foobar.com"
-	user, err := am.newUser(email)
+	account, err := am.newAccount(email)
 	if err != nil {
-		t.Fatalf("Error creating user: %v", err)
+		t.Fatalf("Error creating account: %v", err)
 	}
 
-	err = am.saveUser(am.CA, user)
+	err = am.saveAccount(am.CA, account)
 	if err != nil {
-		t.Fatalf("Error saving user: %v", err)
+		t.Fatalf("Error saving account: %v", err)
 	}
-	_, err = am.getUser(am.CA, email)
+	_, err = am.getAccount(am.CA, email)
 	if err != nil {
-		t.Errorf("Cannot access user data, error: %v", err)
+		t.Errorf("Cannot access account data, error: %v", err)
 	}
 }
 
-func TestGetUserDoesNotAlreadyExist(t *testing.T) {
+func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
 		Issuer:    am,
@@ -116,17 +92,17 @@ func TestGetUserDoesNotAlreadyExist(t *testing.T) {
 	}
 	am.config = testConfig
 
-	user, err := am.getUser(am.CA, "user_does_not_exist@foobar.com")
+	account, err := am.getAccount(am.CA, "account_does_not_exist@foobar.com")
 	if err != nil {
-		t.Fatalf("Error getting user: %v", err)
+		t.Fatalf("Error getting account: %v", err)
 	}
 
-	if user.key == nil {
-		t.Error("Expected user to have a private key, but it was nil")
+	if account.PrivateKey == nil {
+		t.Error("Expected account to have a private key, but it was nil")
 	}
 }
 
-func TestGetUserAlreadyExists(t *testing.T) {
+func TestGetAccountAlreadyExists(t *testing.T) {
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
 		Issuer:    am,
@@ -146,29 +122,33 @@ func TestGetUserAlreadyExists(t *testing.T) {
 	email := "me@foobar.com"
 
 	// Set up test
-	user, err := am.newUser(email)
+	account, err := am.newAccount(email)
 	if err != nil {
-		t.Fatalf("Error creating user: %v", err)
+		t.Fatalf("Error creating account: %v", err)
 	}
-	err = am.saveUser(am.CA, user)
+	err = am.saveAccount(am.CA, account)
 	if err != nil {
-		t.Fatalf("Error saving user: %v", err)
+		t.Fatalf("Error saving account: %v", err)
 	}
 
-	// Expect to load user from disk
-	user2, err := am.getUser(am.CA, email)
+	// Expect to load account from disk
+	loadedAccount, err := am.getAccount(am.CA, email)
 	if err != nil {
-		t.Fatalf("Error getting user: %v", err)
+		t.Fatalf("Error getting account: %v", err)
 	}
+
+	log.Printf("CREATED ACCOUNT: %#v", account)
+	log.Printf(" LOADED ACCOUNT: %#v", account)
 
 	// Assert keys are the same
-	if !privateKeysSame(user.key, user2.key) {
+	if !privateKeysSame(account.PrivateKey, loadedAccount.PrivateKey) {
+		log.Println("OH NOEZ")
 		t.Error("Expected private key to be the same after loading, but it wasn't")
 	}
 
 	// Assert emails are the same
-	if user.Email != user2.Email {
-		t.Errorf("Expected emails to be equal, but was '%s' before and '%s' after loading", user.Email, user2.Email)
+	if !reflect.DeepEqual(account.Contact, loadedAccount.Contact) {
+		t.Errorf("Expected contacts to be equal, but was '%s' before and '%s' after loading", account.Contact, loadedAccount.Contact)
 	}
 }
 
@@ -252,11 +232,11 @@ func TestGetEmailFromRecent(t *testing.T) {
 		"test4-2@foo.com",
 		"TEST4-3@foo.com", // test case insensitivity
 	} {
-		u, err := am.newUser(eml)
+		account, err := am.newAccount(eml)
 		if err != nil {
 			t.Fatalf("Error creating user %d: %v", i, err)
 		}
-		err = am.saveUser(am.CA, u)
+		err = am.saveAccount(am.CA, account)
 		if err != nil {
 			t.Fatalf("Error saving user %d: %v", i, err)
 		}

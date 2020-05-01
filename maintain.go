@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"runtime"
 	"strings"
 	"time"
 
@@ -31,8 +32,22 @@ import (
 // that loops indefinitely and, on a regular schedule, checks
 // certificates for expiration and initiates a renewal of certs
 // that are expiring soon. It also updates OCSP stapling. It
-// should only be called once per cache.
-func (certCache *Cache) maintainAssets() {
+// should only be called once per cache. Panics are recovered,
+// and if panicCount < 10, the function is called recursively,
+// incrementing panicCount each time. Initial invocation should
+// start panicCount at 0.
+func (certCache *Cache) maintainAssets(panicCount int) {
+	defer func() {
+		if err := recover(); err != nil {
+			buf := make([]byte, stackTraceBufferSize)
+			buf = buf[:runtime.Stack(buf, false)]
+			log.Printf("panic: certificate maintenance: %v\n%s", err, buf)
+			if panicCount < 10 {
+				certCache.maintainAssets(panicCount + 1)
+			}
+		}
+	}()
+
 	renewalTicker := time.NewTicker(certCache.options.RenewCheckInterval)
 	ocspTicker := time.NewTicker(certCache.options.OCSPCheckInterval)
 
@@ -235,7 +250,10 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	certCache.mu.RLock()
 	for certHash, cert := range certCache.cache {
 		// no point in updating OCSP for expired certificates
-		if time.Now().After(cert.Leaf.NotAfter) {
+		// TODO: ideally, cert.Leaf will never be nil, however, it currently is
+		// when solving the TLS-ALPN challenge which adds a special cert directly
+		// to the cache, since tls.X509KeyPair() discards the leaf
+		if cert.Leaf == nil || time.Now().After(cert.Leaf.NotAfter) {
 			continue
 		}
 		var lastNextUpdate time.Time
@@ -338,15 +356,15 @@ type CleanStorageOptions struct {
 
 // CleanStorage removes assets which are no longer useful,
 // according to opts.
-func CleanStorage(storage Storage, opts CleanStorageOptions) {
+func CleanStorage(ctx context.Context, storage Storage, opts CleanStorageOptions) {
 	if opts.OCSPStaples {
-		err := deleteOldOCSPStaples(storage)
+		err := deleteOldOCSPStaples(ctx, storage)
 		if err != nil {
 			log.Printf("[ERROR] Deleting old OCSP staples: %v", err)
 		}
 	}
 	if opts.ExpiredCerts {
-		err := deleteExpiredCerts(storage, opts.ExpiredCertGracePeriod)
+		err := deleteExpiredCerts(ctx, storage, opts.ExpiredCertGracePeriod)
 		if err != nil {
 			log.Printf("[ERROR] Deleting expired certificates: %v", err)
 		}
@@ -354,13 +372,19 @@ func CleanStorage(storage Storage, opts CleanStorageOptions) {
 	// TODO: delete stale locks?
 }
 
-func deleteOldOCSPStaples(storage Storage) error {
+func deleteOldOCSPStaples(ctx context.Context, storage Storage) error {
 	ocspKeys, err := storage.List(prefixOCSP, false)
 	if err != nil {
 		// maybe just hasn't been created yet; no big deal
 		return nil
 	}
 	for _, key := range ocspKeys {
+		// if context was cancelled, quit early; otherwise proceed
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		ocspBytes, err := storage.Load(key)
 		if err != nil {
 			log.Printf("[ERROR] While deleting old OCSP staples, unable to load staple file: %v", err)
@@ -386,7 +410,7 @@ func deleteOldOCSPStaples(storage Storage) error {
 	return nil
 }
 
-func deleteExpiredCerts(storage Storage, gracePeriod time.Duration) error {
+func deleteExpiredCerts(ctx context.Context, storage Storage, gracePeriod time.Duration) error {
 	issuerKeys, err := storage.List(prefixCerts, false)
 	if err != nil {
 		// maybe just hasn't been created yet; no big deal
@@ -401,6 +425,13 @@ func deleteExpiredCerts(storage Storage, gracePeriod time.Duration) error {
 		}
 
 		for _, siteKey := range siteKeys {
+			// if context was cancelled, quit early; otherwise proceed
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
 			siteAssets, err := storage.List(siteKey, false)
 			if err != nil {
 				log.Printf("[ERROR] Listing contents of %s: %v", siteKey, err)

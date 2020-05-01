@@ -248,9 +248,9 @@ cache := certmagic.NewCache(certmagic.CacheOptions{
 		// mind that this config value is used as a
 		// template, and will be completed with any
 		// defaults that are set in the Default config
-		return certmagic.Config{
+		return &certmagic.Config{
 			// ...
-		}), nil
+		}, nil
 	},
 	...
 })
@@ -390,7 +390,7 @@ This challenge works by setting a special record in the domain's zone. To do thi
 To enable it, just set the `DNSProvider` field on a `certmagic.Config` struct, or set the default `certmagic.DNSProvider` variable. For example, if my domains' DNS was served by DNSimple and I set my DNSimple API credentials in environment variables:
 
 ```go
-import "github.com/go-acme/lego/v3/providers/dns/dnsimple"
+import "github.com/mholt/acme/providers/dns/dnsimple"
 
 provider, err := dnsimple.NewDNSProvider()
 if err != nil {
