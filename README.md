@@ -248,10 +248,10 @@ cache := certmagic.NewCache(certmagic.CacheOptions{
 		// mind that this config value is used as a
 		// template, and will be completed with any
 		// defaults that are set in the Default config
-		return certmagic.Config{
+		return &certmagic.Config{
 			// ...
 		}, nil
-	}),
+	},
 	...
 })
 
