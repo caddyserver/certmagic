@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"runtime"
 	"strings"
 	"time"
 
@@ -31,8 +32,16 @@ import (
 // that loops indefinitely and, on a regular schedule, checks
 // certificates for expiration and initiates a renewal of certs
 // that are expiring soon. It also updates OCSP stapling. It
-// should only be called once per cache.
+// should only be called once per cache. Panics are recovered.
 func (certCache *Cache) maintainAssets() {
+	defer func() {
+		if err := recover(); err != nil {
+			buf := make([]byte, stackTraceBufferSize)
+			buf = buf[:runtime.Stack(buf, false)]
+			log.Printf("panic: certificate maintenance: %v\n%s", err, buf)
+		}
+	}()
+
 	renewalTicker := time.NewTicker(certCache.options.RenewCheckInterval)
 	ocspTicker := time.NewTicker(certCache.options.OCSPCheckInterval)
 
@@ -235,7 +244,10 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	certCache.mu.RLock()
 	for certHash, cert := range certCache.cache {
 		// no point in updating OCSP for expired certificates
-		if time.Now().After(cert.Leaf.NotAfter) {
+		// TODO: ideally, cert.Leaf will never be nil, however, it currently is
+		// when solving the TLS-ALPN challenge which adds a special cert directly
+		// to the cache, since tls.X509KeyPair() discards the leaf
+		if cert.Leaf == nil || time.Now().After(cert.Leaf.NotAfter) {
 			continue
 		}
 		var lastNextUpdate time.Time

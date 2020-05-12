@@ -246,6 +246,14 @@ func removeLockfile(filename string) error {
 // not terminate until up to lockFreshnessInterval after
 // the lock is released.
 func keepLockfileFresh(filename string) {
+	defer func() {
+		if err := recover(); err != nil {
+			buf := make([]byte, stackTraceBufferSize)
+			buf = buf[:runtime.Stack(buf, false)]
+			log.Printf("panic: active locking: %v\n%s", err, buf)
+		}
+	}()
+
 	for {
 		time.Sleep(lockFreshnessInterval)
 		done, err := updateLockfileFreshness(filename)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -48,6 +49,14 @@ func (jm *jobManager) Submit(name string, job func() error) {
 }
 
 func (jm *jobManager) worker() {
+	defer func() {
+		if err := recover(); err != nil {
+			buf := make([]byte, stackTraceBufferSize)
+			buf = buf[:runtime.Stack(buf, false)]
+			log.Printf("panic: certificate worker: %v\n%s", err, buf)
+		}
+	}()
+
 	for {
 		jm.mu.Lock()
 		if len(jm.queue) == 0 {

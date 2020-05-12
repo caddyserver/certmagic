@@ -470,3 +470,6 @@ var (
 	lnMu            sync.Mutex
 	httpWg          sync.WaitGroup
 )
+
+// Maximum size for the stack trace when recovering from panics.
+const stackTraceBufferSize = 1024 * 1024 * 64

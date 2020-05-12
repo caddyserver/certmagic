@@ -2,6 +2,8 @@ package certmagic
 
 import (
 	"context"
+	"log"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -51,6 +53,14 @@ func (r *RingBufferRateLimiter) Stop() {
 }
 
 func (r *RingBufferRateLimiter) loop() {
+	defer func() {
+		if err := recover(); err != nil {
+			buf := make([]byte, stackTraceBufferSize)
+			buf = buf[:runtime.Stack(buf, false)]
+			log.Printf("panic: ring buffer rate limiter: %v\n%s", err, buf)
+		}
+	}()
+
 	for {
 		// if we've been stopped, return
 		select {

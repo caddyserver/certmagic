@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -75,6 +76,13 @@ func (s *httpSolver) Present(domain, token, keyAuth string) error {
 
 // serve is an HTTP server that serves only HTTP challenge responses.
 func (s *httpSolver) serve(si *solverInfo) {
+	defer func() {
+		if err := recover(); err != nil {
+			buf := make([]byte, stackTraceBufferSize)
+			buf = buf[:runtime.Stack(buf, false)]
+			log.Printf("panic: http solver server: %v\n%s", err, buf)
+		}
+	}()
 	defer close(si.done)
 	httpServer := &http.Server{Handler: s.acmeManager.HTTPChallengeHandler(http.NewServeMux())}
 	httpServer.SetKeepAlivesEnabled(false)
@@ -159,6 +167,13 @@ func (s *tlsALPNSolver) Present(domain, token, keyAuth string) error {
 	si.listener = tls.NewListener(ln, s.config.TLSConfig())
 
 	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				buf := make([]byte, stackTraceBufferSize)
+				buf = buf[:runtime.Stack(buf, false)]
+				log.Printf("panic: tls-alpn solver server: %v\n%s", err, buf)
+			}
+		}()
 		defer close(si.done)
 		for {
 			conn, err := si.listener.Accept()
@@ -178,6 +193,13 @@ func (s *tlsALPNSolver) Present(domain, token, keyAuth string) error {
 
 // handleConn completes the TLS handshake and then closes conn.
 func (*tlsALPNSolver) handleConn(conn net.Conn) {
+	defer func() {
+		if err := recover(); err != nil {
+			buf := make([]byte, stackTraceBufferSize)
+			buf = buf[:runtime.Stack(buf, false)]
+			log.Printf("panic: tls-alpn solver handler: %v\n%s", err, buf)
+		}
+	}()
 	defer conn.Close()
 	tlsConn, ok := conn.(*tls.Conn)
 	if !ok {
