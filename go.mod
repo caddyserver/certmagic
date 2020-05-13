@@ -1,6 +1,6 @@
 module github.com/caddyserver/certmagic
 
-go 1.13
+go 1.14
 
 require (
 	github.com/go-acme/lego/v3 v3.7.0
