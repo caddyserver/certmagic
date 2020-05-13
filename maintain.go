@@ -32,13 +32,19 @@ import (
 // that loops indefinitely and, on a regular schedule, checks
 // certificates for expiration and initiates a renewal of certs
 // that are expiring soon. It also updates OCSP stapling. It
-// should only be called once per cache. Panics are recovered.
-func (certCache *Cache) maintainAssets() {
+// should only be called once per cache. Panics are recovered,
+// and if panicCount < 10, the function is called recursively,
+// incrementing panicCount each time. Initial invocation should
+// start panicCount at 0.
+func (certCache *Cache) maintainAssets(panicCount int) {
 	defer func() {
 		if err := recover(); err != nil {
 			buf := make([]byte, stackTraceBufferSize)
 			buf = buf[:runtime.Stack(buf, false)]
 			log.Printf("panic: certificate maintenance: %v\n%s", err, buf)
+			if panicCount < 10 {
+				certCache.maintainAssets(panicCount + 1)
+			}
 		}
 	}()
 

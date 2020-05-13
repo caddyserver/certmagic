@@ -110,7 +110,7 @@ func NewCache(opts CacheOptions) *Cache {
 		doneChan:   make(chan struct{}),
 	}
 
-	go c.maintainAssets()
+	go c.maintainAssets(0)
 
 	return c
 }
