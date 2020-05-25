@@ -116,7 +116,7 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 	// challenge and issues redirects to HTTPS,
 	// while the HTTPS server simply serves the
 	// user's handler)
-	httpServer := &http.Server{
+	httpServer = &http.Server{
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      5 * time.Second,
@@ -125,7 +125,7 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 	if am, ok := cfg.Issuer.(*ACMEManager); ok {
 		httpServer.Handler = am.HTTPChallengeHandler(http.HandlerFunc(httpRedirectHandler))
 	}
-	httpsServer := &http.Server{
+	httpsServer = &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      2 * time.Minute,
@@ -138,6 +138,27 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 
 	go httpServer.Serve(hln)
 	return httpsServer.Serve(hsln)
+}
+
+// Shutdown gracefully shuts down the servers created by calling HTTPS func.
+func Shutdown(ctx context.Context) error {
+	lnMu.Lock()
+	defer lnMu.Unlock()
+
+	if httpLn == nil && httpsLn == nil {
+		return nil
+	}
+
+	var firstErr error
+
+	if err := httpServer.Shutdown(ctx); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := httpsServer.Shutdown(ctx); err != nil && firstErr == nil {
+		firstErr = err
+	}
+
+	return firstErr
 }
 
 func httpRedirectHandler(w http.ResponseWriter, r *http.Request) {
@@ -466,9 +487,10 @@ var (
 
 // Variables for conveniently serving HTTPS.
 var (
-	httpLn, httpsLn net.Listener
-	lnMu            sync.Mutex
-	httpWg          sync.WaitGroup
+	httpLn, httpsLn         net.Listener
+	httpServer, httpsServer *http.Server
+	lnMu                    sync.Mutex
+	httpWg                  sync.WaitGroup
 )
 
 // Maximum size for the stack trace when recovering from panics.
