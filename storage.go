@@ -227,7 +227,7 @@ func CleanUpOwnLocks() {
 	}
 }
 
-func obtainLock(ctx context.Context, storage Storage, lockKey string) error {
+func acquireLock(ctx context.Context, storage Storage, lockKey string) error {
 	err := storage.Lock(ctx, lockKey)
 	if err == nil {
 		locksMu.Lock()

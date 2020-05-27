@@ -388,7 +388,7 @@ func (cfg *Config) obtainWithIssuer(ctx context.Context, issuer Issuer, name str
 
 	// ensure idempotency of the obtain operation for this name
 	lockKey := cfg.lockKey("cert_acme", name)
-	err := obtainLock(ctx, cfg.Storage, lockKey)
+	err := acquireLock(ctx, cfg.Storage, lockKey)
 	if err != nil {
 		return err
 	}
@@ -474,7 +474,7 @@ func (cfg *Config) renewWithIssuer(ctx context.Context, issuer Issuer, name stri
 
 	// ensure idempotency of the renew operation for this name
 	lockKey := cfg.lockKey("cert_acme", name)
-	err := obtainLock(ctx, cfg.Storage, lockKey)
+	err := acquireLock(ctx, cfg.Storage, lockKey)
 	if err != nil {
 		return err
 	}
