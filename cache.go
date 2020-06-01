@@ -17,6 +17,7 @@ package certmagic
 import (
 	"fmt"
 	"log"
+	weakrand "math/rand" // seeded elsewhere
 	"strings"
 	"sync"
 	"time"
@@ -94,6 +95,9 @@ func NewCache(opts CacheOptions) *Cache {
 	if opts.RenewCheckInterval <= 0 {
 		opts.RenewCheckInterval = DefaultRenewCheckInterval
 	}
+	if opts.Capacity < 0 {
+		opts.Capacity = 0
+	}
 
 	// this must be set, because we cannot not
 	// safely assume that the Default Config
@@ -153,6 +157,11 @@ type CacheOptions struct {
 	// How often to check certificates for renewal;
 	// if unset, DefaultRenewCheckInterval will be used.
 	RenewCheckInterval time.Duration
+
+	// Maximum number of certificates to allow in the cache.
+	// If reached, certificates will be randomly evicted to
+	// make room for new ones. 0 means unlimited.
+	Capacity int
 }
 
 // ConfigGetter is a function that returns a prepared,
@@ -179,6 +188,25 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 	// no-op if this certificate already exists in the cache
 	if _, ok := certCache.cache[cert.hash]; ok {
 		return
+	}
+
+	// if the cache is at capacity, make room for new cert
+	cacheSize := len(certCache.cache)
+	if certCache.options.Capacity > 0 && cacheSize >= certCache.options.Capacity {
+		// Go maps are "nondeterministic" but not actually random,
+		// so although we could just chop off the "front" of the
+		// map with less code, that is a heavily skewed eviction
+		// strategy; generating random numbers is cheap and
+		// ensures a much better distribution.
+		rnd := weakrand.Intn(cacheSize)
+		i := 0
+		for _, randomCert := range certCache.cache {
+			if i == rnd {
+				certCache.removeCertificate(randomCert)
+				break
+			}
+			i++
+		}
 	}
 
 	// store the certificate
