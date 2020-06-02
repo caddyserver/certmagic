@@ -108,7 +108,11 @@ func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
 	if template.CA == "" {
 		template.CA = DefaultACME.CA
 	}
-	if template.TestCA == "" {
+	if template.TestCA == "" && template.CA == DefaultACME.CA {
+		// only use the default test CA if the CA is also
+		// the default CA; no point in testing against
+		// Let's Encrypt's staging server if we are not
+		// using their production server too
 		template.TestCA = DefaultACME.TestCA
 	}
 	if template.Email == "" {

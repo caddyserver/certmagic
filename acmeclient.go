@@ -96,13 +96,6 @@ func (am *ACMEManager) newACMEClient(useTestCA, interactive bool) (*acmeClient, 
 	var caURL string
 	if useTestCA {
 		caURL = am.TestCA
-		// only use the default test CA if the CA is also
-		// the default CA; no point in testing against
-		// Let's Encrypt's staging server if we are not
-		// using their production server too
-		if caURL == "" && am.CA == DefaultACME.CA {
-			caURL = DefaultACME.TestCA
-		}
 	}
 	if caURL == "" {
 		caURL = am.CA
