@@ -93,6 +93,11 @@ type Config struct {
 	// loading TLS assets
 	Storage Storage
 
+	// The rules that define how certificates are loaded
+	// from the storage;
+	// if nil, only exact match will be tried
+	StorageLoad *StorageLoadConfig
+
 	// required pointer to the in-memory cert cache
 	certCache *Cache
 }

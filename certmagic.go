@@ -247,7 +247,7 @@ func ManageAsync(ctx context.Context, domainNames []string) error {
 // containing the names passed into those functions if
 // no DecisionFunc is set. This ensures some degree of
 // control by default to avoid certificate operations for
-// aribtrary domain names. To override this whitelist,
+// arbitrary domain names. To override this whitelist,
 // manually specify a DecisionFunc. To impose rate limits,
 // specify your own DecisionFunc.
 type OnDemandConfig struct {
@@ -283,6 +283,20 @@ func (o *OnDemandConfig) whitelistContains(name string) bool {
 		}
 	}
 	return false
+}
+
+type StorageLoadConfig struct {
+	// Wildcard certificates in the form of *.domain.com
+	// will also be attempted to load from the storage.
+	// This had a performance impact as an extra call to
+	// the storage will be done.
+	TryWildcard bool
+
+	// Wildcard certificates with multiple levels like
+	// *.*.domain.com also be attempted to load from the storage.
+	// This had a performance impact as multiple extra call to
+	// the storage will be done.
+	TryMultiLevelWildcard bool
 }
 
 // isLoopback returns true if the hostname of addr looks

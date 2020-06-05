@@ -229,29 +229,54 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 
 	name := cfg.getNameFromClientHello(hello)
 
-	// If OnDemand is enabled, then we might be able to load or
-	// obtain a needed certificate
-	if cfg.OnDemand != nil && loadIfNecessary {
-		// Then check to see if we have one on disk
-		loadedCert, err := cfg.CacheManagedCertificate(name)
-		if err == nil {
-			loadedCert, err = cfg.handshakeMaintenance(hello, loadedCert)
-			if err != nil {
-				log.Printf("[ERROR] Maintaining newly-loaded certificate for %s: %v", name, err)
-			}
-			return loadedCert, nil
+	if !loadIfNecessary {
+		// Fall back to the default certificate if there is one
+		if defaulted {
+			return cert, nil
 		}
-		if obtainIfNecessary {
-			// By this point, we need to ask the CA for a certificate
+		return Certificate{}, fmt.Errorf("no certificate available for '%s'", name)
+	}
 
-			// Make sure the certificate should be obtained based on config
-			err := cfg.checkIfCertShouldBeObtained(name)
-			if err != nil {
-				return Certificate{}, err
+	// Then check to see if we have one on disk
+	loadedCert, err := cfg.CacheManagedCertificate(name)
+	if err == nil {
+		loadedCert, err = cfg.handshakeMaintenance(hello, loadedCert)
+		if err != nil {
+			log.Printf("[ERROR] Maintaining newly-loaded certificate for %s: %v", name, err)
+		}
+		return loadedCert, nil
+	}
+
+	// If OnDemand is enabled, then we might be able to obtain
+	// a needed certificate
+	if cfg.OnDemand != nil && obtainIfNecessary {
+		// By this point, we need to ask the CA for a certificate
+
+		// Make sure the certificate should be obtained based on config
+		err := cfg.checkIfCertShouldBeObtained(name)
+		if err != nil {
+			return Certificate{}, err
+		}
+
+		// Obtain certificate from the CA
+		return cfg.obtainOnDemandCertificate(hello)
+	}
+
+	if cfg.StorageLoad != nil && cfg.StorageLoad.TryWildcard {
+		// try replacing labels in the name with
+		// wildcards until we get a match
+		labels := strings.Split(name, ".")
+		for i := range labels {
+			labels[i] = "*"
+			candidate := strings.Join(labels, ".")
+			// Then check to see if we have one on disk
+			loadedCert, err := cfg.CacheManagedCertificate(candidate)
+			if err == nil {
+				return loadedCert, nil
 			}
-
-			// Obtain certificate from the CA
-			return cfg.obtainOnDemandCertificate(hello)
+			if i > 0 && cfg.StorageLoad.TryMultiLevelWildcard {
+				break
+			}
 		}
 	}
 

@@ -25,7 +25,11 @@ func TestGetCertificate(t *testing.T) {
 		cache:      make(map[string]Certificate),
 		cacheIndex: make(map[string][]string),
 	}
-	cfg := &Config{certCache: c}
+	cfg := &Config{
+		Issuer:    &ACMEManager{CA: "https://example.com/acme/directory"},
+		Storage:   &FileStorage{Path: "./_testdata_tmp"},
+		certCache: c,
+	}
 
 	// create a test connection for conn.LocalAddr()
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
