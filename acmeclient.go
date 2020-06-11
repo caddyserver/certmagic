@@ -17,7 +17,6 @@ package certmagic
 import (
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"fmt"
 	"log"
 	weakrand "math/rand"
@@ -168,7 +167,7 @@ func (am *ACMEManager) newACMEClient(useTestCA, interactive bool) (*acmeClient, 
 			reg, err = client.Registration.RegisterWithExternalAccountBinding(registration.RegisterEABOptions{
 				TermsOfServiceAgreed: am.Agreed,
 				Kid:                  am.ExternalAccount.KeyID,
-				HmacEncoded:          base64.StdEncoding.EncodeToString(am.ExternalAccount.HMAC),
+				HmacEncoded:          am.ExternalAccount.HMAC,
 			})
 		} else {
 			reg, err = client.Registration.Register(registration.RegisterOptions{

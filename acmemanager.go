@@ -336,7 +336,7 @@ func (am *ACMEManager) Revoke(ctx context.Context, cert CertificateResource) err
 // binding an external account to an ACME account.
 type ExternalAccountBinding struct {
 	KeyID string
-	HMAC  []byte
+	HMAC  string
 }
 
 // DefaultACME specifies the default settings
