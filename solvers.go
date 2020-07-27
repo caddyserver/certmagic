@@ -15,6 +15,7 @@
 package certmagic
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -28,8 +29,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/go-acme/lego/v3/challenge"
-	"github.com/go-acme/lego/v3/challenge/tlsalpn01"
+	"github.com/mholt/acmez"
+	"github.com/mholt/acmez/acme"
 )
 
 // httpSolver solves the HTTP challenge. It must be
@@ -49,7 +50,7 @@ type httpSolver struct {
 }
 
 // Present starts an HTTP server if none is already listening on s.address.
-func (s *httpSolver) Present(domain, token, keyAuth string) error {
+func (s *httpSolver) Present(ctx context.Context, _ acme.Challenge) error {
 	solversMu.Lock()
 	defer solversMu.Unlock()
 
@@ -93,7 +94,7 @@ func (s *httpSolver) serve(si *solverInfo) {
 }
 
 // CleanUp cleans up the HTTP server if it is the last one to finish.
-func (s *httpSolver) CleanUp(domain, token, keyAuth string) error {
+func (s *httpSolver) CleanUp(ctx context.Context, _ acme.Challenge) error {
 	solversMu.Lock()
 	defer solversMu.Unlock()
 	si := getSolverInfo(s.address)
@@ -120,20 +121,20 @@ type tlsALPNSolver struct {
 
 // Present adds the certificate to the certificate cache and, if
 // needed, starts a TLS server for answering TLS-ALPN challenges.
-func (s *tlsALPNSolver) Present(domain, token, keyAuth string) error {
+func (s *tlsALPNSolver) Present(ctx context.Context, chal acme.Challenge) error {
 	// load the certificate into the cache; this isn't strictly necessary
 	// if we're using the distributed solver since our GetCertificate
 	// function will check storage for the keyAuth anyway, but it seems
 	// like loading it into the cache is the right thing to do
-	cert, err := tlsalpn01.ChallengeCert(domain, keyAuth)
+	cert, err := acmez.TLSALPN01ChallengeCert(chal)
 	if err != nil {
 		return err
 	}
 	certHash := hashCertificateChain(cert.Certificate)
 	s.config.certCache.mu.Lock()
-	s.config.certCache.cache[tlsALPNCertKeyName(domain)] = Certificate{
+	s.config.certCache.cache[tlsALPNCertKeyName(chal.Identifier.Value)] = Certificate{
 		Certificate: *cert,
-		Names:       []string{domain},
+		Names:       []string{chal.Identifier.Value},
 		hash:        certHash, // perhaps not necesssary
 	}
 	s.config.certCache.mu.Unlock()
@@ -215,9 +216,9 @@ func (*tlsALPNSolver) handleConn(conn net.Conn) {
 
 // CleanUp removes the challenge certificate from the cache, and if
 // it is the last one to finish, stops the TLS server.
-func (s *tlsALPNSolver) CleanUp(domain, token, keyAuth string) error {
+func (s *tlsALPNSolver) CleanUp(ctx context.Context, chal acme.Challenge) error {
 	s.config.certCache.mu.Lock()
-	delete(s.config.certCache.cache, tlsALPNCertKeyName(domain))
+	delete(s.config.certCache.cache, tlsALPNCertKeyName(chal.Identifier.Value))
 	s.config.certCache.mu.Unlock()
 
 	solversMu.Lock()
@@ -276,7 +277,7 @@ type distributedSolver struct {
 	// Since the distributedSolver is only a
 	// wrapper over an actual solver, place
 	// the actual solver here.
-	providerServer challenge.Provider
+	solver acmez.Solver
 
 	// The CA endpoint URL associated with
 	// this solver.
@@ -286,36 +287,32 @@ type distributedSolver struct {
 // Present invokes the underlying solver's Present method
 // and also stores domain, token, and keyAuth to the storage
 // backing the certificate cache of dhs.acmeManager.
-func (dhs distributedSolver) Present(domain, token, keyAuth string) error {
-	infoBytes, err := json.Marshal(challengeInfo{
-		Domain:  domain,
-		Token:   token,
-		KeyAuth: keyAuth,
-	})
+func (dhs distributedSolver) Present(ctx context.Context, chal acme.Challenge) error {
+	infoBytes, err := json.Marshal(chal)
 	if err != nil {
 		return err
 	}
 
-	err = dhs.acmeManager.config.Storage.Store(dhs.challengeTokensKey(domain), infoBytes)
+	err = dhs.acmeManager.config.Storage.Store(dhs.challengeTokensKey(chal.Identifier.Value), infoBytes)
 	if err != nil {
 		return err
 	}
 
-	err = dhs.providerServer.Present(domain, token, keyAuth)
+	err = dhs.solver.Present(ctx, chal)
 	if err != nil {
-		return fmt.Errorf("presenting with embedded provider: %v", err)
+		return fmt.Errorf("presenting with embedded solver: %v", err)
 	}
 	return nil
 }
 
 // CleanUp invokes the underlying solver's CleanUp method
 // and also cleans up any assets saved to storage.
-func (dhs distributedSolver) CleanUp(domain, token, keyAuth string) error {
-	err := dhs.acmeManager.config.Storage.Delete(dhs.challengeTokensKey(domain))
+func (dhs distributedSolver) CleanUp(ctx context.Context, chal acme.Challenge) error {
+	err := dhs.acmeManager.config.Storage.Delete(dhs.challengeTokensKey(chal.Identifier.Value))
 	if err != nil {
 		return err
 	}
-	err = dhs.providerServer.CleanUp(domain, token, keyAuth)
+	err = dhs.solver.CleanUp(ctx, chal)
 	if err != nil {
 		return fmt.Errorf("cleaning up embedded provider: %v", err)
 	}
@@ -331,10 +328,6 @@ func (dhs distributedSolver) challengeTokensPrefix() string {
 // challenge info for domain.
 func (dhs distributedSolver) challengeTokensKey(domain string) string {
 	return path.Join(dhs.challengeTokensPrefix(), StorageKeys.Safe(domain)+".json")
-}
-
-type challengeInfo struct {
-	Domain, Token, KeyAuth string
 }
 
 // solverInfo associates a listener with the

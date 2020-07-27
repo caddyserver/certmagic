@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -86,6 +87,8 @@ func privateKeyBytes(key crypto.PrivateKey) []byte {
 		keyBytes = x509.MarshalPKCS1PrivateKey(key)
 	case *ecdsa.PrivateKey:
 		keyBytes, _ = x509.MarshalECPrivateKey(key)
+	case ed25519.PrivateKey:
+		return key
 	}
 	return keyBytes
 }

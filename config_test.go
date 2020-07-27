@@ -19,7 +19,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/go-acme/lego/v3/certificate"
+	"github.com/mholt/acmez/acme"
 )
 
 func TestSaveCertResource(t *testing.T) {
@@ -47,10 +47,8 @@ func TestSaveCertResource(t *testing.T) {
 		SANs:           []string{domain},
 		PrivateKeyPEM:  []byte(keyContents),
 		CertificatePEM: []byte(certContents),
-		IssuerData: &certificate.Resource{
-			Domain:        domain,
-			CertURL:       "https://example.com/cert",
-			CertStableURL: "https://example.com/cert/stable",
+		IssuerData: &acme.Certificate{
+			URL: "https://example.com/cert",
 		},
 	}
 
@@ -62,9 +60,7 @@ func TestSaveCertResource(t *testing.T) {
 	// the result of our test will be a map, since we have
 	// no choice but to decode it into an interface
 	cert.IssuerData = map[string]interface{}{
-		"domain":        domain,
-		"certUrl":       "https://example.com/cert",
-		"certStableUrl": "https://example.com/cert/stable",
+		"url": "https://example.com/cert",
 	}
 
 	siteData, err := testConfig.loadCertResource(domain)

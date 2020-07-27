@@ -336,7 +336,7 @@ func hostOnly(hostport string) string {
 // identical calls) to Issue(), giving the issuer the option to ensure
 // it has all the necessary information/state.
 type PreChecker interface {
-	PreCheck(names []string, interactive bool) error
+	PreCheck(ctx context.Context, names []string, interactive bool) error
 }
 
 // Issuer is a type that can issue certificates.
@@ -362,9 +362,11 @@ type Issuer interface {
 	IssuerKey() string
 }
 
-// Revoker can revoke certificates.
+// Revoker can revoke certificates. Reason codes are defined
+// by RFC 5280 §5.3.1: https://tools.ietf.org/html/rfc5280#section-5.3.1
+// and are available as constants in our ACME library.
 type Revoker interface {
-	Revoke(ctx context.Context, cert CertificateResource) error
+	Revoke(ctx context.Context, cert CertificateResource, reason int) error
 }
 
 // KeyGenerator can generate a private key.

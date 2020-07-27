@@ -356,15 +356,15 @@ type CleanStorageOptions struct {
 
 // CleanStorage removes assets which are no longer useful,
 // according to opts.
-func CleanStorage(storage Storage, opts CleanStorageOptions) {
+func CleanStorage(ctx context.Context, storage Storage, opts CleanStorageOptions) {
 	if opts.OCSPStaples {
-		err := deleteOldOCSPStaples(storage)
+		err := deleteOldOCSPStaples(ctx, storage)
 		if err != nil {
 			log.Printf("[ERROR] Deleting old OCSP staples: %v", err)
 		}
 	}
 	if opts.ExpiredCerts {
-		err := deleteExpiredCerts(storage, opts.ExpiredCertGracePeriod)
+		err := deleteExpiredCerts(ctx, storage, opts.ExpiredCertGracePeriod)
 		if err != nil {
 			log.Printf("[ERROR] Deleting expired certificates: %v", err)
 		}
@@ -372,13 +372,19 @@ func CleanStorage(storage Storage, opts CleanStorageOptions) {
 	// TODO: delete stale locks?
 }
 
-func deleteOldOCSPStaples(storage Storage) error {
+func deleteOldOCSPStaples(ctx context.Context, storage Storage) error {
 	ocspKeys, err := storage.List(prefixOCSP, false)
 	if err != nil {
 		// maybe just hasn't been created yet; no big deal
 		return nil
 	}
 	for _, key := range ocspKeys {
+		// if context was cancelled, quit early; otherwise proceed
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		ocspBytes, err := storage.Load(key)
 		if err != nil {
 			log.Printf("[ERROR] While deleting old OCSP staples, unable to load staple file: %v", err)
@@ -404,7 +410,7 @@ func deleteOldOCSPStaples(storage Storage) error {
 	return nil
 }
 
-func deleteExpiredCerts(storage Storage, gracePeriod time.Duration) error {
+func deleteExpiredCerts(ctx context.Context, storage Storage, gracePeriod time.Duration) error {
 	issuerKeys, err := storage.List(prefixCerts, false)
 	if err != nil {
 		// maybe just hasn't been created yet; no big deal
@@ -419,6 +425,13 @@ func deleteExpiredCerts(storage Storage, gracePeriod time.Duration) error {
 		}
 
 		for _, siteKey := range siteKeys {
+			// if context was cancelled, quit early; otherwise proceed
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
 			siteAssets, err := storage.List(siteKey, false)
 			if err != nil {
 				log.Printf("[ERROR] Listing contents of %s: %v", siteKey, err)
