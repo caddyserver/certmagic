@@ -19,7 +19,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"log"
 	weakrand "math/rand"
 	"net"
 	"net/http"
@@ -31,6 +30,7 @@ import (
 
 	"github.com/mholt/acmez"
 	"github.com/mholt/acmez/acme"
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -131,10 +131,12 @@ func (am *ACMEManager) newACMEClient(ctx context.Context, useTestCA, interactive
 			PollTimeout: certObtainTimeout,
 			UserAgent:   buildUAString(),
 			HTTPClient:  hc,
-			// TODO: logging
 		},
 		ChallengeSolvers: make(map[string]acmez.Solver),
-		// TODO: logging
+	}
+	if am.Logger != nil {
+		l := am.Logger.Named("acme_client")
+		client.Client.Logger, client.Logger = l, l
 	}
 
 	// configure challenges (most of the time, DNS challenge is
@@ -249,12 +251,16 @@ func (c *acmeClient) throttle(ctx context.Context, names []string) error {
 		// TODO: stop rate limiter when it is garbage-collected...
 	}
 	rateLimitersMu.Unlock()
-	log.Printf("[INFO]%v Waiting on rate limiter...", names)
+	if c.mgr.Logger != nil {
+		c.mgr.Logger.Info("waiting on internal rate limiter", zap.Strings("identifiers", names))
+	}
 	err := rl.Wait(ctx)
 	if err != nil {
 		return err
 	}
-	log.Printf("[INFO]%v Done waiting", names)
+	if c.mgr.Logger != nil {
+		c.mgr.Logger.Info("done waiting on internal rate limiter", zap.Strings("identifiers", names))
+	}
 	return nil
 }
 
@@ -270,7 +276,7 @@ func (c *acmeClient) revoke(ctx context.Context, cert *x509.Certificate, reason 
 func buildUAString() string {
 	ua := "CertMagic"
 	if UserAgent != "" {
-		ua += " " + UserAgent
+		ua = UserAgent + " " + ua
 	}
 	return ua
 }

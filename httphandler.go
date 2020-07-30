@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/mholt/acmez/acme"
+	"go.uber.org/zap"
 )
 
 // HTTPChallengeHandler wraps h in a handler that can solve the ACME
@@ -78,7 +79,11 @@ func (am *ACMEManager) distributedHTTPChallengeSolver(w http.ResponseWriter, r *
 	chalInfoBytes, err := am.config.Storage.Load(tokenKey)
 	if err != nil {
 		if _, ok := err.(ErrNotExist); !ok {
-			log.Printf("[ERROR][%s] Opening distributed HTTP challenge token file: %v", host, err)
+			if am.Logger != nil {
+				am.Logger.Error("opening distributed HTTP challenge token file",
+					zap.String("host", host),
+					zap.Error(err))
+			}
 		}
 		return false
 	}
@@ -86,7 +91,12 @@ func (am *ACMEManager) distributedHTTPChallengeSolver(w http.ResponseWriter, r *
 	var challenge acme.Challenge
 	err = json.Unmarshal(chalInfoBytes, &challenge)
 	if err != nil {
-		log.Printf("[ERROR][%s] Decoding challenge token file %s (corrupted?): %v", host, tokenKey, err)
+		if am.Logger != nil {
+			am.Logger.Error("decoding HTTP challenge token file (corrupted?)",
+				zap.String("host", host),
+				zap.String("token_key", tokenKey),
+				zap.Error(err))
+		}
 		return false
 	}
 

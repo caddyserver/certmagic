@@ -16,11 +16,12 @@ package certmagic
 
 import (
 	"fmt"
-	"log"
 	weakrand "math/rand" // seeded elsewhere
 	"strings"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // Cache is a structure that stores certificates in memory.
@@ -63,6 +64,8 @@ type Cache struct {
 
 	// Used to signal when stopping is completed
 	doneChan chan struct{}
+
+	logger *zap.Logger
 }
 
 // NewCache returns a new, valid Cache for efficiently
@@ -112,6 +115,7 @@ func NewCache(opts CacheOptions) *Cache {
 		cacheIndex: make(map[string][]string),
 		stopChan:   make(chan struct{}),
 		doneChan:   make(chan struct{}),
+		logger:     opts.Logger,
 	}
 
 	go c.maintainAssets(0)
@@ -162,6 +166,9 @@ type CacheOptions struct {
 	// If reached, certificates will be randomly evicted to
 	// make room for new ones. 0 means unlimited.
 	Capacity int
+
+	// Set a logger to enable logging
+	Logger *zap.Logger
 }
 
 // ConfigGetter is a function that returns a prepared,
@@ -251,8 +258,11 @@ func (certCache *Cache) replaceCertificate(oldCert, newCert Certificate) {
 	certCache.removeCertificate(oldCert)
 	certCache.unsyncedCacheCertificate(newCert)
 	certCache.mu.Unlock()
-	log.Printf("[INFO] Replaced certificate in cache for %v (new expiration date: %s)",
-		newCert.Names, newCert.Leaf.NotAfter.Format("2006-01-02 15:04:05"))
+	if certCache.logger != nil {
+		certCache.logger.Info("replaced certificate in cache",
+			zap.Strings("identifiers", newCert.Names),
+			zap.Time("new_expiration", newCert.Leaf.NotAfter))
+	}
 }
 
 func (certCache *Cache) getFirstMatchingCert(name string) (Certificate, bool) {

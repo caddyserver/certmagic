@@ -16,7 +16,6 @@ package certmagic
 
 import (
 	"bytes"
-	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -137,12 +136,8 @@ func TestGetAccountAlreadyExists(t *testing.T) {
 		t.Fatalf("Error getting account: %v", err)
 	}
 
-	log.Printf("CREATED ACCOUNT: %#v", account)
-	log.Printf(" LOADED ACCOUNT: %#v", account)
-
 	// Assert keys are the same
 	if !privateKeysSame(account.PrivateKey, loadedAccount.PrivateKey) {
-		log.Println("OH NOEZ")
 		t.Error("Expected private key to be the same after loading, but it wasn't")
 	}
 

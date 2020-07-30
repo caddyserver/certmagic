@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 var jm = &jobManager{maxConcurrentJobs: 1000}
@@ -20,15 +22,16 @@ type jobManager struct {
 }
 
 type namedJob struct {
-	name string
-	job  func() error
+	name   string
+	job    func() error
+	logger *zap.Logger
 }
 
 // Submit enqueues the given job with the given name. If name is non-empty
 // and a job with the same name is already enqueued or running, this is a
 // no-op. If name is empty, no duplicate prevention will occur. The job
 // manager will then run this job as soon as it is able.
-func (jm *jobManager) Submit(name string, job func() error) {
+func (jm *jobManager) Submit(logger *zap.Logger, name string, job func() error) {
 	jm.mu.Lock()
 	defer jm.mu.Unlock()
 	if jm.names == nil {
@@ -41,7 +44,7 @@ func (jm *jobManager) Submit(name string, job func() error) {
 		}
 		jm.names[name] = struct{}{}
 	}
-	jm.queue = append(jm.queue, namedJob{name, job})
+	jm.queue = append(jm.queue, namedJob{name, job, logger})
 	if jm.activeWorkers < jm.maxConcurrentJobs {
 		jm.activeWorkers++
 		go jm.worker()
@@ -68,7 +71,9 @@ func (jm *jobManager) worker() {
 		jm.queue = jm.queue[1:]
 		jm.mu.Unlock()
 		if err := next.job(); err != nil {
-			log.Printf("[ERROR] %v", err)
+			if next.logger != nil {
+				next.logger.Error("job failed", zap.Error(err))
+			}
 		}
 		if next.name != "" {
 			jm.mu.Lock()
@@ -78,7 +83,7 @@ func (jm *jobManager) worker() {
 	}
 }
 
-func doWithRetry(ctx context.Context, f func(context.Context) error) error {
+func doWithRetry(ctx context.Context, log *zap.Logger, f func(context.Context) error) error {
 	var attempts int
 	ctx = context.WithValue(ctx, AttemptsCtxKey, &attempts)
 
@@ -111,11 +116,22 @@ func doWithRetry(ctx context.Context, f func(context.Context) error) error {
 				intervalIndex++
 			}
 			if time.Since(start) < maxRetryDuration {
-				log.Printf("[ERROR] attempt %d: %v - retrying in %s (%s/%s elapsed)...",
-					attempts, err, retryIntervals[intervalIndex], time.Since(start), maxRetryDuration)
+				if log != nil {
+					log.Error("will retry",
+						zap.Error(err),
+						zap.Int("attempt", attempts),
+						zap.Duration("retrying_in", retryIntervals[intervalIndex]),
+						zap.Duration("elapsed", time.Since(start)),
+						zap.Duration("max_duration", maxRetryDuration))
+				}
 			} else {
-				log.Printf("[ERROR] final attempt: %v - giving up (%s/%s elapsed)...",
-					err, time.Since(start), maxRetryDuration)
+				if log != nil {
+					log.Error("final attempt; giving up",
+						zap.Error(err),
+						zap.Int("attempt", attempts),
+						zap.Duration("elapsed", time.Since(start)),
+						zap.Duration("max_duration", maxRetryDuration))
+				}
 				return nil
 			}
 		}

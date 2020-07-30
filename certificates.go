@@ -19,11 +19,11 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/crypto/ocsp"
 )
 
@@ -108,7 +108,7 @@ func (cfg *Config) loadManagedCertificate(domain string) (Certificate, error) {
 	if err != nil {
 		return Certificate{}, err
 	}
-	cert, err := makeCertificateWithOCSP(cfg.Storage, certRes.CertificatePEM, certRes.PrivateKeyPEM)
+	cert, err := cfg.makeCertificateWithOCSP(certRes.CertificatePEM, certRes.PrivateKeyPEM)
 	if err != nil {
 		return cert, err
 	}
@@ -122,7 +122,7 @@ func (cfg *Config) loadManagedCertificate(domain string) (Certificate, error) {
 //
 // This method is safe for concurrent use.
 func (cfg *Config) CacheUnmanagedCertificatePEMFile(certFile, keyFile string, tags []string) error {
-	cert, err := makeCertificateFromDiskWithOCSP(cfg.Storage, certFile, keyFile)
+	cert, err := cfg.makeCertificateFromDiskWithOCSP(cfg.Storage, certFile, keyFile)
 	if err != nil {
 		return err
 	}
@@ -143,8 +143,8 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(tlsCert tls.Certificate, tags []
 		return err
 	}
 	_, err = stapleOCSP(cfg.Storage, &cert, nil)
-	if err != nil {
-		log.Printf("[WARNING] Stapling OCSP: %v", err)
+	if err != nil && cfg.Logger != nil {
+		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
 	}
 	cfg.emit("cached_unmanaged_cert", cert.Names)
 	cert.Tags = tags
@@ -157,7 +157,7 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(tlsCert tls.Certificate, tags []
 //
 // This method is safe for concurrent use.
 func (cfg *Config) CacheUnmanagedCertificatePEMBytes(certBytes, keyBytes []byte, tags []string) error {
-	cert, err := makeCertificateWithOCSP(cfg.Storage, certBytes, keyBytes)
+	cert, err := cfg.makeCertificateWithOCSP(certBytes, keyBytes)
 	if err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func (cfg *Config) CacheUnmanagedCertificatePEMBytes(certBytes, keyBytes []byte,
 // certificate and key files. It fills out all the fields in
 // the certificate except for the Managed and OnDemand flags.
 // (It is up to the caller to set those.) It staples OCSP.
-func makeCertificateFromDiskWithOCSP(storage Storage, certFile, keyFile string) (Certificate, error) {
+func (cfg Config) makeCertificateFromDiskWithOCSP(storage Storage, certFile, keyFile string) (Certificate, error) {
 	certPEMBlock, err := ioutil.ReadFile(certFile)
 	if err != nil {
 		return Certificate{}, err
@@ -180,19 +180,19 @@ func makeCertificateFromDiskWithOCSP(storage Storage, certFile, keyFile string) 
 	if err != nil {
 		return Certificate{}, err
 	}
-	return makeCertificateWithOCSP(storage, certPEMBlock, keyPEMBlock)
+	return cfg.makeCertificateWithOCSP(certPEMBlock, keyPEMBlock)
 }
 
 // makeCertificateWithOCSP is the same as makeCertificate except that it also
 // staples OCSP to the certificate.
-func makeCertificateWithOCSP(storage Storage, certPEMBlock, keyPEMBlock []byte) (Certificate, error) {
+func (cfg Config) makeCertificateWithOCSP(certPEMBlock, keyPEMBlock []byte) (Certificate, error) {
 	cert, err := makeCertificate(certPEMBlock, keyPEMBlock)
 	if err != nil {
 		return cert, err
 	}
-	_, err = stapleOCSP(storage, &cert, certPEMBlock)
-	if err != nil {
-		log.Printf("[WARNING] Stapling OCSP: %v", err)
+	_, err = stapleOCSP(cfg.Storage, &cert, certPEMBlock)
+	if err != nil && cfg.Logger != nil {
+		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
 	}
 	return cert, nil
 }
@@ -304,7 +304,9 @@ func (cfg *Config) managedCertInStorageExpiresSoon(cert Certificate) (bool, erro
 // to the new cert. It assumes that the new certificate for oldCert.Names[0] is
 // already in storage.
 func (cfg *Config) reloadManagedCertificate(oldCert Certificate) error {
-	log.Printf("[INFO] Reloading managed certificate for %v", oldCert.Names)
+	if cfg.Logger != nil {
+		cfg.Logger.Info("reloading managed certificate", zap.Strings("identifiers", oldCert.Names))
+	}
 	newCert, err := cfg.loadManagedCertificate(oldCert.Names[0])
 	if err != nil {
 		return fmt.Errorf("loading managed certificate for %v from storage: %v", oldCert.Names, err)

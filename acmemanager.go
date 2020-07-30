@@ -12,6 +12,7 @@ import (
 
 	"github.com/mholt/acmez"
 	"github.com/mholt/acmez/acme"
+	"go.uber.org/zap"
 )
 
 // ACMEManager gets certificates using ACME. It implements the PreChecker,
@@ -87,6 +88,9 @@ type ACMEManager struct {
 	// when communicating with ACME server
 	Resolver string
 
+	// Set a logger to enable logging
+	Logger *zap.Logger
+
 	config     *Config
 	httpClient *http.Client
 }
@@ -140,6 +144,12 @@ func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
 	}
 	if template.CertObtainTimeout == 0 {
 		template.CertObtainTimeout = DefaultACME.CertObtainTimeout
+	}
+	if template.Resolver == "" {
+		template.Resolver = DefaultACME.Resolver
+	}
+	if template.Logger == nil {
+		template.Logger = DefaultACME.Logger
 	}
 	template.config = cfg
 	return &template
