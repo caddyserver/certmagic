@@ -177,6 +177,51 @@ func (cfg *Config) loadCertResource(certNamesKey string) (CertificateResource, e
 	if err != nil {
 		return CertificateResource{}, fmt.Errorf("decoding certificate metadata: %v", err)
 	}
+
+	// TODO: July 2020 - transition to new ACME lib and cert resource structure;
+	// for a while, we will need to convert old cert resources to new structure
+	certRes, err = cfg.transitionCertMetaToACMEzJuly2020Format(certRes, metaBytes)
+	if err != nil {
+		return certRes, fmt.Errorf("one-time certificate resource transition: %v", err)
+	}
+
+	return certRes, nil
+}
+
+// TODO: this is a temporary transition helper starting July 2020.
+// It can go away when we think enough time has passed that most active assets have transitioned.
+func (cfg *Config) transitionCertMetaToACMEzJuly2020Format(certRes CertificateResource, metaBytes []byte) (CertificateResource, error) {
+	data, ok := certRes.IssuerData.(map[string]interface{})
+	if !ok {
+		return certRes, nil
+	}
+	if certURL, ok := data["url"].(string); ok && certURL != "" {
+		return certRes, nil
+	}
+
+	var oldCertRes struct {
+		SANs       []string `json:"sans"`
+		IssuerData struct {
+			Domain        string `json:"domain"`
+			CertURL       string `json:"certUrl"`
+			CertStableURL string `json:"certStableUrl"`
+		} `json:"issuer_data"`
+	}
+	err := json.Unmarshal(metaBytes, &oldCertRes)
+	if err != nil {
+		return certRes, fmt.Errorf("decoding into old certificate resource type: %v", err)
+	}
+
+	data = map[string]interface{}{
+		"url": oldCertRes.IssuerData.CertURL,
+	}
+	certRes.IssuerData = data
+
+	err = cfg.saveCertResource(certRes)
+	if err != nil {
+		return certRes, fmt.Errorf("saving converted certificate resource: %v", err)
+	}
+
 	return certRes, nil
 }
 

@@ -54,7 +54,56 @@ func (am *ACMEManager) getAccount(ca, email string) (acme.Account, error) {
 		return acct, err
 	}
 	acct.PrivateKey, err = decodePrivateKey(keyBytes)
+
+	// TODO: July 2020 - transition to new ACME lib and account structure;
+	// for a while, we will need to convert old accounts to new structure
+	acct, err = am.transitionAccountToACMEzJuly2020Format(ca, acct, regBytes)
+	if err != nil {
+		return acct, fmt.Errorf("one-time account transition: %v", err)
+	}
+
 	return acct, err
+}
+
+// TODO: this is a temporary transition helper starting July 2020.
+// It can go away when we think enough time has passed that most active assets have transitioned.
+func (am *ACMEManager) transitionAccountToACMEzJuly2020Format(ca string, acct acme.Account, regBytes []byte) (acme.Account, error) {
+	if acct.Status != "" && acct.Location != "" {
+		return acct, nil
+	}
+
+	var oldAcct struct {
+		Email        string `json:"Email"`
+		Registration struct {
+			Body struct {
+				Status                 string          `json:"status"`
+				TermsOfServiceAgreed   bool            `json:"termsOfServiceAgreed"`
+				Orders                 string          `json:"orders"`
+				ExternalAccountBinding json.RawMessage `json:"externalAccountBinding"`
+			} `json:"body"`
+			URI string `json:"uri"`
+		} `json:"Registration"`
+	}
+	err := json.Unmarshal(regBytes, &oldAcct)
+	if err != nil {
+		return acct, fmt.Errorf("decoding into old account type: %v", err)
+	}
+
+	acct.Status = oldAcct.Registration.Body.Status
+	acct.TermsOfServiceAgreed = oldAcct.Registration.Body.TermsOfServiceAgreed
+	acct.Location = oldAcct.Registration.URI
+	acct.ExternalAccountBinding = oldAcct.Registration.Body.ExternalAccountBinding
+	acct.Orders = oldAcct.Registration.Body.Orders
+	if oldAcct.Email != "" {
+		acct.Contact = []string{"mailto:" + oldAcct.Email}
+	}
+
+	err = am.saveAccount(ca, acct)
+	if err != nil {
+		return acct, fmt.Errorf("saving converted account: %v", err)
+	}
+
+	return acct, nil
 }
 
 // newAccount generates a new private key for a new ACME account, but
