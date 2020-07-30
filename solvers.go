@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/libdns/libdns"
 	"github.com/mholt/acmez"
 	"github.com/mholt/acmez/acme"
 )
@@ -246,6 +247,138 @@ func tlsALPNCertKeyName(sniName string) string {
 	return sniName + ":acme-tls-alpn"
 }
 
+// DNS01Solver is a type that makes libdns providers usable
+// as ACME dns-01 challenge solvers.
+// See https://github.com/libdns/libdns
+type DNS01Solver struct {
+	// The implementation that interacts with the DNS
+	// provider to set or delete records. (REQUIRED)
+	DNSProvider ACMEDNSProvider
+
+	// The TTL for the temporary challenge records.
+	TTL time.Duration
+
+	// Maximum time to wait for temporary record to appear.
+	PropagationTimeout time.Duration
+
+	txtRecords   map[string]dnsPresentMemory // keyed by domain name
+	txtRecordsMu sync.Mutex
+}
+
+// Present creates the DNS TXT record for the given ACME challenge.
+func (s *DNS01Solver) Present(ctx context.Context, challenge acme.Challenge) error {
+	dnsName := challenge.DNS01TXTRecordName()
+	keyAuth := challenge.DNS01KeyAuthorization()
+
+	rec := libdns.Record{
+		Type:  "TXT",
+		Name:  dnsName,
+		Value: keyAuth,
+		TTL:   s.TTL,
+	}
+
+	zone, err := findZoneByFQDN(dnsName, recursiveNameservers)
+	if err != nil {
+		return fmt.Errorf("could not determine zone for domain %q: %v", dnsName, err)
+	}
+
+	results, err := s.DNSProvider.AppendRecords(ctx, zone, []libdns.Record{rec})
+	if err != nil {
+		return fmt.Errorf("adding temporary record for zone %s: %w", zone, err)
+	}
+	if len(results) != 1 {
+		return fmt.Errorf("expected one record, got %d: %v", len(results), results)
+	}
+
+	// remember the record and zone we got so we can clean up more efficiently
+	s.txtRecordsMu.Lock()
+	if s.txtRecords == nil {
+		s.txtRecords = make(map[string]dnsPresentMemory)
+	}
+	s.txtRecords[dnsName] = dnsPresentMemory{dnsZone: zone, rec: results[0]}
+	s.txtRecordsMu.Unlock()
+
+	return nil
+}
+
+// Wait blocks until the TXT record created in Present() appears in
+// authoritative lookups, i.e. until it has propagated, or until
+// timeout, whichever is first.
+func (s *DNS01Solver) Wait(ctx context.Context, challenge acme.Challenge) error {
+	dnsName := challenge.DNS01TXTRecordName()
+	keyAuth := challenge.DNS01KeyAuthorization()
+
+	timeout := s.PropagationTimeout
+	if timeout == 0 {
+		timeout = 2 * time.Minute
+	}
+	const interval = 2 * time.Second
+
+	var err error
+	start := time.Now()
+	for time.Since(start) < timeout {
+		select {
+		case <-time.After(interval):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		var ready bool
+		ready, err = checkDNSPropagation(dnsName, keyAuth)
+		if err != nil {
+			return fmt.Errorf("checking DNS propagation of %s: %w", dnsName, err)
+		}
+		if ready {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("timed out waiting for record to fully propagate; verify DNS provider configuration is correct - last error: %v", err)
+}
+
+// CleanUp deletes the DNS TXT record created in Present().
+func (s *DNS01Solver) CleanUp(ctx context.Context, challenge acme.Challenge) error {
+	dnsName := challenge.DNS01TXTRecordName()
+
+	defer func() {
+		// always forget about it so we don't leak memory
+		s.txtRecordsMu.Lock()
+		delete(s.txtRecords, dnsName)
+		s.txtRecordsMu.Unlock()
+	}()
+
+	// recall the record we created and zone we looked up
+	s.txtRecordsMu.Lock()
+	memory, ok := s.txtRecords[dnsName]
+	if !ok {
+		s.txtRecordsMu.Unlock()
+		return fmt.Errorf("no memory of presenting a DNS record for %s (probably OK if presenting failed)", challenge.Identifier.Value)
+	}
+	s.txtRecordsMu.Unlock()
+
+	// clean up the record
+	_, err := s.DNSProvider.DeleteRecords(ctx, memory.dnsZone, []libdns.Record{memory.rec})
+	if err != nil {
+		return fmt.Errorf("deleting temporary record for zone %s: %w", memory.dnsZone, err)
+	}
+
+	return nil
+}
+
+type dnsPresentMemory struct {
+	dnsZone string
+	rec     libdns.Record
+}
+
+// ACMEDNSProvider defines the set of operations required for
+// ACME challenges. A DNS provider must be able to append and
+// delete records in order to solve ACME challenges. Find one
+// you can use at https://github.com/libdns. If your provider
+// isn't implemented yet, feel free to contribute!
+type ACMEDNSProvider interface {
+	libdns.RecordAppender
+	libdns.RecordDeleter
+}
+
 // distributedSolver allows the ACME HTTP-01 and TLS-ALPN challenges
 // to be solved by an instance other than the one which initiated it.
 // This is useful behind load balancers or in other cluster/fleet
@@ -424,4 +557,10 @@ func dialTCPSocket(addr string) error {
 var (
 	solvers   = make(map[string]*solverInfo)
 	solversMu sync.Mutex
+)
+
+// Interface guards
+var (
+	_ acmez.Solver = (*DNS01Solver)(nil)
+	_ acmez.Waiter = (*DNS01Solver)(nil)
 )

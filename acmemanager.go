@@ -68,9 +68,10 @@ type ACMEManager struct {
 	// challenge to succeed
 	AltTLSALPNPort int
 
-	// The DNS provider to use when solving the
-	// ACME DNS challenge
-	DNSProvider acmez.Solver
+	// The solver for the dns-01 challenge;
+	// usually this is a DNS01Solver value
+	// from this package
+	DNS01Solver acmez.Solver
 
 	// TrustedRoots specifies a pool of root CA
 	// certificates to trust when communicating
@@ -136,8 +137,8 @@ func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
 	if template.AltTLSALPNPort == 0 {
 		template.AltTLSALPNPort = DefaultACME.AltTLSALPNPort
 	}
-	if template.DNSProvider == nil {
-		template.DNSProvider = DefaultACME.DNSProvider
+	if template.DNS01Solver == nil {
+		template.DNS01Solver = DefaultACME.DNS01Solver
 	}
 	if template.TrustedRoots == nil {
 		template.TrustedRoots = DefaultACME.TrustedRoots

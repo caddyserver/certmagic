@@ -142,7 +142,7 @@ func (am *ACMEManager) newACMEClient(ctx context.Context, useTestCA, interactive
 	// configure challenges (most of the time, DNS challenge is
 	// exclusive of other ones because it is usually only used
 	// in situations where the default challenges would fail)
-	if am.DNSProvider == nil {
+	if am.DNS01Solver == nil {
 		// enable HTTP-01 challenge
 		if !am.DisableHTTPChallenge {
 			useHTTPPort := HTTPChallengePort
@@ -182,7 +182,7 @@ func (am *ACMEManager) newACMEClient(ctx context.Context, useTestCA, interactive
 		}
 	} else {
 		// use DNS challenge exclusively
-		client.ChallengeSolvers[acme.ChallengeTypeDNS01] = am.DNSProvider
+		client.ChallengeSolvers[acme.ChallengeTypeDNS01] = am.DNS01Solver
 	}
 
 	// register account if it is new
