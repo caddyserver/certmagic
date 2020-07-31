@@ -90,8 +90,9 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 	- Robust retries for up to 30 days
 	- Exponential backoff with carefully-tuned intervals
 	- Retries with optional test/staging CA endpoint instead of production, to avoid rate limits
-- Over 50 DNS providers work out-of-the-box (powered by [lego](https://github.com/go-acme/lego)!)
 - Written in Go, a language with memory-safety guarantees
+- Powered by [ACMEz](https://github.com/mholt/acmez), _the_ premier ACME client library for Go
+- All [libdns](https://github.com/libdns) DNS providers work out-of-the-box
 - Pluggable storage implementations (default: file system)
 - Wildcard certificates
 - Automatic OCSP stapling ([done right](https://gist.github.com/sleevi/5efe9ef98961ecfb4da8#gistcomment-2336055)) [keeps your sites online!](https://twitter.com/caddyserver/status/1234874273724084226)
@@ -385,30 +386,21 @@ ln, err := tls.Listen("tcp", ":443", myTLSConfig)
 
 The DNS challenge is perhaps the most useful challenge because it allows you to obtain certificates without your server needing to be publicly accessible on the Internet, and it's the only challenge by which Let's Encrypt will issue wildcard certificates.
 
-This challenge works by setting a special record in the domain's zone. To do this automatically, your DNS provider needs to offer an API by which changes can be made to domain names, and the changes need to take effect immediately for best results. CertMagic supports [all of lego's DNS provider implementations](https://github.com/go-acme/lego/tree/master/providers/dns)! All of them clean up the temporary record after the challenge completes.
+This challenge works by setting a special record in the domain's zone. To do this automatically, your DNS provider needs to offer an API by which changes can be made to domain names, and the changes need to take effect immediately for best results. CertMagic supports [all DNS providers with `libdns` implementations](https://github.com/libdns)! It always cleans up the temporary record after the challenge completes.
 
-To enable it, just set the `DNSProvider` field on a `certmagic.Config` struct, or set the default `certmagic.DNSProvider` variable. For example, if my domains' DNS was served by DNSimple and I set my DNSimple API credentials in environment variables:
+To enable it, just set the `DNS01Solver` field on a `certmagic.ACMEManager` struct, or set the default `certmagic.ACMEManager.DNS01Solver` variable. For example, if my domains' DNS was served by Cloudflare:
 
 ```go
-import "github.com/mholt/acme/providers/dns/dnsimple"
+import "github.com/libdns/cloudflare"
 
-provider, err := dnsimple.NewDNSProvider()
-if err != nil {
-	return err
+certmagic.DefaultACME.DNS01Solver = &certmagic.DNS01Solver{
+	DNSProvider: cloudflare.Provider{
+		APIToken: "topsecret",
+	},
 }
-
-certmagic.DefaultACME.DNSProvider = provider
 ```
 
-Now the DNS challenge will be used by default, and I can obtain certificates for wildcard domains. See the [pkg.go.dev documentation for the provider you're using](https://pkg.go.dev/github.com/go-acme/lego/providers/dns?tab=subdirectories) to learn how to configure it. Most can be configured by env variables or by passing in a config struct. If you pass a config struct instead of using env variables, you will probably need to set some other defaults (that's just how lego works, currently):
-
-```go
-PropagationTimeout: dns01.DefaultPollingInterval,
-PollingInterval:    dns01.DefaultPollingInterval,
-TTL:                dns01.DefaultTTL,
-```
-
-Enabling the DNS challenge disables the other challenges for that `certmagic.Config` instance.
+Now the DNS challenge will be used by default, and I can obtain certificates for wildcard domains, too. Enabling the DNS challenge disables the other challenges for that `certmagic.ACMEManager` instance.
 
 
 ## On-Demand TLS
@@ -503,7 +495,7 @@ We welcome your contributions! Please see our **[contributing guidelines](https:
 
 ## Project History
 
-CertMagic is the core of Caddy's advanced TLS automation code, extracted into a library. The underlying ACME client implementation is [lego](https://github.com/go-acme/lego), which was originally developed for use in Caddy even before Let's Encrypt entered public beta in 2015.
+CertMagic is the core of Caddy's advanced TLS automation code, extracted into a library. The underlying ACME client implementation is [ACMEz](https://github.com/mholt/acmez). CertMagic's code was originally a central part of Caddy even before Let's Encrypt entered public beta in 2015.
 
 In the years since then, Caddy's TLS automation techniques have been widely adopted, tried and tested in production, and served millions of sites and secured trillions of connections.
 
