@@ -122,6 +122,9 @@ func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
 	if !template.Agreed {
 		template.Agreed = DefaultACME.Agreed
 	}
+	if template.ExternalAccount == nil {
+		template.ExternalAccount = DefaultACME.ExternalAccount
+	}
 	if !template.DisableHTTPChallenge {
 		template.DisableHTTPChallenge = DefaultACME.DisableHTTPChallenge
 	}
