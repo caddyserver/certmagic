@@ -461,24 +461,23 @@ func (cfg *Config) obtainWithIssuer(ctx context.Context, issuer Issuer, name str
 		if err != nil {
 			return fmt.Errorf("[%s] Obtain: saving assets: %v", name, err)
 		}
+
+		cfg.emit("cert_obtained", name)
+
+		if log != nil {
+			log.Info("certificate obtained successfully", zap.String("identifier", name))
+		}
+
 		return nil
 	}
+
 	if interactive {
 		err = f(ctx)
 	} else {
 		err = doWithRetry(ctx, log, f)
 	}
-	if err != nil {
-		return err
-	}
 
-	cfg.emit("cert_obtained", name)
-
-	if log != nil {
-		log.Info("certificate obtained successfully", zap.String("identifier", name))
-	}
-
-	return nil
+	return err
 }
 
 // RenewCert renews the certificate for name using cfg. It stows the
@@ -573,24 +572,23 @@ func (cfg *Config) renewWithIssuer(ctx context.Context, issuer Issuer, name stri
 		if err != nil {
 			return fmt.Errorf("[%s] Renew: saving assets: %v", name, err)
 		}
+
+		cfg.emit("cert_renewed", name)
+
+		if log != nil {
+			log.Info("certificate renewed successfully", zap.String("identifier", name))
+		}
+
 		return nil
 	}
+
 	if interactive {
 		err = f(ctx)
 	} else {
 		err = doWithRetry(ctx, log, f)
 	}
-	if err != nil {
-		return err
-	}
 
-	cfg.emit("cert_renewed", name)
-
-	if log != nil {
-		log.Info("certificate renewed successfully", zap.String("identifier", name))
-	}
-
-	return nil
+	return err
 }
 
 func (cfg *Config) generateCSR(privateKey crypto.PrivateKey, sans []string) (*x509.CertificateRequest, error) {
