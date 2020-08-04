@@ -187,20 +187,29 @@ func (am *ACMEManager) newACMEClient(ctx context.Context, useTestCA, interactive
 
 	// register account if it is new
 	if account.Status == "" {
+		if am.NewAccountFunc != nil {
+			err = am.NewAccountFunc(ctx, am, account)
+			if err != nil {
+				return nil, fmt.Errorf("account pre-registration callback: %v", err)
+			}
+		}
+
 		// agree to terms
 		if interactive {
-			var termsURL string
-			dir, err := client.GetDirectory(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("getting directory: %w", err)
-			}
-			if dir.Meta != nil {
-				termsURL = dir.Meta.TermsOfService
-			}
-			if !am.Agreed && termsURL != "" {
-				am.Agreed = am.askUserAgreement(termsURL)
-				if !am.Agreed {
-					return nil, fmt.Errorf("user must agree to CA terms")
+			if !am.Agreed {
+				var termsURL string
+				dir, err := client.GetDirectory(ctx)
+				if err != nil {
+					return nil, fmt.Errorf("getting directory: %w", err)
+				}
+				if dir.Meta != nil {
+					termsURL = dir.Meta.TermsOfService
+				}
+				if termsURL != "" {
+					am.Agreed = am.askUserAgreement(termsURL)
+					if !am.Agreed {
+						return nil, fmt.Errorf("user must agree to CA terms")
+					}
 				}
 			}
 		} else {

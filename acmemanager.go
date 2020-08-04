@@ -89,6 +89,13 @@ type ACMEManager struct {
 	// when communicating with ACME server
 	Resolver string
 
+	// Callback function that is called before a
+	// new ACME account is registered with the CA;
+	// it allows for last-second config changes
+	// of the ACMEManager (TODO: this feature is
+	// still EXPERIMENTAL and subject to change)
+	NewAccountFunc func(context.Context, *ACMEManager, acme.Account) error
+
 	// Set a logger to enable logging
 	Logger *zap.Logger
 
@@ -151,6 +158,9 @@ func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
 	}
 	if template.Resolver == "" {
 		template.Resolver = DefaultACME.Resolver
+	}
+	if template.NewAccountFunc == nil {
+		template.NewAccountFunc = DefaultACME.NewAccountFunc
 	}
 	if template.Logger == nil {
 		template.Logger = DefaultACME.Logger
