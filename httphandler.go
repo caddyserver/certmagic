@@ -16,7 +16,6 @@ package certmagic
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 
@@ -100,13 +99,13 @@ func (am *ACMEManager) distributedHTTPChallengeSolver(w http.ResponseWriter, r *
 		return false
 	}
 
-	return answerHTTPChallenge(w, r, challenge)
+	return am.answerHTTPChallenge(w, r, challenge)
 }
 
 // answerHTTPChallenge solves the challenge with chalInfo.
 // Most of this code borrowed from xenolf's built-in HTTP-01
 // challenge solver in March 2018.
-func answerHTTPChallenge(w http.ResponseWriter, r *http.Request, challenge acme.Challenge) bool {
+func (am *ACMEManager) answerHTTPChallenge(w http.ResponseWriter, r *http.Request, challenge acme.Challenge) bool {
 	challengeReqPath := challenge.HTTP01ResourcePath()
 	if r.URL.Path == challengeReqPath &&
 		strings.EqualFold(hostOnly(r.Host), challenge.Identifier.Value) && // mitigate DNS rebinding attacks
@@ -114,7 +113,12 @@ func answerHTTPChallenge(w http.ResponseWriter, r *http.Request, challenge acme.
 		w.Header().Add("Content-Type", "text/plain")
 		w.Write([]byte(challenge.KeyAuthorization))
 		r.Close = true
-		log.Printf("[INFO][%s] Served key authentication to %s (HTTP challenge)", challenge.Identifier.Value, r.RemoteAddr)
+		if am.Logger != nil {
+			am.Logger.Info("served key authentication",
+				zap.String("identifier", challenge.Identifier.Value),
+				zap.String("challenge", "http-01"),
+				zap.String("remote", r.RemoteAddr))
+		}
 		return true
 	}
 	return false

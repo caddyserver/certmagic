@@ -62,18 +62,21 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 				}
 				if ok {
 					if cfg.Logger != nil {
-						cfg.Logger.Info("served key authentication certificate (distributed TLS-ALPN challenge)",
+						cfg.Logger.Info("served key authentication certificate",
 							zap.String("server_name", clientHello.ServerName),
-							zap.String("remote_ip", clientHello.Conn.RemoteAddr().String()))
+							zap.String("challenge", "tls-alpn-01"),
+							zap.String("remote", clientHello.Conn.RemoteAddr().String()),
+							zap.Bool("distributed", true))
 					}
 					return &challengeCert.Certificate, nil
 				}
 				return nil, fmt.Errorf("no certificate to complete TLS-ALPN challenge for SNI name: %s", clientHello.ServerName)
 			}
 			if cfg.Logger != nil {
-				cfg.Logger.Info("served key authentication certificate (TLS-ALPN challenge)",
+				cfg.Logger.Info("served key authentication certificate",
 					zap.String("server_name", clientHello.ServerName),
-					zap.String("remote_ip", clientHello.Conn.RemoteAddr().String()))
+					zap.String("challenge", "tls-alpn-01"),
+					zap.String("remote", clientHello.Conn.RemoteAddr().String()))
 			}
 			return &challengeCert.Certificate, nil
 		}
