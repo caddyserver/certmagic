@@ -298,7 +298,7 @@ func (am *ACMEManager) doIssue(ctx context.Context, csr *x509.CertificateRequest
 
 	certChains, err := client.acmeClient.ObtainCertificateUsingCSR(ctx, client.account, csr)
 	if err != nil {
-		return nil, usingTestCA, fmt.Errorf("%v %w", nameSet, err)
+		return nil, usingTestCA, fmt.Errorf("%v %w (ca=%s)", nameSet, err, client.acmeClient.Directory)
 	}
 
 	// TODO: ACME server could in theory issue a cert with multiple chains,
