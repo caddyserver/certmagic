@@ -143,13 +143,12 @@ func createDNSMsg(fqdn string, rtype uint16, recursive bool) *dns.Msg {
 func sendDNSQuery(m *dns.Msg, ns string) (*dns.Msg, error) {
 	udp := &dns.Client{Net: "udp", Timeout: dnsTimeout}
 	in, _, err := udp.Exchange(m, ns)
-
-  var truncated = (in != nil && in.Truncated)
-  var timeout_err = (err != nil && strings.Contains(err.Error(), "timeout"))
-
-  if truncated || timeout_err {
+	// two kinds of errors we can handle by retrying with TCP:
+	// truncation and timeout; see https://github.com/caddyserver/caddy/issues/3639
+	truncated := in != nil && in.Truncated
+	timeoutErr := err != nil && strings.Contains(err.Error(), "timeout")
+	if truncated || timeoutErr {
 		tcp := &dns.Client{Net: "tcp", Timeout: dnsTimeout}
-		// If the TCP request succeeds, the err will reset to nil
 		in, _, err = tcp.Exchange(m, ns)
 	}
 	return in, err
