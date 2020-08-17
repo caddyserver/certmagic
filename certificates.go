@@ -57,6 +57,18 @@ func (cert Certificate) NeedsRenewal(cfg *Config) bool {
 	return currentlyInRenewalWindow(cert.Leaf.NotBefore, cert.Leaf.NotAfter, cfg.RenewalWindowRatio)
 }
 
+// Expired returns true if the certificate has expired.
+func (cert Certificate) Expired() bool {
+	if cert.Leaf == nil {
+		// ideally cert.Leaf would never be nil, but this can happen for
+		// "synthetic" certs like those made to solve the TLS-ALPN challenge
+		// which adds a special cert directly  to the cache, since
+		// tls.X509KeyPair() discards the leaf; oh well
+		return false
+	}
+	return time.Now().After(cert.Leaf.NotAfter)
+}
+
 // currentlyInRenewalWindow returns true if the current time is
 // within the renewal window, according to the given start/end
 // dates and the ratio of the renewal window. If true is returned,

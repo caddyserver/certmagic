@@ -242,6 +242,14 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	// First check our in-memory cache to see if we've already loaded it
 	cert, matched, defaulted := cfg.getCertificate(hello)
 	if matched {
+		if cert.managed && cfg.OnDemand != nil && obtainIfNecessary {
+			// It's been reported before that if the machine goes to sleep (or
+			// suspends the process) that certs which are already loaded into
+			// memory won't get renewed in the background, so we need to check
+			// expiry on each handshake too, sigh:
+			// https://caddy.community/t/local-certificates-not-renewing-on-demand/9482
+			return cfg.optionalMaintenance(log, cert, hello)
+		}
 		return cert, nil
 	}
 
@@ -283,6 +291,30 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	}
 
 	return Certificate{}, fmt.Errorf("no certificate available for '%s'", name)
+}
+
+// optionalMaintenance will perform maintenance on the certificate (if necessary) and
+// will return the resulting certificate. This should only be done if the certificate
+// is managed, OnDemand is enabled, and the scope is allowed to obtain certificates.
+func (cfg *Config) optionalMaintenance(log *zap.Logger, cert Certificate, hello *tls.ClientHelloInfo) (Certificate, error) {
+	newCert, err := cfg.handshakeMaintenance(hello, cert)
+	if err == nil {
+		return newCert, nil
+	}
+
+	if log != nil {
+		log.Error("renewing certificate on-demand failed",
+			zap.Strings("subjects", cert.Names),
+			zap.Time("not_after", cert.Leaf.NotAfter),
+			zap.Error(err))
+	}
+
+	if cert.Expired() {
+		return cert, err
+	}
+
+	// still has time remaining, so serve it anyway
+	return cert, nil
 }
 
 // checkIfCertShouldBeObtained checks to see if an on-demand TLS certificate
@@ -360,6 +392,8 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 }
 
 // handshakeMaintenance performs a check on cert for expiration and OCSP validity.
+// If necessary, it will renew the certificate and/or refresh the OCSP staple.
+// OCSP stapling errors are not returned, only logged.
 //
 // This function is safe for use by multiple concurrent goroutines.
 func (cfg *Config) handshakeMaintenance(hello *tls.ClientHelloInfo, cert Certificate) (Certificate, error) {

@@ -298,11 +298,8 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	// obtain brief read lock during our scan to see which staples need updating
 	certCache.mu.RLock()
 	for certHash, cert := range certCache.cache {
-		// no point in updating OCSP for expired certificates
-		// TODO: ideally, cert.Leaf will never be nil, however, it currently is
-		// when solving the TLS-ALPN challenge which adds a special cert directly
-		// to the cache, since tls.X509KeyPair() discards the leaf
-		if cert.Leaf == nil || time.Now().After(cert.Leaf.NotAfter) {
+		// no point in updating OCSP for expired or "synthetic" certificates
+		if cert.Leaf == nil || cert.Expired() {
 			continue
 		}
 		var lastNextUpdate time.Time
