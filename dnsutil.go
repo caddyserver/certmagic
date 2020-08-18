@@ -272,7 +272,8 @@ func checkAuthoritativeNss(fqdn, value string, nameservers []string) (bool, erro
 		}
 
 		if !found {
-			return false, fmt.Errorf("NS %s did not return the expected TXT record [fqdn: %s, value: %s]: %s", ns, fqdn, value, strings.Join(records, " ,"))
+			return false, fmt.Errorf("NS %s did not return the expected TXT record (fqdn=%s expected=%s actual=%s)",
+				ns, fqdn, value, strings.Join(records, " ,"))
 		}
 	}
 
