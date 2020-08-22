@@ -211,13 +211,13 @@ func parseNameservers(servers []string) []string {
 }
 
 // checkDNSPropagation checks if the expected TXT record has been propagated to all authoritative nameservers.
-func checkDNSPropagation(fqdn, value string) (bool, error) {
+func checkDNSPropagation(fqdn, value string, resolvers []string) (bool, error) {
 	if !strings.HasSuffix(fqdn, ".") {
 		fqdn += "."
 	}
 
 	// Initial attempt to resolve at the recursive NS
-	r, err := dnsQuery(fqdn, dns.TypeTXT, recursiveNameservers, true)
+	r, err := dnsQuery(fqdn, dns.TypeTXT, resolvers, true)
 	if err != nil {
 		return false, err
 	}
@@ -231,7 +231,7 @@ func checkDNSPropagation(fqdn, value string) (bool, error) {
 		fqdn = updateDomainWithCName(r, fqdn)
 	}
 
-	authoritativeNss, err := lookupNameservers(fqdn)
+	authoritativeNss, err := lookupNameservers(fqdn, resolvers)
 	if err != nil {
 		return false, err
 	}
@@ -281,15 +281,15 @@ func checkAuthoritativeNss(fqdn, value string, nameservers []string) (bool, erro
 }
 
 // lookupNameservers returns the authoritative nameservers for the given fqdn.
-func lookupNameservers(fqdn string) ([]string, error) {
+func lookupNameservers(fqdn string, resolvers []string) ([]string, error) {
 	var authoritativeNss []string
 
-	zone, err := findZoneByFQDN(fqdn, recursiveNameservers)
+	zone, err := findZoneByFQDN(fqdn, resolvers)
 	if err != nil {
 		return nil, fmt.Errorf("could not determine the zone: %w", err)
 	}
 
-	r, err := dnsQuery(zone, dns.TypeNS, recursiveNameservers, true)
+	r, err := dnsQuery(zone, dns.TypeNS, resolvers, true)
 	if err != nil {
 		return nil, err
 	}
@@ -318,8 +318,12 @@ func updateDomainWithCName(r *dns.Msg, fqdn string) string {
 	return fqdn
 }
 
-// recursiveNameservers are used to pre-check DNS propagation
-var recursiveNameservers = getNameservers(defaultResolvConf, defaultNameservers)
+// recursiveNameservers are used to pre-check DNS propagation. It
+// prepends user-configured nameservers (custom) to the defaults
+// obtained from resolv.conf and defaultNameservers.
+func recursiveNameservers(custom []string) []string {
+	return append(custom, getNameservers(defaultResolvConf, defaultNameservers)...)
+}
 
 var defaultNameservers = []string{
 	"8.8.8.8:53",

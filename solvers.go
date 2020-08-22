@@ -261,6 +261,9 @@ type DNS01Solver struct {
 	// Maximum time to wait for temporary record to appear.
 	PropagationTimeout time.Duration
 
+	// Preferred DNS resolver(s) to use when doing DNS lookups.
+	Resolvers []string
+
 	txtRecords   map[string]dnsPresentMemory // keyed by domain name
 	txtRecordsMu sync.Mutex
 }
@@ -284,7 +287,7 @@ func (s *DNS01Solver) Present(ctx context.Context, challenge acme.Challenge) err
 	// https://github.com/caddyserver/caddy/issues/3474
 	activeDNSChallenges.Lock(dnsName)
 
-	zone, err := findZoneByFQDN(dnsName, recursiveNameservers)
+	zone, err := findZoneByFQDN(dnsName, recursiveNameservers(s.Resolvers))
 	if err != nil {
 		return fmt.Errorf("could not determine zone for domain %q: %v", dnsName, err)
 	}
@@ -321,6 +324,8 @@ func (s *DNS01Solver) Wait(ctx context.Context, challenge acme.Challenge) error 
 	}
 	const interval = 2 * time.Second
 
+	resolvers := recursiveNameservers(s.Resolvers)
+
 	var err error
 	start := time.Now()
 	for time.Since(start) < timeout {
@@ -330,7 +335,7 @@ func (s *DNS01Solver) Wait(ctx context.Context, challenge acme.Challenge) error 
 			return ctx.Err()
 		}
 		var ready bool
-		ready, err = checkDNSPropagation(dnsName, keyAuth)
+		ready, err = checkDNSPropagation(dnsName, keyAuth, resolvers)
 		if err != nil {
 			return fmt.Errorf("checking DNS propagation of %s: %w", dnsName, err)
 		}

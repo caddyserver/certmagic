@@ -37,7 +37,7 @@ func TestLookupNameserversOK(t *testing.T) {
 		t.Run(test.fqdn, func(t *testing.T) {
 			t.Parallel()
 
-			nss, err := lookupNameservers(test.fqdn)
+			nss, err := lookupNameservers(test.fqdn, recursiveNameservers(nil))
 			if err != nil {
 				t.Errorf("Expected no error, got: %v", err)
 			}
@@ -70,7 +70,7 @@ func TestLookupNameserversErr(t *testing.T) {
 		t.Run(test.desc, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := lookupNameservers(test.fqdn)
+			_, err := lookupNameservers(test.fqdn, nil)
 			if err == nil {
 				t.Errorf("expected error, got none")
 			}
@@ -94,28 +94,28 @@ var findXByFqdnTestCases = []struct {
 		fqdn:        "mail.google.com.",
 		zone:        "google.com.",
 		primaryNs:   "ns1.google.com.",
-		nameservers: recursiveNameservers,
+		nameservers: recursiveNameservers(nil),
 	},
 	{
 		desc:        "domain is a non-existent subdomain",
 		fqdn:        "foo.google.com.",
 		zone:        "google.com.",
 		primaryNs:   "ns1.google.com.",
-		nameservers: recursiveNameservers,
+		nameservers: recursiveNameservers(nil),
 	},
 	{
 		desc:        "domain is a eTLD",
 		fqdn:        "example.com.ac.",
 		zone:        "ac.",
 		primaryNs:   "a0.nic.ac.",
-		nameservers: recursiveNameservers,
+		nameservers: recursiveNameservers(nil),
 	},
 	{
 		desc:        "domain is a cross-zone CNAME",
 		fqdn:        "cross-zone-example.assets.sh.",
 		zone:        "assets.sh.",
 		primaryNs:   "gina.ns.cloudflare.com.",
-		nameservers: recursiveNameservers,
+		nameservers: recursiveNameservers(nil),
 	},
 	{
 		desc:          "NXDOMAIN",
@@ -148,24 +148,25 @@ var findXByFqdnTestCases = []struct {
 }
 
 func TestFindZoneByFqdn(t *testing.T) {
-	for _, test := range findXByFqdnTestCases {
+	for i, test := range findXByFqdnTestCases {
 		t.Run(test.desc, func(t *testing.T) {
 			clearFqdnCache()
 
 			zone, err := findZoneByFQDN(test.fqdn, test.nameservers)
 			if test.expectedError != "" {
 				if err == nil {
-					t.Errorf("expected error, got none")
+					t.Errorf("test %d: expected error, got none", i)
+					return
 				}
 				if !strings.Contains(err.Error(), test.expectedError) {
-					t.Errorf("Expected error to contain '%s' but got '%s'", test.expectedError, err.Error())
+					t.Errorf("test %d: expected error to contain '%s' but got '%s'", i, test.expectedError, err.Error())
 				}
 			} else {
 				if err != nil {
-					t.Errorf("Expected no error, but got: %v", err)
+					t.Errorf("test %d: expected no error, but got: %v", i, err)
 				}
 				if zone != test.zone {
-					t.Errorf("Expected zone '%s' but got '%s'", zone, test.zone)
+					t.Errorf("test %d: expected zone '%s' but got '%s'", i, zone, test.zone)
 				}
 			}
 		})
