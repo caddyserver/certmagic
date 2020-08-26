@@ -160,7 +160,7 @@ func formatDNSError(msg *dns.Msg, err error) string {
 		parts = append(parts, dns.RcodeToString[msg.Rcode])
 	}
 	if err != nil {
-		parts = append(parts, fmt.Sprintf("%v", err))
+		parts = append(parts, err.Error())
 	}
 	if len(parts) > 0 {
 		return ": " + strings.Join(parts, " ")
