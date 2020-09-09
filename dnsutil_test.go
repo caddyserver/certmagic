@@ -7,6 +7,7 @@ package certmagic
 // It has been modified.
 
 import (
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -182,7 +183,7 @@ func TestResolveConfServers(t *testing.T) {
 		{
 			fixture:  "testdata/resolv.conf.1",
 			defaults: []string{"127.0.0.1:53"},
-			expected: []string{"10.200.3.249:53", "10.200.3.250:5353", "[2001:4860:4860::8844]:53", "[10.0.0.1]:5353"},
+			expected: []string{"10.200.3.249", "10.200.3.250:5353", "2001:4860:4860::8844", "[10.0.0.1]:5353"},
 		},
 		{
 			fixture:  "testdata/resolv.conf.nonexistant",
@@ -193,7 +194,32 @@ func TestResolveConfServers(t *testing.T) {
 
 	for i, test := range testCases {
 		t.Run(test.fixture, func(t *testing.T) {
-			result := getNameservers(test.fixture, test.defaults)
+			result := systemOrDefaultNameservers(test.fixture, test.defaults)
+
+			sort.Strings(result)
+			sort.Strings(test.expected)
+
+			if !reflect.DeepEqual(test.expected, result) {
+				t.Errorf("Test %d: Expected %v but got %v", i, test.expected, result)
+			}
+		})
+	}
+}
+
+func TestRecursiveNameservers(t *testing.T) {
+	var testCases = []struct {
+		custom   []string
+		expected []string
+	}{
+		{
+			custom:   []string{"127.0.0.1"},
+			expected: []string{"127.0.0.1:53", "192.168.1.1:53"},
+		},
+	}
+
+	for i, test := range testCases {
+		t.Run(fmt.Sprintf("test %d", i), func(t *testing.T) {
+			result := recursiveNameservers(test.custom)
 
 			sort.Strings(result)
 			sort.Strings(test.expected)

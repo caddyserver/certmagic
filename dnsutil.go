@@ -188,26 +188,24 @@ func (cache *soaCacheEntry) isExpired() bool {
 	return time.Now().After(cache.expires)
 }
 
-// getNameservers attempts to get systems nameservers before falling back to the defaults
-func getNameservers(path string, defaults []string) []string {
+// systemOrDefaultNameservers attempts to get system nameservers from the
+// resolv.conf file given by path before falling back to hard-coded defaults.
+func systemOrDefaultNameservers(path string, defaults []string) []string {
 	config, err := dns.ClientConfigFromFile(path)
 	if err != nil || len(config.Servers) == 0 {
 		return defaults
 	}
-	return parseNameservers(config.Servers)
+	return config.Servers
 }
 
-func parseNameservers(servers []string) []string {
-	var resolvers []string
-	for _, resolver := range servers {
-		// ensure all servers have a port number
-		if _, _, err := net.SplitHostPort(resolver); err != nil {
-			resolvers = append(resolvers, net.JoinHostPort(resolver, "53"))
-		} else {
-			resolvers = append(resolvers, resolver)
+// populateNameserverPorts ensures that all nameservers have a port number.
+func populateNameserverPorts(servers []string) {
+	for i := range servers {
+		_, port, _ := net.SplitHostPort(servers[i])
+		if port == "" {
+			servers[i] = net.JoinHostPort(servers[i], "53")
 		}
 	}
-	return resolvers
 }
 
 // checkDNSPropagation checks if the expected TXT record has been propagated to all authoritative nameservers.
@@ -320,9 +318,12 @@ func updateDomainWithCName(r *dns.Msg, fqdn string) string {
 
 // recursiveNameservers are used to pre-check DNS propagation. It
 // prepends user-configured nameservers (custom) to the defaults
-// obtained from resolv.conf and defaultNameservers.
+// obtained from resolv.conf and defaultNameservers and ensures
+// that all server addresses have a port value.
 func recursiveNameservers(custom []string) []string {
-	return append(custom, getNameservers(defaultResolvConf, defaultNameservers)...)
+	servers := append(custom, systemOrDefaultNameservers(defaultResolvConf, defaultNameservers)...)
+	populateNameserverPorts(servers)
+	return servers
 }
 
 var defaultNameservers = []string{
