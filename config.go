@@ -679,7 +679,7 @@ func (cfg *Config) TLSConfig() *tls.Config {
 	return &tls.Config{
 		// these two fields necessary for TLS-ALPN challenge
 		GetCertificate: cfg.GetCertificate,
-		NextProtos:     []string{"h2", "http/1.1", acmez.ACMETLS1Protocol},
+		NextProtos:     []string{acmez.ACMETLS1Protocol},
 
 		// the rest recommended for modern TLS servers
 		MinVersion: tls.VersionTLS12,

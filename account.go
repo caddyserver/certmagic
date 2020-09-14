@@ -54,6 +54,9 @@ func (am *ACMEManager) getAccount(ca, email string) (acme.Account, error) {
 		return acct, err
 	}
 	acct.PrivateKey, err = decodePrivateKey(keyBytes)
+	if err != nil {
+		return acct, fmt.Errorf("could not decode account's private key: %v", err)
+	}
 
 	// TODO: July 2020 - transition to new ACME lib and account structure;
 	// for a while, we will need to convert old accounts to new structure

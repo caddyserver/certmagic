@@ -182,7 +182,7 @@ func TestResolveConfServers(t *testing.T) {
 		{
 			fixture:  "testdata/resolv.conf.1",
 			defaults: []string{"127.0.0.1:53"},
-			expected: []string{"10.200.3.249:53", "10.200.3.250:5353", "[2001:4860:4860::8844]:53", "[10.0.0.1]:5353"},
+			expected: []string{"10.200.3.249", "10.200.3.250:5353", "2001:4860:4860::8844", "[10.0.0.1]:5353"},
 		},
 		{
 			fixture:  "testdata/resolv.conf.nonexistant",
@@ -193,7 +193,7 @@ func TestResolveConfServers(t *testing.T) {
 
 	for i, test := range testCases {
 		t.Run(test.fixture, func(t *testing.T) {
-			result := getNameservers(test.fixture, test.defaults)
+			result := systemOrDefaultNameservers(test.fixture, test.defaults)
 
 			sort.Strings(result)
 			sort.Strings(test.expected)
@@ -202,6 +202,22 @@ func TestResolveConfServers(t *testing.T) {
 				t.Errorf("Test %d: Expected %v but got %v", i, test.expected, result)
 			}
 		})
+	}
+}
+
+func TestRecursiveNameserversAddsPort(t *testing.T) {
+	custom := []string{"127.0.0.1"}
+	results := recursiveNameservers(custom)
+
+	var hasCustom bool
+	for i, res := range results {
+		hasCustom = hasCustom || strings.HasPrefix(res, custom[0])
+		if !strings.HasSuffix(res, ":53") {
+			t.Errorf("%v Expected all results to have a port, but result %d doesn't: %s", results, i, res)
+		}
+	}
+	if !hasCustom {
+		t.Errorf("%v Expected custom resolvers to be included, but they weren't: %v", results, custom)
 	}
 }
 
