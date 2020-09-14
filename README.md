@@ -5,7 +5,7 @@
 <p align="center">The same library used by the <a href="https://caddyserver.com">Caddy Web Server</a></p>
 <p align="center">
 	<a href="https://pkg.go.dev/github.com/caddyserver/certmagic?tab=doc"><img src="https://img.shields.io/badge/godoc-reference-blue.svg"></a>
-	<a href="https://dev.azure.com/mholt-dev/CertMagic/_build"><img src="https://img.shields.io/azure-devops/build/mholt-dev/3511431f-630c-43ac-833f-be949b4f4ee7/3.svg?label=cross-platform%20tests"></a>
+	<a href="https://github.com/caddyserver/certmagic/actions?query=workflow%3ATests"><img src="https://github.com/caddyserver/certmagic/workflows/Tests/badge.svg"></a>
 	<a href="https://sourcegraph.com/github.com/caddyserver/certmagic?badge"><img src="https://sourcegraph.com/github.com/caddyserver/certmagic/-/badge.svg"></a>
 </p>
 
