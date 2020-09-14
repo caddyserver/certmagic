@@ -7,7 +7,6 @@ package certmagic
 // It has been modified.
 
 import (
-	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -206,28 +205,19 @@ func TestResolveConfServers(t *testing.T) {
 	}
 }
 
-func TestRecursiveNameservers(t *testing.T) {
-	var testCases = []struct {
-		custom   []string
-		expected []string
-	}{
-		{
-			custom:   []string{"127.0.0.1"},
-			expected: []string{"127.0.0.1:53", "192.168.1.1:53"},
-		},
+func TestRecursiveNameserversAddsPort(t *testing.T) {
+	custom := []string{"127.0.0.1"}
+	results := recursiveNameservers(custom)
+
+	var hasCustom bool
+	for i, res := range results {
+		hasCustom = hasCustom || strings.HasPrefix(res, custom[0])
+		if !strings.HasSuffix(res, ":53") {
+			t.Errorf("%v Expected all results to have a port, but result %d doesn't: %s", results, i, res)
+		}
 	}
-
-	for i, test := range testCases {
-		t.Run(fmt.Sprintf("test %d", i), func(t *testing.T) {
-			result := recursiveNameservers(test.custom)
-
-			sort.Strings(result)
-			sort.Strings(test.expected)
-
-			if !reflect.DeepEqual(test.expected, result) {
-				t.Errorf("Test %d: Expected %v but got %v", i, test.expected, result)
-			}
-		})
+	if !hasCustom {
+		t.Errorf("%v Expected custom resolvers to be included, but they weren't: %v", results, custom)
 	}
 }
 
