@@ -265,14 +265,6 @@ func (certCache *Cache) replaceCertificate(oldCert, newCert Certificate) {
 	}
 }
 
-func (certCache *Cache) getFirstMatchingCert(name string) (Certificate, bool) {
-	all := certCache.getAllMatchingCerts(name)
-	if len(all) == 0 {
-		return all[0], true
-	}
-	return Certificate{}, false
-}
-
 func (certCache *Cache) getAllMatchingCerts(name string) []Certificate {
 	certCache.mu.RLock()
 	defer certCache.mu.RUnlock()
