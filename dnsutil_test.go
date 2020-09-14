@@ -136,7 +136,7 @@ var findXByFqdnTestCases = []struct {
 		fqdn:          "scholar.google.com.",
 		zone:          "google.com.",
 		nameservers:   []string{":7053", ":8053", ":9053"},
-		expectedError: "could not find the start of authority for scholar.google.com.: read ",
+		expectedError: "could not find the start of authority for scholar.google.com.:",
 	},
 	{
 		desc:          "no nameservers",
