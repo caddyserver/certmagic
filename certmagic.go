@@ -477,4 +477,4 @@ var (
 )
 
 // Maximum size for the stack trace when recovering from panics.
-const stackTraceBufferSize = 1024 * 1024 * 64
+const stackTraceBufferSize = 1024 * 128

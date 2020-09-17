@@ -381,7 +381,7 @@ func SubjectQualifiesForPublicCert(subj string) bool {
 
 // MatchWildcard returns true if subject (a candidate DNS name)
 // matches wildcard (a reference DNS name), mostly according to
-// RFC-compliant wildcard rules.
+// RFC6125-compliant wildcard rules.
 func MatchWildcard(subject, wildcard string) bool {
 	if subject == wildcard {
 		return true
