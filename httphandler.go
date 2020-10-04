@@ -28,13 +28,16 @@ import (
 // cache backed by a functional storage facility, since that is where
 // the challenge state is stored between initiation and solution.
 //
-// If a request is not an ACME HTTP challenge, h will be invoked.
+// If a request is not an ACME HTTP challenge, h will be invoked (if h is not nil).
+// If h is nil all unhandled HTTP requests will be ignored.
 func (am *ACMEManager) HTTPChallengeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if am.HandleHTTPChallenge(w, r) {
 			return
 		}
-		h.ServeHTTP(w, r)
+		if h != nil {
+			h.ServeHTTP(w, r)
+		}
 	})
 }
 
