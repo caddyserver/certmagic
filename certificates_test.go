@@ -100,6 +100,7 @@ func TestSubjectQualifiesForCert(t *testing.T) {
 		{"*.*.example.com", true},
 		{"sub.*.example.com", false},
 		{"*sub.example.com", false},
+		{"**.com", false},
 		{".com", false},
 		{"example.com.", false},
 		{"localhost", true},
