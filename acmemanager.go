@@ -73,6 +73,12 @@ type ACMEManager struct {
 	// from this package
 	DNS01Solver acmez.Solver
 
+	// The solver for the http-01 challenge
+	HTTP01Solver acmez.Solver
+
+	// The solver for the tls-alpn-01 challenge
+	TLSALPN01Solver acmez.Solver
+
 	// TrustedRoots specifies a pool of root CA
 	// certificates to trust when communicating
 	// over a network to a peer.
