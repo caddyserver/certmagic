@@ -260,6 +260,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	if cfg.OnDemand != nil && loadIfNecessary {
 		// Then check to see if we have one on disk
 		loadedCert, err := cfg.CacheManagedCertificate(name)
+		// TODO: try wildcard names too
 		if err == nil {
 			loadedCert, err = cfg.handshakeMaintenance(hello, loadedCert)
 			if err != nil {
@@ -514,21 +515,31 @@ func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCe
 // this to succeed, it requires that cfg.Issuer is of type *ACMEManager.
 // A boolean true is returned if a valid certificate is returned.
 func (cfg *Config) tryDistributedChallengeSolver(clientHello *tls.ClientHelloInfo) (Certificate, bool, error) {
-	am, ok := cfg.Issuer.(*ACMEManager)
-	if !ok {
-		return Certificate{}, false, nil
-	}
-	tokenKey := distributedSolver{acmeManager: am, caURL: am.CA}.challengeTokensKey(clientHello.ServerName)
-	chalInfoBytes, err := cfg.Storage.Load(tokenKey)
-	if err != nil {
+	// first we'll have to find the right issuer that has the challenge info in its storage location
+	var chalInfoBytes []byte
+	var tokenKey string
+	for _, issuer := range cfg.Issuers {
+		am, ok := issuer.(*ACMEManager)
+		if !ok {
+			continue
+		}
+		tokenKey = distributedSolver{acmeManager: am, caURL: am.CA}.challengeTokensKey(clientHello.ServerName)
+		var err error
+		chalInfoBytes, err = cfg.Storage.Load(tokenKey)
+		if err == nil {
+			break
+		}
 		if _, ok := err.(ErrNotExist); ok {
-			return Certificate{}, false, nil
+			continue
 		}
 		return Certificate{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)
 	}
+	if len(chalInfoBytes) == 0 {
+		return Certificate{}, false, nil
+	}
 
 	var chalInfo acme.Challenge
-	err = json.Unmarshal(chalInfoBytes, &chalInfo)
+	err := json.Unmarshal(chalInfoBytes, &chalInfo)
 	if err != nil {
 		return Certificate{}, false, fmt.Errorf("decoding challenge token file %s (corrupted?): %v", tokenKey, err)
 	}

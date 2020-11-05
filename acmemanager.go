@@ -19,7 +19,7 @@ import (
 // Issuer, and Revoker interfaces.
 //
 // It is NOT VALID to use an ACMEManager without calling NewACMEManager().
-// It fills in default values from DefaultACME as well as setting up
+// It fills in any default values from DefaultACME as well as setting up
 // internal state that is necessary for valid use. Always call
 // NewACMEManager() to get a valid ACMEManager value.
 type ACMEManager struct {
@@ -105,7 +105,8 @@ type ACMEManager struct {
 
 // NewACMEManager constructs a valid ACMEManager based on a template
 // configuration; any empty values will be filled in by defaults in
-// DefaultACME. The associated config is also required.
+// DefaultACME, and if any required values are still empty, sensible
+// defaults will be used.
 //
 // Typically, you'll create the Config first, then call NewACMEManager(),
 // then assign the return value to the Issuer/Revoker fields of the Config.
@@ -301,8 +302,7 @@ func (am *ACMEManager) doIssue(ctx context.Context, csr *x509.CertificateRequest
 		return nil, usingTestCA, fmt.Errorf("%v %w (ca=%s)", nameSet, err, client.acmeClient.Directory)
 	}
 
-	// TODO: ACME server could in theory issue a cert with multiple chains,
-	// but we don't (yet) have a way to choose one, so just use first one
+	// TODO: ACME server could in theory issue a cert with multiple chains, but we don't (yet) have a way to choose one, so just use first one
 	ic := &IssuedCertificate{
 		Certificate: certChains[0].ChainPEM,
 		Metadata:    certChains[0],
@@ -326,8 +326,8 @@ func (am *ACMEManager) Revoke(ctx context.Context, cert CertificateResource, rea
 	return client.revoke(ctx, certs[0], reason)
 }
 
-// DefaultACME specifies the default settings
-// to use for ACMEManagers.
+// DefaultACME specifies default settings to use for ACMEManagers.
+// Using this value is optional but can be convenient.
 var DefaultACME = ACMEManager{
 	CA:     LetsEncryptProductionCA,
 	TestCA: LetsEncryptStagingCA,
@@ -337,6 +337,7 @@ var DefaultACME = ACMEManager{
 const (
 	LetsEncryptStagingCA    = "https://acme-staging-v02.api.letsencrypt.org/directory"
 	LetsEncryptProductionCA = "https://acme-v02.api.letsencrypt.org/directory"
+	ZeroSSLProductionCA     = "https://acme.zerossl.com/v2/DV90"
 )
 
 // prefixACME is the storage key prefix used for ACME-specific assets.

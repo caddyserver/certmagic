@@ -27,7 +27,7 @@ import (
 func TestNewAccount(t *testing.T) {
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		Issuer:    am,
+		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
 		certCache: new(Cache),
 	}
@@ -52,7 +52,7 @@ func TestNewAccount(t *testing.T) {
 func TestSaveAccount(t *testing.T) {
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		Issuer:    am,
+		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata1_tmp"},
 		certCache: new(Cache),
 	}
@@ -85,7 +85,7 @@ func TestSaveAccount(t *testing.T) {
 func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		Issuer:    am,
+		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
 		certCache: new(Cache),
 	}
@@ -104,7 +104,7 @@ func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
 func TestGetAccountAlreadyExists(t *testing.T) {
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		Issuer:    am,
+		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata2_tmp"},
 		certCache: new(Cache),
 	}
@@ -155,7 +155,7 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		Issuer:    am,
+		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata2_tmp"},
 		certCache: new(Cache),
 	}
@@ -174,7 +174,7 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 func TestGetEmailFromUserInput(t *testing.T) {
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		Issuer:    am,
+		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata3_tmp"},
 		certCache: new(Cache),
 	}
@@ -206,7 +206,7 @@ func TestGetEmailFromUserInput(t *testing.T) {
 func TestGetEmailFromRecent(t *testing.T) {
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
-		Issuer:    am,
+		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata4_tmp"},
 		certCache: new(Cache),
 	}

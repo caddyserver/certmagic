@@ -113,10 +113,11 @@ func (cfg *Config) CacheManagedCertificate(domain string) (Certificate, error) {
 	return cert, nil
 }
 
-// loadManagedCertificate loads the managed certificate for domain,
-// but it does not add it to the cache. It just loads from storage.
+// loadManagedCertificate loads the managed certificate for domain from any
+// of the configured issuers' storage locations, but it does not add it to
+// the cache. It just loads from storage and returns it.
 func (cfg *Config) loadManagedCertificate(domain string) (Certificate, error) {
-	certRes, err := cfg.loadCertResource(domain)
+	certRes, err := cfg.loadCertResourceAnyIssuer(domain)
 	if err != nil {
 		return Certificate{}, err
 	}
@@ -295,19 +296,12 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 // meantime, and it would be a good idea to simply load the cert
 // into our cache rather than repeating the renewal process again.
 func (cfg *Config) managedCertInStorageExpiresSoon(cert Certificate) (bool, error) {
-	certRes, err := cfg.loadCertResource(cert.Names[0])
+	certRes, err := cfg.loadCertResourceAnyIssuer(cert.Names[0])
 	if err != nil {
 		return false, err
 	}
-	tlsCert, err := tls.X509KeyPair(certRes.CertificatePEM, certRes.PrivateKeyPEM)
-	if err != nil {
-		return false, err
-	}
-	leaf, err := x509.ParseCertificate(tlsCert.Certificate[0])
-	if err != nil {
-		return false, err
-	}
-	return currentlyInRenewalWindow(leaf.NotBefore, leaf.NotAfter, cfg.RenewalWindowRatio), nil
+	_, needsRenew := cfg.managedCertNeedsRenewal(certRes)
+	return needsRenew, nil
 }
 
 // reloadManagedCertificate reloads the certificate corresponding to the name(s)
