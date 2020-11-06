@@ -260,7 +260,12 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	if cfg.OnDemand != nil && loadIfNecessary {
 		// Then check to see if we have one on disk
 		loadedCert, err := cfg.CacheManagedCertificate(name)
-		// TODO: try wildcard names too
+		if _, ok := err.(ErrNotExist); ok {
+			// If no exact match, try a wildcard variant, which is something we can still use
+			labels := strings.Split(name, ".")
+			labels[0] = "*"
+			loadedCert, err = cfg.CacheManagedCertificate(strings.Join(labels, "."))
+		}
 		if err == nil {
 			loadedCert, err = cfg.handshakeMaintenance(hello, loadedCert)
 			if err != nil {

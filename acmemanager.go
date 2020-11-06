@@ -108,8 +108,9 @@ type ACMEManager struct {
 // DefaultACME, and if any required values are still empty, sensible
 // defaults will be used.
 //
-// Typically, you'll create the Config first, then call NewACMEManager(),
-// then assign the return value to the Issuer/Revoker fields of the Config.
+// Typically, you'll create the Config first with New() or NewDefault(),
+// then call NewACMEManager(), then assign the return value to the Issuers
+// field of the Config.
 func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
 	if cfg == nil {
 		panic("cannot make valid ACMEManager without an associated CertMagic config")
