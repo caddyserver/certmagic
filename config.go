@@ -357,6 +357,9 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 // TODO: consider moving interactive param into the Config struct,
 // and maybe retry settings into the Config struct as well? (same for RenewCert)
 func (cfg *Config) ObtainCert(ctx context.Context, name string, interactive bool) error {
+	if len(cfg.Issuers) == 0 {
+		return fmt.Errorf("no issuers configured; impossible to obtain or check for existing certificate in storage")
+	}
 	if cfg.storageHasCertResourcesAnyIssuer(name) {
 		return nil
 	}
@@ -486,6 +489,9 @@ func (cfg *Config) storageHasCertResourcesAnyIssuer(name string) bool {
 // renewed certificate and its assets in storage if successful. It
 // DOES NOT update the in-memory cache with the new certificate.
 func (cfg *Config) RenewCert(ctx context.Context, name string, interactive bool) error {
+	if len(cfg.Issuers) == 0 {
+		return fmt.Errorf("no issuers configured; impossible to renew or check existing certificate in storage")
+	}
 	// ensure storage is writeable and readable
 	// TODO: this is not necessary every time; should only perform check once every so often for each storage, which may require some global state...
 	err := cfg.checkStorage()

@@ -177,7 +177,7 @@ func (am *ACMEManager) IssuerKey() string {
 	return am.issuerKey(am.CA)
 }
 
-func (am *ACMEManager) issuerKey(ca string) string {
+func (*ACMEManager) issuerKey(ca string) string {
 	key := ca
 	if caURL, err := url.Parse(key); err == nil {
 		key = caURL.Host

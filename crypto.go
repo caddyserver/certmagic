@@ -32,6 +32,7 @@ import (
 	"strings"
 
 	"github.com/klauspost/cpuid"
+	"go.uber.org/zap"
 )
 
 // encodePrivateKey marshals a EC or RSA private key into a PEM-encoded array of bytes.
@@ -171,6 +172,7 @@ func (cfg *Config) loadCertResourceAnyIssuer(certNamesKey string) (CertificateRe
 
 	type decodedCertResource struct {
 		CertificateResource
+		issuer  Issuer
 		decoded *x509.Certificate
 	}
 	var certResources []decodedCertResource
@@ -196,6 +198,7 @@ func (cfg *Config) loadCertResourceAnyIssuer(certNamesKey string) (CertificateRe
 		}
 		certResources = append(certResources, decodedCertResource{
 			CertificateResource: certRes,
+			issuer:              issuer,
 			decoded:             certs[0],
 		})
 	}
@@ -210,6 +213,15 @@ func (cfg *Config) loadCertResourceAnyIssuer(certNamesKey string) (CertificateRe
 	sort.Slice(certResources, func(i, j int) bool {
 		return certResources[j].decoded.NotBefore.Before(certResources[i].decoded.NotBefore)
 	})
+
+	if cfg.Logger != nil {
+		cfg.Logger.Debug("loading managed certificate",
+			zap.String("domain", certNamesKey),
+			zap.Time("expiration", certResources[0].decoded.NotAfter),
+			zap.String("issuer_key", certResources[0].issuer.IssuerKey()),
+			zap.Any("storage", cfg.Storage),
+		)
+	}
 
 	return certResources[0].CertificateResource, nil
 }

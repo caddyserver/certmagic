@@ -153,12 +153,12 @@ func (am *ACMEManager) newACMEClient(ctx context.Context, useTestCA, interactive
 				useHTTPPort = am.AltHTTPPort
 			}
 			client.ChallengeSolvers[acme.ChallengeTypeHTTP01] = distributedSolver{
-				acmeManager: am,
+				storage:                am.config.Storage,
+				storageKeyIssuerPrefix: am.storageKeyCAPrefix(client.Directory),
 				solver: &httpSolver{
 					acmeManager: am,
 					address:     net.JoinHostPort(am.ListenHost, strconv.Itoa(useHTTPPort)),
 				},
-				caURL: client.Directory,
 			}
 		}
 
@@ -172,12 +172,12 @@ func (am *ACMEManager) newACMEClient(ctx context.Context, useTestCA, interactive
 				useTLSALPNPort = am.AltTLSALPNPort
 			}
 			client.ChallengeSolvers[acme.ChallengeTypeTLSALPN01] = distributedSolver{
-				acmeManager: am,
+				storage:                am.config.Storage,
+				storageKeyIssuerPrefix: am.storageKeyCAPrefix(client.Directory),
 				solver: &tlsALPNSolver{
 					config:  am.config,
 					address: net.JoinHostPort(am.ListenHost, strconv.Itoa(useTLSALPNPort)),
 				},
-				caURL: client.Directory,
 			}
 		}
 	} else {

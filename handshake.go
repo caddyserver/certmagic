@@ -76,7 +76,8 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 				cfg.Logger.Info("served key authentication certificate",
 					zap.String("server_name", clientHello.ServerName),
 					zap.String("challenge", "tls-alpn-01"),
-					zap.String("remote", clientHello.Conn.RemoteAddr().String()))
+					zap.String("remote", clientHello.Conn.RemoteAddr().String()),
+					zap.Bool("distributed", false))
 			}
 			return &challengeCert.Certificate, nil
 		}
@@ -524,11 +525,11 @@ func (cfg *Config) tryDistributedChallengeSolver(clientHello *tls.ClientHelloInf
 	var chalInfoBytes []byte
 	var tokenKey string
 	for _, issuer := range cfg.Issuers {
-		am, ok := issuer.(*ACMEManager)
-		if !ok {
-			continue
+		ds := distributedSolver{
+			storage:                cfg.Storage,
+			storageKeyIssuerPrefix: storageKeyACMECAPrefix(issuer.IssuerKey()),
 		}
-		tokenKey = distributedSolver{acmeManager: am, caURL: am.CA}.challengeTokensKey(clientHello.ServerName)
+		tokenKey = ds.challengeTokensKey(clientHello.ServerName)
 		var err error
 		chalInfoBytes, err = cfg.Storage.Load(tokenKey)
 		if err == nil {

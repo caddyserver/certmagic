@@ -242,8 +242,12 @@ func (am *ACMEManager) askUserAgreement(agreementURL string) bool {
 	return answer == "y" || answer == "yes"
 }
 
+func storageKeyACMECAPrefix(issuerKey string) string {
+	return path.Join(prefixACME, StorageKeys.Safe(issuerKey))
+}
+
 func (am *ACMEManager) storageKeyCAPrefix(caURL string) string {
-	return path.Join(prefixACME, StorageKeys.Safe(am.issuerKey(caURL)))
+	return storageKeyACMECAPrefix(am.issuerKey(caURL))
 }
 
 func (am *ACMEManager) storageKeyUsersPrefix(caURL string) string {
