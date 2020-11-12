@@ -96,6 +96,12 @@ type ACMEManager struct {
 	// still EXPERIMENTAL and subject to change)
 	NewAccountFunc func(context.Context, *ACMEManager, acme.Account) error
 
+	// List of preferred certificate chains, by
+	// issuer's CommonName. If empty, or if no
+	// matching chain is found, the first chain
+	// offered by the server will be used.
+	PreferredChains []string
+
 	// Set a logger to enable logging
 	Logger *zap.Logger
 
@@ -300,12 +306,56 @@ func (am *ACMEManager) doIssue(ctx context.Context, csr *x509.CertificateRequest
 	if err != nil {
 		return nil, usingTestCA, fmt.Errorf("%v %w (ca=%s)", nameSet, err, client.acmeClient.Directory)
 	}
+	if len(certChains) == 0 {
+		return nil, usingTestCA, fmt.Errorf("no certificate chains")
+	}
 
-	// TODO: ACME server could in theory issue a cert with multiple chains,
-	// but we don't (yet) have a way to choose one, so just use first one
+	// select the preferred chain
+	var preferredChainIdx int
+	if len(am.PreferredChains) > 0 {
+		decodedChains := make([][]*x509.Certificate, len(certChains))
+		for i, chain := range certChains {
+			certs, err := parseCertsFromPEMBundle(chain.ChainPEM)
+			if err != nil {
+				if am.Logger != nil {
+					am.Logger.Error("unable to parse PEM certificate chain",
+						zap.Int("chain", i),
+						zap.Error(err))
+				}
+				continue
+			}
+			decodedChains[i] = certs
+		}
+
+		var foundPreferredChain bool
+	outer:
+		for _, prefChain := range am.PreferredChains {
+			for j, chain := range decodedChains {
+				for _, cert := range chain {
+					if cert.Issuer.CommonName == prefChain {
+						preferredChainIdx = j
+						foundPreferredChain = true
+						if am.Logger != nil {
+							am.Logger.Debug("found preferred certificate chain",
+								zap.String("preference", prefChain),
+								zap.Int("chain", preferredChainIdx))
+						}
+						break outer
+					}
+				}
+			}
+		}
+
+		if !foundPreferredChain && am.Logger != nil {
+			am.Logger.Warn("did not find chain matching preferences; using first",
+				zap.Strings("preferences", am.PreferredChains),
+				zap.String("using", decodedChains[preferredChainIdx][0].Issuer.CommonName))
+		}
+	}
+
 	ic := &IssuedCertificate{
-		Certificate: certChains[0].ChainPEM,
-		Metadata:    certChains[0],
+		Certificate: certChains[preferredChainIdx].ChainPEM,
+		Metadata:    certChains[preferredChainIdx],
 	}
 
 	return ic, usingTestCA, nil
