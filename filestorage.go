@@ -147,7 +147,7 @@ func (fs *FileStorage) Lock(ctx context.Context, key string) error {
 			err2 := json.NewDecoder(f).Decode(&meta)
 			f.Close()
 			if err2 != nil {
-				return err2
+				return fmt.Errorf("decoding lockfile contents: %w", err2)
 			}
 		}
 

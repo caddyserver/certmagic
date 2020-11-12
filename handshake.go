@@ -273,14 +273,6 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 		}
 		if obtainIfNecessary {
 			// By this point, we need to ask the CA for a certificate
-
-			// Make sure the certificate should be obtained based on config
-			err := cfg.checkIfCertShouldBeObtained(name)
-			if err != nil {
-				return Certificate{}, err
-			}
-
-			// Obtain certificate from the CA
 			return cfg.obtainOnDemandCertificate(hello)
 		}
 	}
@@ -347,6 +339,11 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 
 	name := cfg.getNameFromClientHello(hello)
 
+	getCertWithoutReobtaining := func() (Certificate, error) {
+		// very important to set the obtainIfNecessary argument to false, so we don't repeat this infinitely
+		return cfg.getCertDuringHandshake(hello, true, false)
+	}
+
 	// We must protect this process from happening concurrently, so synchronize.
 	obtainCertWaitChansMu.Lock()
 	wait, ok := obtainCertWaitChans[name]
@@ -354,8 +351,17 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 		// lucky us -- another goroutine is already obtaining the certificate.
 		// wait for it to finish obtaining the cert and then we'll use it.
 		obtainCertWaitChansMu.Unlock()
-		<-wait
-		return cfg.getCertDuringHandshake(hello, true, false)
+
+		// TODO: see if we can get a proper context in here, for true cancellation
+		timeout := time.NewTimer(2 * time.Minute)
+		select {
+		case <-timeout.C:
+			return Certificate{}, fmt.Errorf("timed out waiting to obtain certificate for %s", name)
+		case <-wait:
+			timeout.Stop()
+		}
+
+		return getCertWithoutReobtaining()
 	}
 
 	// looks like it's up to us to do all the work and obtain the cert.
@@ -364,22 +370,35 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 	obtainCertWaitChans[name] = wait
 	obtainCertWaitChansMu.Unlock()
 
-	// obtain the certificate
+	unblockWaiters := func() {
+		obtainCertWaitChansMu.Lock()
+		close(wait)
+		delete(obtainCertWaitChans, name)
+		obtainCertWaitChansMu.Unlock()
+	}
+
+	// Make sure the certificate should be obtained based on config
+	err := cfg.checkIfCertShouldBeObtained(name)
+	if err != nil {
+		unblockWaiters()
+		return Certificate{}, err
+	}
+
 	if log != nil {
 		log.Info("obtaining new certificate", zap.String("server_name", name))
 	}
+
 	// TODO: use a proper context; we use one with timeout because retries are enabled because interactive is false
 	ctx, cancel := context.WithTimeout(context.TODO(), 90*time.Second)
 	defer cancel()
-	err := cfg.ObtainCert(ctx, name, false)
+
+	// Obtain the certificate
+	err = cfg.ObtainCert(ctx, name, false)
 
 	// immediately unblock anyone waiting for it; doing this in
 	// a defer would risk deadlock because of the recursive call
 	// to getCertDuringHandshake below when we return!
-	obtainCertWaitChansMu.Lock()
-	close(wait)
-	delete(obtainCertWaitChans, name)
-	obtainCertWaitChansMu.Unlock()
+	unblockWaiters()
 
 	if err != nil {
 		// shucks; failed to solve challenge on-demand
@@ -388,7 +407,7 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 
 	// success; certificate was just placed on disk, so
 	// we need only restart serving the certificate
-	return cfg.getCertDuringHandshake(hello, true, false)
+	return getCertWithoutReobtaining()
 }
 
 // handshakeMaintenance performs a check on cert for expiration and OCSP validity.
@@ -400,13 +419,7 @@ func (cfg *Config) handshakeMaintenance(hello *tls.ClientHelloInfo, cert Certifi
 	log := loggerNamed(cfg.Logger, "on_demand")
 
 	// Check cert expiration
-	timeLeft := cert.Leaf.NotAfter.Sub(time.Now().UTC())
 	if currentlyInRenewalWindow(cert.Leaf.NotBefore, cert.Leaf.NotAfter, cfg.RenewalWindowRatio) {
-		if log != nil {
-			log.Info("certificate expires soon; attempting renewal",
-				zap.Strings("identifiers", cert.Names),
-				zap.Duration("remaining", timeLeft))
-		}
 		return cfg.renewDynamicCertificate(hello, cert)
 	}
 
@@ -436,28 +449,80 @@ func (cfg *Config) handshakeMaintenance(hello *tls.ClientHelloInfo, cert Certifi
 // renewDynamicCertificate renews the certificate for name using cfg. It returns the
 // certificate to use and an error, if any. name should already be lower-cased before
 // calling this function. name is the name obtained directly from the handshake's
-// ClientHello.
+// ClientHello. If the certificate hasn't yet expired, currentCert will be returned
+// and the renewal will happen in the background; otherwise this blocks until the
+// certificate has been renewed, and returns the renewed certificate.
 //
 // This function is safe for use by multiple concurrent goroutines.
 func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCert Certificate) (Certificate, error) {
 	log := loggerNamed(cfg.Logger, "on_demand")
 
 	name := cfg.getNameFromClientHello(hello)
+	timeLeft := time.Until(currentCert.Leaf.NotAfter)
 
+	getCertWithoutReobtaining := func() (Certificate, error) {
+		// very important to set the obtainIfNecessary argument to false, so we don't repeat this infinitely
+		return cfg.getCertDuringHandshake(hello, true, false)
+	}
+
+	// see if another goroutine is already working on this certificate
 	obtainCertWaitChansMu.Lock()
 	wait, ok := obtainCertWaitChans[name]
 	if ok {
-		// lucky us -- another goroutine is already renewing the certificate.
-		// wait for it to finish, then we'll use the new one.
+		// lucky us -- another goroutine is already renewing the certificate
 		obtainCertWaitChansMu.Unlock()
-		<-wait
-		return cfg.getCertDuringHandshake(hello, true, false)
+
+		if timeLeft > 0 {
+			// the current certificate hasn't expired, and another goroutine is already
+			// renewing it, so we might as well serve what we have without blocking
+			if log != nil {
+				log.Debug("certificate expires soon but is already being renewed; serving current certificate",
+					zap.Strings("identifiers", currentCert.Names),
+					zap.Duration("remaining", timeLeft))
+			}
+			return currentCert, nil
+		}
+
+		// otherwise, we'll have to wait for the renewal to finish so we don't serve
+		// an expired certificate
+
+		if log != nil {
+			log.Debug("certificate has expired, but is already being renewed; waiting for renewal to complete",
+				zap.Strings("identifiers", currentCert.Names),
+				zap.Time("expired", currentCert.Leaf.NotAfter))
+		}
+
+		// TODO: see if we can get a proper context in here, for true cancellation
+		timeout := time.NewTimer(2 * time.Minute)
+		select {
+		case <-timeout.C:
+			return Certificate{}, fmt.Errorf("timed out waiting for certificate renewal of %s", name)
+		case <-wait:
+			timeout.Stop()
+		}
+
+		return getCertWithoutReobtaining()
 	}
 
 	// looks like it's up to us to do all the work and renew the cert
 	wait = make(chan struct{})
 	obtainCertWaitChans[name] = wait
 	obtainCertWaitChansMu.Unlock()
+
+	unblockWaiters := func() {
+		obtainCertWaitChansMu.Lock()
+		close(wait)
+		delete(obtainCertWaitChans, name)
+		obtainCertWaitChansMu.Unlock()
+	}
+
+	if log != nil {
+		log.Info("attempting certificate renewal",
+			zap.String("server_name", name),
+			zap.Strings("identifiers", currentCert.Names),
+			zap.Time("expiration", currentCert.Leaf.NotAfter),
+			zap.Duration("remaining", timeLeft))
+	}
 
 	// Make sure a certificate for this name should be obtained on-demand
 	err := cfg.checkIfCertShouldBeObtained(name)
@@ -466,45 +531,52 @@ func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCe
 		cfg.certCache.mu.Lock()
 		cfg.certCache.removeCertificate(currentCert)
 		cfg.certCache.mu.Unlock()
+		unblockWaiters()
 		return Certificate{}, err
 	}
 
-	// renew and reload the certificate
-	if log != nil {
-		log.Info("renewing certificate", zap.String("server_name", name))
-	}
-	// TODO: use a proper context; we use one with timeout because retries are enabled because interactive is false
-	ctx, cancel := context.WithTimeout(context.TODO(), 90*time.Second)
-	defer cancel()
-	err = cfg.RenewCert(ctx, name, false)
-	if err == nil {
-		// even though the recursive nature of the dynamic cert loading
-		// would just call this function anyway, we do it here to
-		// make the replacement as atomic as possible.
-		newCert, err := cfg.CacheManagedCertificate(name)
-		if err != nil {
-			if log != nil {
-				log.Error("loading renewed certificate", zap.String("server_name", name), zap.Error(err))
+	// Renew and reload the certificate
+	renewAndReload := func(ctx context.Context, cancel context.CancelFunc) (Certificate, error) {
+		defer cancel()
+		err = cfg.RenewCert(ctx, name, false)
+		if err == nil {
+			// even though the recursive nature of the dynamic cert loading
+			// would just call this function anyway, we do it here to
+			// make the replacement as atomic as possible.
+			newCert, err := cfg.CacheManagedCertificate(name)
+			if err != nil {
+				if log != nil {
+					log.Error("loading renewed certificate", zap.String("server_name", name), zap.Error(err))
+				}
+			} else {
+				// replace the old certificate with the new one
+				cfg.certCache.replaceCertificate(currentCert, newCert)
 			}
-		} else {
-			// replace the old certificate with the new one
-			cfg.certCache.replaceCertificate(currentCert, newCert)
 		}
+
+		// immediately unblock anyone waiting for it; doing this in
+		// a defer would risk deadlock because of the recursive call
+		// to getCertDuringHandshake below when we return!
+		unblockWaiters()
+
+		if err != nil {
+			return Certificate{}, err
+		}
+
+		return getCertWithoutReobtaining()
 	}
 
-	// immediately unblock anyone waiting for it; doing this in
-	// a defer would risk deadlock because of the recursive call
-	// to getCertDuringHandshake below when we return!
-	obtainCertWaitChansMu.Lock()
-	close(wait)
-	delete(obtainCertWaitChans, name)
-	obtainCertWaitChansMu.Unlock()
-
-	if err != nil {
-		return Certificate{}, err
+	// if the certificate hasn't expired, we can serve what we have and renew in the background
+	if timeLeft > 0 {
+		// TODO: get a proper context; we use one with timeout because retries are enabled because interactive is false
+		ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Minute)
+		go renewAndReload(ctx, cancel)
+		return currentCert, nil
 	}
 
-	return cfg.getCertDuringHandshake(hello, true, false)
+	// otherwise, we have to block while we renew an expired certificate
+	ctx, cancel := context.WithTimeout(context.TODO(), 90*time.Second)
+	return renewAndReload(ctx, cancel)
 }
 
 // tryDistributedChallengeSolver is to be called when the clientHello pertains to

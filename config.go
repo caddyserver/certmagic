@@ -505,7 +505,7 @@ func (cfg *Config) renewWithIssuer(ctx context.Context, issuer Issuer, name stri
 	lockKey := cfg.lockKey("cert_acme", name)
 	err := acquireLock(ctx, cfg.Storage, lockKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to acquire lock '%s': %v", lockKey, err)
 	}
 	defer func() {
 		if log != nil {
