@@ -74,7 +74,11 @@ func (am *ACMEManager) distributedHTTPChallengeSolver(w http.ResponseWriter, r *
 
 	host := hostOnly(r.Host)
 
-	tokenKey := distributedSolver{acmeManager: am, caURL: am.CA}.challengeTokensKey(host)
+	tokenKey := distributedSolver{
+		storage:                am.config.Storage,
+		storageKeyIssuerPrefix: am.storageKeyCAPrefix(am.CA),
+	}.challengeTokensKey(host)
+
 	chalInfoBytes, err := am.config.Storage.Load(tokenKey)
 	if err != nil {
 		if _, ok := err.(ErrNotExist); !ok {

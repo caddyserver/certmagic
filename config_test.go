@@ -25,7 +25,7 @@ import (
 func TestSaveCertResource(t *testing.T) {
 	am := &ACMEManager{CA: "https://example.com/acme/directory"}
 	testConfig := &Config{
-		Issuer:    am,
+		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
 		certCache: new(Cache),
 	}
@@ -52,7 +52,7 @@ func TestSaveCertResource(t *testing.T) {
 		},
 	}
 
-	err := testConfig.saveCertResource(cert)
+	err := testConfig.saveCertResource(am, cert)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestSaveCertResource(t *testing.T) {
 		"url": "https://example.com/cert",
 	}
 
-	siteData, err := testConfig.loadCertResource(domain)
+	siteData, err := testConfig.loadCertResource(am, domain)
 	if err != nil {
 		t.Fatalf("Expected no error reading site, got: %v", err)
 	}

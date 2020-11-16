@@ -76,7 +76,8 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 				cfg.Logger.Info("served key authentication certificate",
 					zap.String("server_name", clientHello.ServerName),
 					zap.String("challenge", "tls-alpn-01"),
-					zap.String("remote", clientHello.Conn.RemoteAddr().String()))
+					zap.String("remote", clientHello.Conn.RemoteAddr().String()),
+					zap.Bool("distributed", false))
 			}
 			return &challengeCert.Certificate, nil
 		}
@@ -260,6 +261,12 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	if cfg.OnDemand != nil && loadIfNecessary {
 		// Then check to see if we have one on disk
 		loadedCert, err := cfg.CacheManagedCertificate(name)
+		if _, ok := err.(ErrNotExist); ok {
+			// If no exact match, try a wildcard variant, which is something we can still use
+			labels := strings.Split(name, ".")
+			labels[0] = "*"
+			loadedCert, err = cfg.CacheManagedCertificate(strings.Join(labels, "."))
+		}
 		if err == nil {
 			loadedCert, err = cfg.handshakeMaintenance(hello, loadedCert)
 			if err != nil {
@@ -586,21 +593,31 @@ func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCe
 // this to succeed, it requires that cfg.Issuer is of type *ACMEManager.
 // A boolean true is returned if a valid certificate is returned.
 func (cfg *Config) tryDistributedChallengeSolver(clientHello *tls.ClientHelloInfo) (Certificate, bool, error) {
-	am, ok := cfg.Issuer.(*ACMEManager)
-	if !ok {
-		return Certificate{}, false, nil
-	}
-	tokenKey := distributedSolver{acmeManager: am, caURL: am.CA}.challengeTokensKey(clientHello.ServerName)
-	chalInfoBytes, err := cfg.Storage.Load(tokenKey)
-	if err != nil {
+	// first we'll have to find the right issuer that has the challenge info in its storage location
+	var chalInfoBytes []byte
+	var tokenKey string
+	for _, issuer := range cfg.Issuers {
+		ds := distributedSolver{
+			storage:                cfg.Storage,
+			storageKeyIssuerPrefix: storageKeyACMECAPrefix(issuer.IssuerKey()),
+		}
+		tokenKey = ds.challengeTokensKey(clientHello.ServerName)
+		var err error
+		chalInfoBytes, err = cfg.Storage.Load(tokenKey)
+		if err == nil {
+			break
+		}
 		if _, ok := err.(ErrNotExist); ok {
-			return Certificate{}, false, nil
+			continue
 		}
 		return Certificate{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)
 	}
+	if len(chalInfoBytes) == 0 {
+		return Certificate{}, false, nil
+	}
 
 	var chalInfo acme.Challenge
-	err = json.Unmarshal(chalInfoBytes, &chalInfo)
+	err := json.Unmarshal(chalInfoBytes, &chalInfo)
 	if err != nil {
 		return Certificate{}, false, fmt.Errorf("decoding challenge token file %s (corrupted?): %v", tokenKey, err)
 	}

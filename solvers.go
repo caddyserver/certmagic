@@ -458,20 +458,19 @@ func (mmu *mapMutex) locked(key interface{}) (ok bool) {
 // sharing sync and storage, and using the facilities provided by
 // this package for solving the challenges.
 type distributedSolver struct {
-	// The config with a certificate cache
-	// with a reference to the storage to
-	// use which is shared among all the
-	// instances in the cluster - REQUIRED.
-	acmeManager *ACMEManager
+	// The storage backing the distributed solver. It must be
+	// the same storage configuration as what is solving the
+	// challenge in order to be effective.
+	storage Storage
+
+	// The storage key prefix, associated with the issuer
+	// that is solving the challenge.
+	storageKeyIssuerPrefix string
 
 	// Since the distributedSolver is only a
 	// wrapper over an actual solver, place
 	// the actual solver here.
 	solver acmez.Solver
-
-	// The CA endpoint URL associated with
-	// this solver.
-	caURL string
 }
 
 // Present invokes the underlying solver's Present method
@@ -483,7 +482,7 @@ func (dhs distributedSolver) Present(ctx context.Context, chal acme.Challenge) e
 		return err
 	}
 
-	err = dhs.acmeManager.config.Storage.Store(dhs.challengeTokensKey(chal.Identifier.Value), infoBytes)
+	err = dhs.storage.Store(dhs.challengeTokensKey(chal.Identifier.Value), infoBytes)
 	if err != nil {
 		return err
 	}
@@ -498,7 +497,7 @@ func (dhs distributedSolver) Present(ctx context.Context, chal acme.Challenge) e
 // CleanUp invokes the underlying solver's CleanUp method
 // and also cleans up any assets saved to storage.
 func (dhs distributedSolver) CleanUp(ctx context.Context, chal acme.Challenge) error {
-	err := dhs.acmeManager.config.Storage.Delete(dhs.challengeTokensKey(chal.Identifier.Value))
+	err := dhs.storage.Delete(dhs.challengeTokensKey(chal.Identifier.Value))
 	if err != nil {
 		return err
 	}
@@ -511,7 +510,7 @@ func (dhs distributedSolver) CleanUp(ctx context.Context, chal acme.Challenge) e
 
 // challengeTokensPrefix returns the key prefix for challenge info.
 func (dhs distributedSolver) challengeTokensPrefix() string {
-	return path.Join(dhs.acmeManager.storageKeyCAPrefix(dhs.caURL), "challenge_tokens")
+	return path.Join(dhs.storageKeyIssuerPrefix, "challenge_tokens")
 }
 
 // challengeTokensKey returns the key to use to store and access

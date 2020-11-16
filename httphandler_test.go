@@ -24,7 +24,7 @@ import (
 func TestHTTPChallengeHandlerNoOp(t *testing.T) {
 	am := &ACMEManager{CA: "https://example.com/acme/directory"}
 	testConfig := &Config{
-		Issuer:    am,
+		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
 		certCache: new(Cache),
 	}
