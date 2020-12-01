@@ -345,6 +345,28 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 	return nil
 }
 
+// Unmanage causes the certificates for domainNames to stop being managed.
+// If there are certificates for the supplied domain names in the cache, they
+// are evicted from the cache.
+func (cfg *Config) Unmanage(domainNames []string) {
+	var deleteQueue []Certificate
+	for _, domainName := range domainNames {
+		certs := cfg.certCache.AllMatchingCertificates(domainName)
+		for _, cert := range certs {
+			if !cert.managed {
+				continue
+			}
+			deleteQueue = append(deleteQueue, cert)
+		}
+	}
+
+	cfg.certCache.mu.Lock()
+	for _, cert := range deleteQueue {
+		cfg.certCache.removeCertificate(cert)
+	}
+	cfg.certCache.mu.Unlock()
+}
+
 // ObtainCert obtains a certificate for name using cfg, as long
 // as a certificate does not already exist in storage for that
 // name. The name must qualify and cfg must be flagged as Managed.
