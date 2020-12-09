@@ -108,16 +108,12 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 //
 // This function is safe for concurrent use.
 func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate, matched, defaulted bool) {
-	name := NormalizedName(hello.ServerName)
+	name := normalizedName(hello.ServerName)
 
 	if name == "" {
 		// if SNI is empty, prefer matching IP address
 		if hello.Conn != nil {
-			addr := hello.Conn.LocalAddr().String()
-			ip, _, err := net.SplitHostPort(addr)
-			if err == nil {
-				addr = ip
-			}
+			addr := localIPFromConn(hello.Conn)
 			cert, matched = cfg.selectCert(hello, addr)
 			if matched {
 				return
@@ -126,7 +122,7 @@ func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate,
 
 		// fall back to a "default" certificate, if specified
 		if cfg.DefaultServerName != "" {
-			normDefault := NormalizedName(cfg.DefaultServerName)
+			normDefault := normalizedName(cfg.DefaultServerName)
 			cert, defaulted = cfg.selectCert(hello, normDefault)
 			if defaulted {
 				return
@@ -637,23 +633,36 @@ func (cfg *Config) tryDistributedChallengeSolver(clientHello *tls.ClientHelloInf
 // If hello.ServerName is empty (i.e. client did not use SNI), then the
 // associated connection's local address is used to extract an IP address.
 func (*Config) getNameFromClientHello(hello *tls.ClientHelloInfo) string {
-	name := NormalizedName(hello.ServerName)
-	if name != "" || hello.Conn == nil {
+	if name := normalizedName(hello.ServerName); name != "" {
 		return name
 	}
-
-	// if no SNI, try using IP address on the connection
-	localAddr := hello.Conn.LocalAddr().String()
-	localAddrHost, _, err := net.SplitHostPort(localAddr)
-	if err == nil {
-		return localAddrHost
-	}
-	return localAddr
+	return localIPFromConn(hello.Conn)
 }
 
-// NormalizedName returns a cleaned form of serverName that is
+// localIPFromConn returns the host portion of c's local address
+// and strips the scope ID if one exists (see RFC 4007).
+func localIPFromConn(c net.Conn) string {
+	if c == nil {
+		return ""
+	}
+	localAddr := c.LocalAddr().String()
+	ip, _, err := net.SplitHostPort(localAddr)
+	if err != nil {
+		// OK; assume there was no port
+		ip = localAddr
+	}
+	// IPv6 addresses can have scope IDs, e.g. "fe80::4c3:3cff:fe4f:7e0b%eth0",
+	// but for our purposes, these are useless (unless a valid use case proves
+	// otherwise; see issue #3911)
+	if scopeIDStart := strings.Index(ip, "%"); scopeIDStart > -1 {
+		ip = ip[:scopeIDStart]
+	}
+	return ip
+}
+
+// normalizedName returns a cleaned form of serverName that is
 // used for consistency when referring to a SNI value.
-func NormalizedName(serverName string) string {
+func normalizedName(serverName string) string {
 	return strings.ToLower(strings.TrimSpace(serverName))
 }
 
