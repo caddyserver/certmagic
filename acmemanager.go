@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -96,11 +97,9 @@ type ACMEManager struct {
 	// still EXPERIMENTAL and subject to change)
 	NewAccountFunc func(context.Context, *ACMEManager, acme.Account) error
 
-	// List of preferred certificate chains, by
-	// issuer's CommonName. If empty, or if no
-	// matching chain is found, the first chain
-	// offered by the server will be used.
-	PreferredChains []string
+	// Preferences for selecting alternate
+	// certificate chains
+	PreferredChains ChainPreference
 
 	// Set a logger to enable logging
 	Logger *zap.Logger
@@ -210,11 +209,11 @@ func (*ACMEManager) issuerKey(ca string) string {
 // batch is eligible for certificates if using Let's Encrypt.
 // It also ensures that an email address is available.
 func (am *ACMEManager) PreCheck(_ context.Context, names []string, interactive bool) error {
-	letsEncrypt := strings.Contains(am.CA, "api.letsencrypt.org")
-	if letsEncrypt {
+	publicCA := strings.Contains(am.CA, "api.letsencrypt.org") || strings.Contains(am.CA, "acme.zerossl.com")
+	if publicCA {
 		for _, name := range names {
 			if !SubjectQualifiesForPublicCert(name) {
-				return fmt.Errorf("subject does not qualify for a Let's Encrypt certificate: %s", name)
+				return fmt.Errorf("subject does not qualify for a public certificate: %s", name)
 			}
 		}
 	}
@@ -312,9 +311,42 @@ func (am *ACMEManager) doIssue(ctx context.Context, csr *x509.CertificateRequest
 		return nil, usingTestCA, fmt.Errorf("no certificate chains")
 	}
 
-	// select the preferred chain
-	var preferredChainIdx int
-	if len(am.PreferredChains) > 0 {
+	preferredChain := am.selectPreferredChain(certChains)
+
+	ic := &IssuedCertificate{
+		Certificate: preferredChain.ChainPEM,
+		Metadata:    preferredChain,
+	}
+
+	return ic, usingTestCA, nil
+}
+
+// selectPreferredChain sorts and then filters the certificate chains to find the optimal
+// chain preferred by the client. If there's only one chain, that is returned without any
+// processing. If there are no matches, the first chain is returned.
+func (am *ACMEManager) selectPreferredChain(certChains []acme.Certificate) acme.Certificate {
+	if len(certChains) == 1 {
+		if am.Logger != nil && (len(am.PreferredChains.AnyCommonName) > 0 || len(am.PreferredChains.RootCommonName) > 0) {
+			am.Logger.Debug("there is only one chain offered; selecting it regardless of preferences",
+				zap.String("chain_url", certChains[0].URL))
+		}
+		return certChains[0]
+	}
+
+	if am.PreferredChains.Smallest != nil {
+		if *am.PreferredChains.Smallest {
+			sort.Slice(certChains, func(i, j int) bool {
+				return len(certChains[i].ChainPEM) < len(certChains[j].ChainPEM)
+			})
+		} else {
+			sort.Slice(certChains, func(i, j int) bool {
+				return len(certChains[i].ChainPEM) > len(certChains[j].ChainPEM)
+			})
+		}
+	}
+
+	if len(am.PreferredChains.AnyCommonName) > 0 || len(am.PreferredChains.RootCommonName) > 0 {
+		// in order to inspect, we need to decode their PEM contents
 		decodedChains := make([][]*x509.Certificate, len(certChains))
 		for i, chain := range certChains {
 			certs, err := parseCertsFromPEMBundle(chain.ChainPEM)
@@ -329,38 +361,44 @@ func (am *ACMEManager) doIssue(ctx context.Context, csr *x509.CertificateRequest
 			decodedChains[i] = certs
 		}
 
-		var foundPreferredChain bool
-	outer:
-		for _, prefChain := range am.PreferredChains {
-			for j, chain := range decodedChains {
-				for _, cert := range chain {
-					if cert.Issuer.CommonName == prefChain {
-						preferredChainIdx = j
-						foundPreferredChain = true
-						if am.Logger != nil {
-							am.Logger.Debug("found preferred certificate chain",
-								zap.String("preference", prefChain),
-								zap.Int("chain", preferredChainIdx))
+		if len(am.PreferredChains.AnyCommonName) > 0 {
+			for _, prefAnyCN := range am.PreferredChains.AnyCommonName {
+				for i, chain := range decodedChains {
+					for _, cert := range chain {
+						if cert.Issuer.CommonName == prefAnyCN {
+							if am.Logger != nil {
+								am.Logger.Debug("found preferred certificate chain by issuer common name",
+									zap.String("preference", prefAnyCN),
+									zap.Int("chain", i))
+							}
+							return certChains[i]
 						}
-						break outer
 					}
 				}
 			}
 		}
 
-		if !foundPreferredChain && am.Logger != nil {
-			am.Logger.Warn("did not find chain matching preferences; using first",
-				zap.Strings("preferences", am.PreferredChains),
-				zap.String("using", decodedChains[preferredChainIdx][0].Issuer.CommonName))
+		if len(am.PreferredChains.RootCommonName) > 0 {
+			for _, prefRootCN := range am.PreferredChains.RootCommonName {
+				for i, chain := range decodedChains {
+					if chain[len(chain)-1].Issuer.CommonName == prefRootCN {
+						if am.Logger != nil {
+							am.Logger.Debug("found preferred certificate chain by root common name",
+								zap.String("preference", prefRootCN),
+								zap.Int("chain", i))
+						}
+						return certChains[i]
+					}
+				}
+			}
+		}
+
+		if am.Logger != nil {
+			am.Logger.Warn("did not find chain matching preferences; using first")
 		}
 	}
 
-	ic := &IssuedCertificate{
-		Certificate: certChains[preferredChainIdx].ChainPEM,
-		Metadata:    certChains[preferredChainIdx],
-	}
-
-	return ic, usingTestCA, nil
+	return certChains[0]
 }
 
 // Revoke implements the Revoker interface. It revokes the given certificate.
@@ -376,6 +414,22 @@ func (am *ACMEManager) Revoke(ctx context.Context, cert CertificateResource, rea
 	}
 
 	return client.revoke(ctx, certs[0], reason)
+}
+
+// ChainPreference describes the client's preferred certificate chain,
+// useful if the CA offers alternate chains. The first matching chain
+// will be selected.
+type ChainPreference struct {
+	// Prefer chains with the fewest number of bytes.
+	Smallest *bool
+
+	// Select first chain having a root with one of
+	// these common names.
+	RootCommonName []string
+
+	// Select first chain that has any issuer with one
+	// of these common names.
+	AnyCommonName []string
 }
 
 // DefaultACME specifies default settings to use for ACMEManagers.
