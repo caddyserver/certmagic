@@ -309,7 +309,8 @@ func (am *ACMEManager) mostRecentAccountEmail(caURL string) (string, bool) {
 	// get all the key infos ahead of sorting, because
 	// we might filter some out
 	stats := make(map[string]KeyInfo)
-	for i, u := range accountList {
+	for i := 0; i < len(accountList); i++ {
+		u := accountList[i]
 		keyInfo, err := am.config.Storage.Stat(u)
 		if err != nil {
 			continue
@@ -322,6 +323,7 @@ func (am *ACMEManager) mostRecentAccountEmail(caURL string) (string, bool) {
 			// frankly one's OS shouldn't mess with the data folder
 			// in the first place.
 			accountList = append(accountList[:i], accountList[i+1:]...)
+			i--
 			continue
 		}
 		stats[u] = keyInfo
