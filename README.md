@@ -394,7 +394,7 @@ To enable it, just set the `DNS01Solver` field on a `certmagic.ACMEManager` stru
 import "github.com/libdns/cloudflare"
 
 certmagic.DefaultACME.DNS01Solver = &certmagic.DNS01Solver{
-	DNSProvider: cloudflare.Provider{
+	DNSProvider: &cloudflare.Provider{
 		APIToken: "topsecret",
 	},
 }
