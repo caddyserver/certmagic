@@ -32,6 +32,7 @@ import (
 
 	"github.com/mholt/acmez"
 	"go.uber.org/zap"
+	"golang.org/x/net/idna"
 )
 
 // Config configures a certificate manager instance.
@@ -647,7 +648,12 @@ func (cfg *Config) generateCSR(privateKey crypto.PrivateKey, sans []string) (*x5
 		} else if u, err := url.Parse(name); err == nil && strings.Contains(name, "/") {
 			csrTemplate.URIs = append(csrTemplate.URIs, u)
 		} else {
-			csrTemplate.DNSNames = append(csrTemplate.DNSNames, name)
+			// convert IDNs to ASCII according to RFC 5280 section 7
+			normalizedName, err := idna.ToASCII(name)
+			if err != nil {
+				return nil, fmt.Errorf("converting identifier '%s' to ASCII: %v", name, err)
+			}
+			csrTemplate.DNSNames = append(csrTemplate.DNSNames, normalizedName)
 		}
 	}
 

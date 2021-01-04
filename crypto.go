@@ -33,6 +33,7 @@ import (
 
 	"github.com/klauspost/cpuid"
 	"go.uber.org/zap"
+	"golang.org/x/net/idna"
 )
 
 // encodePrivateKey marshals a EC or RSA private key into a PEM-encoded array of bytes.
@@ -231,17 +232,22 @@ func (cfg *Config) loadCertResource(issuer Issuer, certNamesKey string) (Certifi
 	var certRes CertificateResource
 	issuerKey := issuer.IssuerKey()
 
-	certBytes, err := cfg.Storage.Load(StorageKeys.SiteCert(issuerKey, certNamesKey))
+	normalizedName, err := idna.ToASCII(certNamesKey)
+	if err != nil {
+		return certRes, fmt.Errorf("converting '%s' to ASCII: %v", certNamesKey, err)
+	}
+
+	certBytes, err := cfg.Storage.Load(StorageKeys.SiteCert(issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err
 	}
 	certRes.CertificatePEM = certBytes
-	keyBytes, err := cfg.Storage.Load(StorageKeys.SitePrivateKey(issuerKey, certNamesKey))
+	keyBytes, err := cfg.Storage.Load(StorageKeys.SitePrivateKey(issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err
 	}
 	certRes.PrivateKeyPEM = keyBytes
-	metaBytes, err := cfg.Storage.Load(StorageKeys.SiteMeta(issuerKey, certNamesKey))
+	metaBytes, err := cfg.Storage.Load(StorageKeys.SiteMeta(issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err
 	}
