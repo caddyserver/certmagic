@@ -430,7 +430,7 @@ func (cfg *Config) handshakeMaintenance(hello *tls.ClientHelloInfo, cert Certifi
 	if cert.ocsp != nil {
 		refreshTime := cert.ocsp.ThisUpdate.Add(cert.ocsp.NextUpdate.Sub(cert.ocsp.ThisUpdate) / 2)
 		if time.Now().After(refreshTime) {
-			_, err := stapleOCSP(cfg.Storage, &cert, nil)
+			_, err := stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
 			if err != nil {
 				// An error with OCSP stapling is not the end of the world, and in fact, is
 				// quite common considering not all certs have issuer URLs that support it.

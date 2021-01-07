@@ -337,8 +337,8 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 			continue
 		}
 
-		ocspResp, err := stapleOCSP(cfg.Storage, &cert, nil)
-		if err != nil {
+		ocspResp, err := stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
+		if err != nil || ocspResp == nil {
 			if cert.ocsp != nil {
 				// if there was no staple before, that's fine; otherwise we should log the error
 				if log != nil {

@@ -84,6 +84,14 @@ type Config struct {
 	// be used.
 	CertSelection CertificateSelector
 
+	// OCSP configures how OCSP is handled. By default,
+	// OCSP responses are fetched for every certificate
+	// with a responder URL, and cached on disk. Changing
+	// these defaults is STRONGLY discouraged unless you
+	// have a compelling reason to put clients at greater
+	// risk and reduce their privacy.
+	OCSP OCSPConfig
+
 	// The storage to access when storing or loading
 	// TLS assets. Default is the local file system.
 	Storage Storage
@@ -833,6 +841,22 @@ func loggerNamed(l *zap.Logger, name string) *zap.Logger {
 // CertificateSelector is a type which can select a certificate to use given multiple choices.
 type CertificateSelector interface {
 	SelectCertificate(*tls.ClientHelloInfo, []Certificate) (Certificate, error)
+}
+
+// OCSPConfig configures how OCSP is handled.
+type OCSPConfig struct {
+	// Disable automatic OCSP stapling; strongly
+	// discouraged unless you have a good reason.
+	// Disabling this puts clients at greater risk
+	// and reduces their privacy.
+	DisableStapling bool
+
+	// A map of OCSP responder domains to replacement
+	// domains for querying OCSP servers. Used for
+	// overriding the OCSP responder URL that is
+	// embedded in certificates. Mapping to an empty
+	// URL will disable OCSP from that responder.
+	ResponderOverrides map[string]string
 }
 
 // certIssueLockOp is the name of the operation used

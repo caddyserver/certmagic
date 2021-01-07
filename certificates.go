@@ -155,7 +155,7 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(tlsCert tls.Certificate, tags []
 	if err != nil {
 		return err
 	}
-	_, err = stapleOCSP(cfg.Storage, &cert, nil)
+	_, err = stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
 	if err != nil && cfg.Logger != nil {
 		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
 	}
@@ -203,7 +203,7 @@ func (cfg Config) makeCertificateWithOCSP(certPEMBlock, keyPEMBlock []byte) (Cer
 	if err != nil {
 		return cert, err
 	}
-	_, err = stapleOCSP(cfg.Storage, &cert, certPEMBlock)
+	_, err = stapleOCSP(cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
 	if err != nil && cfg.Logger != nil {
 		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
 	}
