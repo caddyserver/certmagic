@@ -100,8 +100,10 @@ func TestSubjectQualifiesForCert(t *testing.T) {
 		{"*.*.example.com", true},
 		{"sub.*.example.com", false},
 		{"*sub.example.com", false},
-		{"**.com", false},
-		{".com", false},
+		{"**.tld", false},
+		{"*", true},
+		{"*.tld", true},
+		{".tld", false},
 		{"example.com.", false},
 		{"localhost", true},
 		{"foo.localhost", true},
@@ -149,7 +151,9 @@ func TestSubjectQualifiesForPublicCert(t *testing.T) {
 		{"*.*.example.com", false},
 		{"sub.*.example.com", false},
 		{"*sub.example.com", false},
-		{".com", false},
+		{"*", false},     // won't be trusted by browsers
+		{"*.tld", false}, // won't be trusted by browsers
+		{".tld", false},
 		{"example.com.", false},
 		{"localhost", false},
 		{"foo.localhost", false},
