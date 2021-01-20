@@ -16,6 +16,7 @@ package certmagic
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -34,18 +35,24 @@ import (
 // getAccount either loads or creates a new account, depending on if
 // an account can be found in storage for the given CA + email combo.
 func (am *ACMEManager) getAccount(ca, email string) (acme.Account, error) {
-	regBytes, err := am.config.Storage.Load(am.storageKeyUserReg(ca, email))
+	acct, err := am.loadAccount(ca, email)
 	if err != nil {
 		if _, ok := err.(ErrNotExist); ok {
 			return am.newAccount(email)
 		}
+		return acct, err
+	}
+	return acct, err
+}
+
+// loadAccount loads an account from storage, but does not create a new one.
+func (am *ACMEManager) loadAccount(ca, email string) (acme.Account, error) {
+	regBytes, err := am.config.Storage.Load(am.storageKeyUserReg(ca, email))
+	if err != nil {
 		return acme.Account{}, err
 	}
 	keyBytes, err := am.config.Storage.Load(am.storageKeyUserPrivateKey(ca, email))
 	if err != nil {
-		if _, ok := err.(ErrNotExist); ok {
-			return am.newAccount(email)
-		}
 		return acme.Account{}, err
 	}
 
@@ -66,7 +73,7 @@ func (am *ACMEManager) getAccount(ca, email string) (acme.Account, error) {
 		return acct, fmt.Errorf("one-time account transition: %v", err)
 	}
 
-	return acct, err
+	return acct, nil
 }
 
 // TODO: this is a temporary transition helper starting July 2020.
@@ -125,9 +132,45 @@ func (*ACMEManager) newAccount(email string) (acme.Account, error) {
 	return acct, nil
 }
 
-// GetAccount looks up the account associated with privateKeyPEM from the ACME server.
-// If the account is found by the server, it will be saved to storage and returned.
+// GetAccount first tries loading the account with the associated private key from storage.
+// If it does not exist in storage, it will be retrieved from the ACME server and added to storage.
+// The account must already exist; it does not create a new account.
 func (am *ACMEManager) GetAccount(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
+	account, err := am.loadAccountByKey(ctx, privateKeyPEM)
+	if err != nil {
+		if _, ok := err.(ErrNotExist); ok {
+			account, err = am.lookUpAccount(ctx, privateKeyPEM)
+		} else {
+			return account, err
+		}
+	}
+	return account, err
+}
+
+// loadAccountByKey loads the account with the given private key from storage, if it exists.
+// If it does not exist, an error of type ErrNotExist is returned. This is not very efficient
+// for lots of accounts.
+func (am *ACMEManager) loadAccountByKey(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
+	accountList, err := am.config.Storage.List(am.storageKeyUsersPrefix(am.CA), false)
+	if err != nil {
+		return acme.Account{}, err
+	}
+	for _, accountFolderKey := range accountList {
+		email := path.Base(accountFolderKey)
+		keyBytes, err := am.config.Storage.Load(am.storageKeyUserPrivateKey(am.CA, email))
+		if err != nil {
+			return acme.Account{}, err
+		}
+		if bytes.Equal(bytes.TrimSpace(keyBytes), bytes.TrimSpace(privateKeyPEM)) {
+			return am.loadAccount(am.CA, email)
+		}
+	}
+	return acme.Account{}, ErrNotExist(fmt.Errorf("no account found with that key"))
+}
+
+// lookUpAccount looks up the account associated with privateKeyPEM from the ACME server.
+// If the account is found by the server, it will be saved to storage and returned.
+func (am *ACMEManager) lookUpAccount(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
 	client, err := am.newACMEClient(false)
 	if err != nil {
 		return acme.Account{}, fmt.Errorf("creating ACME client: %v", err)

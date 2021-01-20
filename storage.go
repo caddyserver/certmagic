@@ -272,6 +272,7 @@ var safeKeyRE = regexp.MustCompile(`[^\w@.-]`)
 // ErrNotExist is returned by Storage implementations when
 // a resource is not found. It is similar to os.IsNotExist
 // except this is a type, not a variable.
+// TODO: use new Go error wrapping conventions
 type ErrNotExist interface {
 	error
 }
