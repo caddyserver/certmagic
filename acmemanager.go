@@ -289,7 +289,7 @@ func (am *ACMEManager) Issue(ctx context.Context, csr *x509.CertificateRequest) 
 }
 
 func (am *ACMEManager) doIssue(ctx context.Context, csr *x509.CertificateRequest, useTestCA bool) (*IssuedCertificate, bool, error) {
-	client, err := am.newACMEClient(ctx, useTestCA, false)
+	client, err := am.newACMEClientWithAccount(ctx, useTestCA, false)
 	if err != nil {
 		return nil, false, err
 	}
@@ -403,7 +403,7 @@ func (am *ACMEManager) selectPreferredChain(certChains []acme.Certificate) acme.
 
 // Revoke implements the Revoker interface. It revokes the given certificate.
 func (am *ACMEManager) Revoke(ctx context.Context, cert CertificateResource, reason int) error {
-	client, err := am.newACMEClient(ctx, false, false)
+	client, err := am.newACMEClientWithAccount(ctx, false, false)
 	if err != nil {
 		return err
 	}

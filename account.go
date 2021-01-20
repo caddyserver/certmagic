@@ -16,6 +16,7 @@ package certmagic
 
 import (
 	"bufio"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -122,6 +123,35 @@ func (*ACMEManager) newAccount(email string) (acme.Account, error) {
 	}
 	acct.PrivateKey = privateKey
 	return acct, nil
+}
+
+// GetAccount looks up the account associated with privateKeyPEM from the ACME server.
+// If the account is found by the server, it will be saved to storage and returned.
+func (am *ACMEManager) GetAccount(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
+	client, err := am.newACMEClient(false)
+	if err != nil {
+		return acme.Account{}, fmt.Errorf("creating ACME client: %v", err)
+	}
+
+	privateKey, err := decodePrivateKey([]byte(privateKeyPEM))
+	if err != nil {
+		return acme.Account{}, fmt.Errorf("decoding private key: %v", err)
+	}
+
+	// look up the account
+	account := acme.Account{PrivateKey: privateKey}
+	account, err = client.GetAccount(ctx, account)
+	if err != nil {
+		return acme.Account{}, fmt.Errorf("looking up account with server: %v", err)
+	}
+
+	// save the account details to storage
+	err = am.saveAccount(client.Directory, account)
+	if err != nil {
+		return account, fmt.Errorf("could not save account to storage: %v", err)
+	}
+
+	return account, nil
 }
 
 // saveAccount persists an ACME account's info and private key to storage.

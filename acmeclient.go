@@ -37,19 +37,99 @@ func init() {
 	weakrand.Seed(time.Now().UnixNano())
 }
 
-// acmeClient holds state necessary for us to perform
-// ACME operations for certificate management. Call
-// ACMEManager.newACMEClient() to get a valid one to .
+// acmeClient holds state necessary to perform ACME operations
+// for certificate management with an ACME account. Call
+// ACMEManager.newACMEClientWithAccount() to get a valid one.
 type acmeClient struct {
 	mgr        *ACMEManager
 	acmeClient *acmez.Client
 	account    acme.Account
 }
 
-// newACMEClient creates the underlying ACME library client type.
-// If useTestCA is true, am.TestCA will be used if it is set;
-// otherwise, the primary CA will still be used.
-func (am *ACMEManager) newACMEClient(ctx context.Context, useTestCA, interactive bool) (*acmeClient, error) {
+// newACMEClientWithAccount creates an ACME client ready to use with an account, including
+// loading one from storage or registering a new account with the CA if necessary. If
+// useTestCA is true, am.TestCA will be used if set; otherwise, the primary CA will be used.
+func (am *ACMEManager) newACMEClientWithAccount(ctx context.Context, useTestCA, interactive bool) (*acmeClient, error) {
+	// first, get underlying ACME client
+	client, err := am.newACMEClient(useTestCA)
+	if err != nil {
+		return nil, err
+	}
+
+	// look up or create the ACME account
+	account, err := am.getAccount(client.Directory, am.Email)
+	if err != nil {
+		return nil, fmt.Errorf("getting ACME account: %v", err)
+	}
+
+	// register account if it is new
+	if account.Status == "" {
+		if am.NewAccountFunc != nil {
+			err = am.NewAccountFunc(ctx, am, account)
+			if err != nil {
+				return nil, fmt.Errorf("account pre-registration callback: %v", err)
+			}
+		}
+
+		// agree to terms
+		if interactive {
+			if !am.Agreed {
+				var termsURL string
+				dir, err := client.GetDirectory(ctx)
+				if err != nil {
+					return nil, fmt.Errorf("getting directory: %w", err)
+				}
+				if dir.Meta != nil {
+					termsURL = dir.Meta.TermsOfService
+				}
+				if termsURL != "" {
+					am.Agreed = am.askUserAgreement(termsURL)
+					if !am.Agreed {
+						return nil, fmt.Errorf("user must agree to CA terms")
+					}
+				}
+			}
+		} else {
+			// can't prompt a user who isn't there; they should
+			// have reviewed the terms beforehand
+			am.Agreed = true
+		}
+		account.TermsOfServiceAgreed = am.Agreed
+
+		// associate account with external binding, if configured
+		if am.ExternalAccount != nil {
+			err := account.SetExternalAccountBinding(ctx, client.Client, *am.ExternalAccount)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		// create account
+		account, err = client.NewAccount(ctx, account)
+		if err != nil {
+			return nil, fmt.Errorf("registering account with server: %w", err)
+		}
+
+		// persist the account to storage
+		err = am.saveAccount(client.Directory, account)
+		if err != nil {
+			return nil, fmt.Errorf("could not save account: %v", err)
+		}
+	}
+
+	c := &acmeClient{
+		mgr:        am,
+		acmeClient: client,
+		account:    account,
+	}
+
+	return c, nil
+}
+
+// newACMEClient creates a new underlying ACME client using the settings in am,
+// independent of any particular ACME account. If useTestCA is true, am.TestCA
+// will be used if it is set; otherwise, the primary CA will be used.
+func (am *ACMEManager) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 	// ensure defaults are filled in
 	var caURL string
 	if useTestCA {
@@ -76,12 +156,6 @@ func (am *ACMEManager) newACMEClient(ctx context.Context, useTestCA, interactive
 	}
 	if u.Scheme != "https" && !isLoopback(u.Host) && !isInternal(u.Host) {
 		return nil, fmt.Errorf("%s: insecure CA URL (HTTPS required)", caURL)
-	}
-
-	// look up or create the ACME account
-	account, err := am.getAccount(caURL, am.Email)
-	if err != nil {
-		return nil, fmt.Errorf("getting ACME account: %v", err)
 	}
 
 	// set up the dialers and resolver for the ACME client's HTTP client
@@ -185,68 +259,7 @@ func (am *ACMEManager) newACMEClient(ctx context.Context, useTestCA, interactive
 		client.ChallengeSolvers[acme.ChallengeTypeDNS01] = am.DNS01Solver
 	}
 
-	// register account if it is new
-	if account.Status == "" {
-		if am.NewAccountFunc != nil {
-			err = am.NewAccountFunc(ctx, am, account)
-			if err != nil {
-				return nil, fmt.Errorf("account pre-registration callback: %v", err)
-			}
-		}
-
-		// agree to terms
-		if interactive {
-			if !am.Agreed {
-				var termsURL string
-				dir, err := client.GetDirectory(ctx)
-				if err != nil {
-					return nil, fmt.Errorf("getting directory: %w", err)
-				}
-				if dir.Meta != nil {
-					termsURL = dir.Meta.TermsOfService
-				}
-				if termsURL != "" {
-					am.Agreed = am.askUserAgreement(termsURL)
-					if !am.Agreed {
-						return nil, fmt.Errorf("user must agree to CA terms")
-					}
-				}
-			}
-		} else {
-			// can't prompt a user who isn't there; they should
-			// have reviewed the terms beforehand
-			am.Agreed = true
-		}
-		account.TermsOfServiceAgreed = am.Agreed
-
-		// associate account with external binding, if configured
-		if am.ExternalAccount != nil {
-			err := account.SetExternalAccountBinding(ctx, client.Client, *am.ExternalAccount)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		// create account
-		account, err = client.NewAccount(ctx, account)
-		if err != nil {
-			return nil, fmt.Errorf("registering account with server: %w", err)
-		}
-
-		// persist the account to storage
-		err = am.saveAccount(caURL, account)
-		if err != nil {
-			return nil, fmt.Errorf("could not save account: %v", err)
-		}
-	}
-
-	c := &acmeClient{
-		mgr:        am,
-		acmeClient: client,
-		account:    account,
-	}
-
-	return c, nil
+	return client, nil
 }
 
 func (c *acmeClient) throttle(ctx context.Context, names []string) error {
