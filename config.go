@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/json"
 	"fmt"
 	weakrand "math/rand"
 	"net"
@@ -31,6 +32,7 @@ import (
 	"time"
 
 	"github.com/mholt/acmez"
+	"github.com/mholt/acmez/acme"
 	"go.uber.org/zap"
 	"golang.org/x/net/idna"
 )
@@ -751,6 +753,54 @@ func (cfg *Config) TLSConfig() *tls.Config {
 		CipherSuites:             preferredDefaultCipherSuites(),
 		PreferServerCipherSuites: true,
 	}
+}
+
+// getChallengeInfo loads the challenge info from either the internal challenge memory
+// or the external storage (implying distributed solving). The second return value
+// indicates whether challenge info was loaded from external storage. If true, the
+// challenge is being solved in a distributed fashion; if false, from internal memory.
+// If no matching challenge information can be found, an error is returned.
+func (cfg *Config) getChallengeInfo(identifier string) (challengeWithData, bool, error) {
+	// first, check if our process initiated this challenge; if so, just return it
+	activeChallengesMu.Lock()
+	chalData, ok := activeChallenges[identifier]
+	activeChallengesMu.Unlock()
+	if ok {
+		return chalData, false, nil
+	}
+
+	// otherwise, perhaps another instance in the cluster initiated it; check
+	// the configured storage to retrieve challenge data
+
+	var chalInfo acme.Challenge
+	var chalInfoBytes []byte
+	var tokenKey string
+	for _, issuer := range cfg.Issuers {
+		ds := distributedSolver{
+			storage:                cfg.Storage,
+			storageKeyIssuerPrefix: storageKeyACMECAPrefix(issuer.IssuerKey()),
+		}
+		tokenKey = ds.challengeTokensKey(identifier)
+		var err error
+		chalInfoBytes, err = cfg.Storage.Load(tokenKey)
+		if err == nil {
+			break
+		}
+		if _, ok := err.(ErrNotExist); ok {
+			continue
+		}
+		return challengeWithData{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)
+	}
+	if len(chalInfoBytes) == 0 {
+		return challengeWithData{}, false, fmt.Errorf("no information found to solve challenge for identifier: %s", identifier)
+	}
+
+	err := json.Unmarshal(chalInfoBytes, &chalInfo)
+	if err != nil {
+		return challengeWithData{}, false, fmt.Errorf("decoding challenge token file %s (corrupted?): %v", tokenKey, err)
+	}
+
+	return challengeWithData{Challenge: chalInfo}, true, nil
 }
 
 // checkStorage tests the storage by writing random bytes

@@ -15,7 +15,6 @@
 package certmagic
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -71,45 +70,23 @@ func (am *ACMEManager) distributedHTTPChallengeSolver(w http.ResponseWriter, r *
 	if am == nil {
 		return false
 	}
-
 	host := hostOnly(r.Host)
-
-	tokenKey := distributedSolver{
-		storage:                am.config.Storage,
-		storageKeyIssuerPrefix: am.storageKeyCAPrefix(am.CA),
-	}.challengeTokensKey(host)
-
-	chalInfoBytes, err := am.config.Storage.Load(tokenKey)
-	if err != nil {
-		if _, ok := err.(ErrNotExist); !ok {
-			if am.Logger != nil {
-				am.Logger.Error("opening distributed HTTP challenge token file",
-					zap.String("host", host),
-					zap.Error(err))
-			}
-		}
-		return false
-	}
-
-	var challenge acme.Challenge
-	err = json.Unmarshal(chalInfoBytes, &challenge)
+	chalInfo, distributed, err := am.config.getChallengeInfo(host)
 	if err != nil {
 		if am.Logger != nil {
-			am.Logger.Error("decoding HTTP challenge token file (corrupted?)",
+			am.Logger.Error("looking up info for HTTP challenge",
 				zap.String("host", host),
-				zap.String("token_key", tokenKey),
 				zap.Error(err))
 		}
 		return false
 	}
-
-	return am.answerHTTPChallenge(w, r, challenge)
+	return am.answerHTTPChallenge(w, r, chalInfo.Challenge, distributed)
 }
 
 // answerHTTPChallenge solves the challenge with chalInfo.
 // Most of this code borrowed from xenolf's built-in HTTP-01
 // challenge solver in March 2018.
-func (am *ACMEManager) answerHTTPChallenge(w http.ResponseWriter, r *http.Request, challenge acme.Challenge) bool {
+func (am *ACMEManager) answerHTTPChallenge(w http.ResponseWriter, r *http.Request, challenge acme.Challenge, distributed bool) bool {
 	challengeReqPath := challenge.HTTP01ResourcePath()
 	if r.URL.Path == challengeReqPath &&
 		strings.EqualFold(hostOnly(r.Host), challenge.Identifier.Value) && // mitigate DNS rebinding attacks
@@ -121,7 +98,8 @@ func (am *ACMEManager) answerHTTPChallenge(w http.ResponseWriter, r *http.Reques
 			am.Logger.Info("served key authentication",
 				zap.String("identifier", challenge.Identifier.Value),
 				zap.String("challenge", "http-01"),
-				zap.String("remote", r.RemoteAddr))
+				zap.String("remote", r.RemoteAddr),
+				zap.Bool("distributed", distributed))
 		}
 		return true
 	}

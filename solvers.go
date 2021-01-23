@@ -123,22 +123,19 @@ type tlsALPNSolver struct {
 // Present adds the certificate to the certificate cache and, if
 // needed, starts a TLS server for answering TLS-ALPN challenges.
 func (s *tlsALPNSolver) Present(ctx context.Context, chal acme.Challenge) error {
-	// load the certificate into the cache; this isn't strictly necessary
-	// if we're using the distributed solver since our GetCertificate
-	// function will check storage for the keyAuth anyway, but it seems
-	// like loading it into the cache is the right thing to do
+	// we pre-generate the certificate for efficiency with multi-perspective
+	// validation, so it only has to be done once (at least, by this instance;
+	// distributed solving does not have that luxury, oh well) - update the
+	// challenge data in memory to be the generated certificate
 	cert, err := acmez.TLSALPN01ChallengeCert(chal)
 	if err != nil {
 		return err
 	}
-	certHash := hashCertificateChain(cert.Certificate)
-	s.config.certCache.mu.Lock()
-	s.config.certCache.cache[tlsALPNCertKeyName(chal.Identifier.Value)] = Certificate{
-		Certificate: *cert,
-		Names:       []string{chal.Identifier.Value},
-		hash:        certHash, // perhaps not necesssary
-	}
-	s.config.certCache.mu.Unlock()
+	activeChallengesMu.Lock()
+	chalData := activeChallenges[chal.Identifier.Value]
+	chalData.data = cert
+	activeChallenges[chal.Identifier.Value] = chalData
+	activeChallengesMu.Unlock()
 
 	// the rest of this function increments the
 	// challenge count for the solver at this
@@ -614,6 +611,46 @@ var (
 	solvers   = make(map[string]*solverInfo)
 	solversMu sync.Mutex
 )
+
+// activeChallenges holds information about all known, currently-active
+// ACME challenges, keyed by identifier. CertMagic guarantees that
+// challenges for the same identifier do not overlap, by its locking
+// mechanisms; thus if a challenge comes in for a certain identifier,
+// we can be confident that if this process initiated the challenge,
+// the correct information to solve it is in this map. (It may have
+// alternatively been initiated by another instance in a cluster, in
+// which case the distributed solver will take care of that.)
+var (
+	activeChallenges   = make(map[string]challengeWithData)
+	activeChallengesMu sync.Mutex
+)
+
+// challengeWithData pairs a challenge with optional data
+// to make it easier or more efficient to solve.
+type challengeWithData struct {
+	acme.Challenge
+	data interface{}
+}
+
+// solverWrapper should be used to wrap all challenge solvers so that
+// we can add the challenge info to memory; this makes challenges globally
+// solvable by a single HTTP or TLS server even if multiple servers with
+// different configurations/scopes need to get certificates.
+type solverWrapper struct{ acmez.Solver }
+
+func (sw solverWrapper) Present(ctx context.Context, chal acme.Challenge) error {
+	activeChallengesMu.Lock()
+	activeChallenges[chal.Identifier.Value] = challengeWithData{Challenge: chal}
+	activeChallengesMu.Unlock()
+	return sw.Solver.Present(ctx, chal)
+}
+
+func (sw solverWrapper) CleanUp(ctx context.Context, chal acme.Challenge) error {
+	activeChallengesMu.Lock()
+	delete(activeChallenges, chal.Identifier.Value)
+	activeChallengesMu.Unlock()
+	return sw.Solver.CleanUp(ctx, chal)
+}
 
 // Interface guards
 var (

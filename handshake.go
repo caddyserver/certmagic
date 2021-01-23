@@ -17,7 +17,6 @@ package certmagic
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -25,7 +24,6 @@ import (
 	"time"
 
 	"github.com/mholt/acmez"
-	"github.com/mholt/acmez/acme"
 	"go.uber.org/zap"
 )
 
@@ -44,42 +42,23 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 	// (https://tools.ietf.org/html/draft-ietf-acme-tls-alpn-05)
 	for _, proto := range clientHello.SupportedProtos {
 		if proto == acmez.ACMETLS1Protocol {
-			cfg.certCache.mu.RLock()
-			challengeCert, ok := cfg.certCache.cache[tlsALPNCertKeyName(clientHello.ServerName)]
-			cfg.certCache.mu.RUnlock()
-			if !ok {
-				// see if this challenge was started in a cluster; try distributed challenge solver
-				// (note that the tls.Config's ALPN settings must include the ACME TLS-ALPN challenge
-				// protocol string, otherwise a valid certificate will not solve the challenge; we
-				// should already have taken care of that when we made the tls.Config)
-				challengeCert, ok, err := cfg.tryDistributedChallengeSolver(clientHello)
-				if err != nil {
-					if cfg.Logger != nil {
-						cfg.Logger.Error("tls-alpn challenge",
-							zap.String("server_name", clientHello.ServerName),
-							zap.Error(err))
-					}
+			challengeCert, distributed, err := cfg.getTLSALPNChallengeCert(clientHello)
+			if err != nil {
+				if cfg.Logger != nil {
+					cfg.Logger.Error("tls-alpn challenge",
+						zap.String("server_name", clientHello.ServerName),
+						zap.Error(err))
 				}
-				if ok {
-					if cfg.Logger != nil {
-						cfg.Logger.Info("served key authentication certificate",
-							zap.String("server_name", clientHello.ServerName),
-							zap.String("challenge", "tls-alpn-01"),
-							zap.String("remote", clientHello.Conn.RemoteAddr().String()),
-							zap.Bool("distributed", true))
-					}
-					return &challengeCert.Certificate, nil
-				}
-				return nil, fmt.Errorf("no certificate to complete TLS-ALPN challenge for SNI name: %s", clientHello.ServerName)
+				return nil, err
 			}
 			if cfg.Logger != nil {
 				cfg.Logger.Info("served key authentication certificate",
 					zap.String("server_name", clientHello.ServerName),
 					zap.String("challenge", "tls-alpn-01"),
 					zap.String("remote", clientHello.Conn.RemoteAddr().String()),
-					zap.Bool("distributed", false))
+					zap.Bool("distributed", distributed))
 			}
-			return &challengeCert.Certificate, nil
+			return challengeCert, nil
 		}
 	}
 
@@ -582,51 +561,34 @@ func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCe
 	return renewAndReload(ctx, cancel)
 }
 
-// tryDistributedChallengeSolver is to be called when the clientHello pertains to
-// a TLS-ALPN challenge and a certificate is required to solve it. This method
-// checks the distributed store of challenge info files and, if a matching ServerName
-// is present, it makes a certificate to solve this challenge and returns it. For
-// this to succeed, it requires that cfg.Issuer is of type *ACMEManager.
-// A boolean true is returned if a valid certificate is returned.
-func (cfg *Config) tryDistributedChallengeSolver(clientHello *tls.ClientHelloInfo) (Certificate, bool, error) {
-	// first we'll have to find the right issuer that has the challenge info in its storage location
-	var chalInfoBytes []byte
-	var tokenKey string
-	for _, issuer := range cfg.Issuers {
-		ds := distributedSolver{
-			storage:                cfg.Storage,
-			storageKeyIssuerPrefix: storageKeyACMECAPrefix(issuer.IssuerKey()),
-		}
-		tokenKey = ds.challengeTokensKey(clientHello.ServerName)
-		var err error
-		chalInfoBytes, err = cfg.Storage.Load(tokenKey)
-		if err == nil {
-			break
-		}
-		if _, ok := err.(ErrNotExist); ok {
-			continue
-		}
-		return Certificate{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)
-	}
-	if len(chalInfoBytes) == 0 {
-		return Certificate{}, false, nil
+// getTLSALPNChallengeCert is to be called when the clientHello pertains to
+// a TLS-ALPN challenge and a certificate is required to solve it. This method gets
+// the relevant challenge info and then returns the associated certificate (if any)
+// or generates it anew if it's not available (as is the case when distributed
+// solving). True is returned if the challenge is being solved distributed (there
+// is no semantic difference with distributed solving; it is mainly for logging).
+func (cfg *Config) getTLSALPNChallengeCert(clientHello *tls.ClientHelloInfo) (*tls.Certificate, bool, error) {
+	chalData, distributed, err := cfg.getChallengeInfo(clientHello.ServerName)
+	if err != nil {
+		return nil, distributed, err
 	}
 
-	var chalInfo acme.Challenge
-	err := json.Unmarshal(chalInfoBytes, &chalInfo)
-	if err != nil {
-		return Certificate{}, false, fmt.Errorf("decoding challenge token file %s (corrupted?): %v", tokenKey, err)
+	// fast path: we already created the certificate (this avoids having to re-create
+	// it at every handshake that tries to verify, e.g. multi-perspective validation)
+	if chalData.data != nil {
+		return chalData.data.(*tls.Certificate), distributed, nil
 	}
 
-	cert, err := acmez.TLSALPN01ChallengeCert(chalInfo)
+	// otherwise, we can re-create the solution certificate, but it takes a few cycles
+	cert, err := acmez.TLSALPN01ChallengeCert(chalData.Challenge)
 	if err != nil {
-		return Certificate{}, false, fmt.Errorf("making TLS-ALPN challenge certificate: %v", err)
+		return nil, distributed, fmt.Errorf("making TLS-ALPN challenge certificate: %v", err)
 	}
 	if cert == nil {
-		return Certificate{}, false, fmt.Errorf("got nil TLS-ALPN challenge certificate but no error")
+		return nil, distributed, fmt.Errorf("got nil TLS-ALPN challenge certificate but no error")
 	}
 
-	return Certificate{Certificate: *cert}, true, nil
+	return cert, distributed, nil
 }
 
 // getNameFromClientHello returns a normalized form of hello.ServerName.

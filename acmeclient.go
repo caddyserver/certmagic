@@ -264,6 +264,25 @@ func (am *ACMEManager) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 		client.ChallengeSolvers[acme.ChallengeTypeDNS01] = am.DNS01Solver
 	}
 
+	// wrap solvers in our wrapper so that we can keep track of challenge
+	// info: this is useful for solving challenges globally as a process;
+	// for example, usually there is only one process that can solve the
+	// HTTP and TLS-ALPN challenges, and only one server in that process
+	// that can bind the necessary port(s), so if a server listening on
+	// a different port needed a certificate, it would have to know about
+	// the other server listening on that port, and somehow convey its
+	// challenge info or share its config, but this isn't always feasible;
+	// what the wrapper does is it accesses a global challenge memory so
+	// that unrelated servers in this process can all solve each others'
+	// challenges without having to know about each other - Caddy's admin
+	// endpoint uses this functionality since it and the HTTP/TLS modules
+	// do not know about each other
+	// (doing this here in a separate loop ensures that even if we expose
+	// solver config to users later, we will even wrap their own solvers)
+	for name, solver := range client.ChallengeSolvers {
+		client.ChallengeSolvers[name] = solverWrapper{solver}
+	}
+
 	return client, nil
 }
 
