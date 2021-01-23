@@ -38,6 +38,12 @@ type ACMEManager struct {
 	// selecting an existing ACME server account
 	Email string
 
+	// The PEM-encoded private key of the ACME
+	// account to use; only needed if the account
+	// is already created on the server and
+	// can be looked up with the ACME protocol
+	AccountKeyPEM string
+
 	// Set to true if agreed to the CA's
 	// subscriber agreement
 	Agreed bool
@@ -132,6 +138,9 @@ func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
 	}
 	if template.Email == "" {
 		template.Email = DefaultACME.Email
+	}
+	if template.AccountKeyPEM == "" {
+		template.AccountKeyPEM = DefaultACME.AccountKeyPEM
 	}
 	if !template.Agreed {
 		template.Agreed = DefaultACME.Agreed

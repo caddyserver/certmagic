@@ -57,7 +57,12 @@ func (am *ACMEManager) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 	}
 
 	// look up or create the ACME account
-	account, err := am.getAccount(client.Directory, am.Email)
+	var account acme.Account
+	if am.AccountKeyPEM != "" {
+		account, err = am.GetAccount(ctx, []byte(am.AccountKeyPEM))
+	} else {
+		account, err = am.getAccount(client.Directory, am.Email)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("getting ACME account: %v", err)
 	}
