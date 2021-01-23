@@ -603,6 +603,15 @@ func dialTCPSocket(addr string) error {
 	return err
 }
 
+// GetACMEChallenge returns an active ACME challenge for the given identifier,
+// or false if no active challenge for that identifier is known.
+func GetACMEChallenge(identifier string) (Challenge, bool) {
+	activeChallengesMu.Lock()
+	chalData, ok := activeChallenges[identifier]
+	activeChallengesMu.Unlock()
+	return chalData, ok
+}
+
 // The active challenge solvers, keyed by listener address,
 // and protected by a mutex. Note that the creation of
 // solver listeners and the incrementing of their counts
@@ -621,13 +630,13 @@ var (
 // alternatively been initiated by another instance in a cluster, in
 // which case the distributed solver will take care of that.)
 var (
-	activeChallenges   = make(map[string]challengeWithData)
+	activeChallenges   = make(map[string]Challenge)
 	activeChallengesMu sync.Mutex
 )
 
-// challengeWithData pairs a challenge with optional data
-// to make it easier or more efficient to solve.
-type challengeWithData struct {
+// Challenge is an ACME challenge, but optionally paired with
+// data that can make it easier or more efficient to solve.
+type Challenge struct {
 	acme.Challenge
 	data interface{}
 }
@@ -640,7 +649,7 @@ type solverWrapper struct{ acmez.Solver }
 
 func (sw solverWrapper) Present(ctx context.Context, chal acme.Challenge) error {
 	activeChallengesMu.Lock()
-	activeChallenges[chal.Identifier.Value] = challengeWithData{Challenge: chal}
+	activeChallenges[chal.Identifier.Value] = Challenge{Challenge: chal}
 	activeChallengesMu.Unlock()
 	return sw.Solver.Present(ctx, chal)
 }

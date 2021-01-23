@@ -760,11 +760,9 @@ func (cfg *Config) TLSConfig() *tls.Config {
 // indicates whether challenge info was loaded from external storage. If true, the
 // challenge is being solved in a distributed fashion; if false, from internal memory.
 // If no matching challenge information can be found, an error is returned.
-func (cfg *Config) getChallengeInfo(identifier string) (challengeWithData, bool, error) {
+func (cfg *Config) getChallengeInfo(identifier string) (Challenge, bool, error) {
 	// first, check if our process initiated this challenge; if so, just return it
-	activeChallengesMu.Lock()
-	chalData, ok := activeChallenges[identifier]
-	activeChallengesMu.Unlock()
+	chalData, ok := GetACMEChallenge(identifier)
 	if ok {
 		return chalData, false, nil
 	}
@@ -789,18 +787,18 @@ func (cfg *Config) getChallengeInfo(identifier string) (challengeWithData, bool,
 		if _, ok := err.(ErrNotExist); ok {
 			continue
 		}
-		return challengeWithData{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)
+		return Challenge{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)
 	}
 	if len(chalInfoBytes) == 0 {
-		return challengeWithData{}, false, fmt.Errorf("no information found to solve challenge for identifier: %s", identifier)
+		return Challenge{}, false, fmt.Errorf("no information found to solve challenge for identifier: %s", identifier)
 	}
 
 	err := json.Unmarshal(chalInfoBytes, &chalInfo)
 	if err != nil {
-		return challengeWithData{}, false, fmt.Errorf("decoding challenge token file %s (corrupted?): %v", tokenKey, err)
+		return Challenge{}, false, fmt.Errorf("decoding challenge token file %s (corrupted?): %v", tokenKey, err)
 	}
 
-	return challengeWithData{Challenge: chalInfo}, true, nil
+	return Challenge{Challenge: chalInfo}, true, nil
 }
 
 // checkStorage tests the storage by writing random bytes
