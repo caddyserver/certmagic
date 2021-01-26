@@ -250,6 +250,29 @@ func (cfg *Config) ManageSync(domainNames []string) error {
 	return cfg.manageAll(nil, domainNames, false)
 }
 
+// ClientCredentials returns a list of TLS client certificate chains for the given identifiers.
+// The return value can be used in a tls.Config to enable client authentication using managed certificates.
+// Any certificates that need to be obtained or renewed for these identifiers will be managed accordingly.
+func (cfg *Config) ClientCredentials(ctx context.Context, identifiers []string) ([]tls.Certificate, error) {
+	err := cfg.manageAll(ctx, identifiers, false)
+	if err != nil {
+		return nil, err
+	}
+	var chains []tls.Certificate
+	for _, id := range identifiers {
+		certRes, err := cfg.loadCertResourceAnyIssuer(id)
+		if err != nil {
+			return chains, err
+		}
+		chain, err := tls.X509KeyPair(certRes.CertificatePEM, certRes.PrivateKeyPEM)
+		if err != nil {
+			return chains, err
+		}
+		chains = append(chains, chain)
+	}
+	return chains, nil
+}
+
 // ManageAsync is the same as ManageSync, except that ACME
 // operations are performed asynchronously (in the background).
 // This method returns before certificates are ready. It is
