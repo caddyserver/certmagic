@@ -31,7 +31,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/klauspost/cpuid"
+	"github.com/klauspost/cpuid/v2"
 	"go.uber.org/zap"
 	"golang.org/x/net/idna"
 )
