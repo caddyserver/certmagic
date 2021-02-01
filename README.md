@@ -136,6 +136,8 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 $ go get github.com/caddyserver/certmagic
 ```
 
+Please make sure that you call `go mod init` in your project before calling `go get github.com/caddyserver/certmagic`.
+
 
 ## Usage
 

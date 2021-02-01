@@ -333,7 +333,7 @@ func namesFromCSR(csr *x509.CertificateRequest) []string {
 //
 // See https://github.com/mholt/caddy/issues/1674
 func preferredDefaultCipherSuites() []uint16 {
-	if cpuid.CPU.Supports(cpuid.AESNI) {
+	if cpuid.CPU.AesNi() {
 		return defaultCiphersPreferAES
 	}
 	return defaultCiphersPreferChaCha
