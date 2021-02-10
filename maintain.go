@@ -141,6 +141,9 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 			}
 			continue
 		}
+		if cfg.OnDemand != nil {
+			continue
+		}
 
 		// if time is up or expires soon, we need to try to renew it
 		if cert.NeedsRenewal(cfg) {
