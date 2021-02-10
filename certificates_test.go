@@ -194,7 +194,9 @@ func TestMatchWildcard(t *testing.T) {
 		{"bar.localhost", "*.localhost", true},
 		{"foo.bar.localhost", "*.localhost", false},
 		{".localhost", "*.localhost", false},
+		{"foo.localhost", "foo.*", false},
 		{"foo.bar.local", "foo.*.local", false},
+		{"foo.bar.local", "foo.bar.*", false},
 		{"foo.bar.local", "*.bar.local", true},
 		{"1.2.3.4.5.6", "*.2.3.4.5.6", true},
 		{"1.2.3.4.5.6", "*.*.3.4.5.6", true},
@@ -203,6 +205,7 @@ func TestMatchWildcard(t *testing.T) {
 		{"1.2.3.4.5.6", "*.*.*.*.*.6", true},
 		{"1.2.3.4.5.6", "*.*.*.*.*.*", true},
 		{"0.1.2.3.4.5.6", "*.*.*.*.*.*", false},
+		{"1.2.3.4", "1.2.3.*", false}, // https://tools.ietf.org/html/rfc2818#section-3.1
 	} {
 		actual := MatchWildcard(test.subject, test.wildcard)
 		if actual != test.expect {

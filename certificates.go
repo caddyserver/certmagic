@@ -384,7 +384,12 @@ func SubjectIsInternal(subj string) bool {
 
 // MatchWildcard returns true if subject (a candidate DNS name)
 // matches wildcard (a reference DNS name), mostly according to
-// RFC6125-compliant wildcard rules.
+// RFC 6125-compliant wildcard rules. See also RFC 2818 which
+// states that IP addresses must match exactly, but this function
+// does not attempt to distinguish IP addresses from internal or
+// external DNS names that happen to look like IP addresses.
+// It uses DNS wildcard matching logic.
+// https://tools.ietf.org/html/rfc2818#section-3.1
 func MatchWildcard(subject, wildcard string) bool {
 	if subject == wildcard {
 		return true
