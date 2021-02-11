@@ -99,9 +99,9 @@ type ACMEManager struct {
 	// Callback function that is called before a
 	// new ACME account is registered with the CA;
 	// it allows for last-second config changes
-	// of the ACMEManager (TODO: this feature is
-	// still EXPERIMENTAL and subject to change)
-	NewAccountFunc func(context.Context, *ACMEManager, acme.Account) error
+	// of the ACMEManager and the Account.
+	// (TODO: this feature is still EXPERIMENTAL and subject to change)
+	NewAccountFunc func(context.Context, *ACMEManager, acme.Account) (acme.Account, error)
 
 	// Preferences for selecting alternate
 	// certificate chains

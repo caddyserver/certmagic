@@ -70,7 +70,7 @@ func (am *ACMEManager) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 	// register account if it is new
 	if account.Status == "" {
 		if am.NewAccountFunc != nil {
-			err = am.NewAccountFunc(ctx, am, account)
+			account, err = am.NewAccountFunc(ctx, am, account)
 			if err != nil {
 				return nil, fmt.Errorf("account pre-registration callback: %v", err)
 			}
@@ -112,13 +112,13 @@ func (am *ACMEManager) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 		// create account
 		account, err = client.NewAccount(ctx, account)
 		if err != nil {
-			return nil, fmt.Errorf("registering account with server: %w", err)
+			return nil, fmt.Errorf("registering account %v with server: %w", account.Contact, err)
 		}
 
 		// persist the account to storage
 		err = am.saveAccount(client.Directory, account)
 		if err != nil {
-			return nil, fmt.Errorf("could not save account: %v", err)
+			return nil, fmt.Errorf("could not save account %v: %v", account.Contact, err)
 		}
 	}
 
