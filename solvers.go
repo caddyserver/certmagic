@@ -270,13 +270,6 @@ func (s *DNS01Solver) Present(ctx context.Context, challenge acme.Challenge) err
 	dnsName := challenge.DNS01TXTRecordName()
 	keyAuth := challenge.DNS01KeyAuthorization()
 
-	rec := libdns.Record{
-		Type:  "TXT",
-		Name:  dnsName,
-		Value: keyAuth,
-		TTL:   s.TTL,
-	}
-
 	// multiple identifiers can have the same ACME challenge
 	// domain (e.g. example.com and *.example.com) so we need
 	// to ensure that we don't solve those concurrently and
@@ -287,6 +280,13 @@ func (s *DNS01Solver) Present(ctx context.Context, challenge acme.Challenge) err
 	zone, err := findZoneByFQDN(dnsName, recursiveNameservers(s.Resolvers))
 	if err != nil {
 		return fmt.Errorf("could not determine zone for domain %q: %v", dnsName, err)
+	}
+
+	rec := libdns.Record{
+		Type:  "TXT",
+		Name:  libdns.RelativeName(dnsName+".", zone),
+		Value: keyAuth,
+		TTL:   s.TTL,
 	}
 
 	results, err := s.DNSProvider.AppendRecords(ctx, zone, []libdns.Record{rec})
@@ -491,6 +491,14 @@ func (dhs distributedSolver) Present(ctx context.Context, chal acme.Challenge) e
 	return nil
 }
 
+// Wait wraps the underlying solver's Wait() method, if any. Implements acmez.Waiter.
+func (dhs distributedSolver) Wait(ctx context.Context, challenge acme.Challenge) error {
+	if waiter, ok := dhs.solver.(acmez.Waiter); ok {
+		return waiter.Wait(ctx, challenge)
+	}
+	return nil
+}
+
 // CleanUp invokes the underlying solver's CleanUp method
 // and also cleans up any assets saved to storage.
 func (dhs distributedSolver) CleanUp(ctx context.Context, chal acme.Challenge) error {
@@ -654,6 +662,13 @@ func (sw solverWrapper) Present(ctx context.Context, chal acme.Challenge) error 
 	return sw.Solver.Present(ctx, chal)
 }
 
+func (sw solverWrapper) Wait(ctx context.Context, chal acme.Challenge) error {
+	if waiter, ok := sw.Solver.(acmez.Waiter); ok {
+		return waiter.Wait(ctx, chal)
+	}
+	return nil
+}
+
 func (sw solverWrapper) CleanUp(ctx context.Context, chal acme.Challenge) error {
 	activeChallengesMu.Lock()
 	delete(activeChallenges, chal.Identifier.Value)
@@ -663,6 +678,7 @@ func (sw solverWrapper) CleanUp(ctx context.Context, chal acme.Challenge) error 
 
 // Interface guards
 var (
-	_ acmez.Solver = (*DNS01Solver)(nil)
-	_ acmez.Waiter = (*DNS01Solver)(nil)
+	_ acmez.Solver = (*solverWrapper)(nil)
+	_ acmez.Waiter = (*solverWrapper)(nil)
+	_ acmez.Waiter = (*distributedSolver)(nil)
 )

@@ -4,7 +4,7 @@ go 1.14
 
 require (
 	github.com/klauspost/cpuid v1.2.5
-	github.com/libdns/libdns v0.1.0
+	github.com/libdns/libdns v0.2.0
 	github.com/mholt/acmez v0.1.3
 	github.com/miekg/dns v1.1.30
 	go.uber.org/zap v1.15.0
