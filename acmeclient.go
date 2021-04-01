@@ -362,7 +362,7 @@ var (
 
 	// RateLimitEvents is how many new events can be allowed
 	// in RateLimitEventsWindow.
-	RateLimitEvents = 10
+	RateLimitEvents = 20
 
 	// RateLimitEventsWindow is the size of the sliding
 	// window that throttles events.
