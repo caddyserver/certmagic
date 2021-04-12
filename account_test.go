@@ -151,6 +151,7 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 	DefaultACME.Email = "tEsT2@foo.com"
 	defer func() {
 		DefaultACME.Email = ""
+		discoveredEmail = ""
 	}()
 
 	am := &ACMEManager{CA: dummyCA}
@@ -221,6 +222,7 @@ func TestGetEmailFromRecent(t *testing.T) {
 	}()
 
 	DefaultACME.Email = ""
+	discoveredEmail = ""
 
 	for i, eml := range []string{
 		"test4-1@foo.com",
