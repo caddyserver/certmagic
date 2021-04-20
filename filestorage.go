@@ -32,7 +32,8 @@ import (
 // directory. It is used to get file paths in a consistent,
 // cross-platform way or persisting ACME assets on the file system.
 type FileStorage struct {
-	Path string
+	Path           string
+	AllowGroupRead bool
 }
 
 // Exists returns true if key exists in fs.
@@ -43,12 +44,18 @@ func (fs *FileStorage) Exists(key string) bool {
 
 // Store saves value at key.
 func (fs *FileStorage) Store(key string, value []byte) error {
+	dirMask := uint32(0700)
+	fileMask := uint32(0600)
+	if fs.AllowGroupRead {
+		dirMask = 0750
+		fileMask = 0640
+	}
 	filename := fs.Filename(key)
-	err := os.MkdirAll(filepath.Dir(filename), 0700)
+	err := os.MkdirAll(filepath.Dir(filename), os.FileMode(dirMask))
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(filename, value, 0600)
+	return ioutil.WriteFile(filename, value, os.FileMode(fileMask))
 }
 
 // Load retrieves the value at key.
