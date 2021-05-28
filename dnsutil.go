@@ -317,13 +317,15 @@ func updateDomainWithCName(r *dns.Msg, fqdn string) string {
 // the records and the bool result is set to true
 func isImportant(custom []string) ([]string, bool) {
 	important := false
-	list := make([]string, len(custom))
-	for i, v := range custom {
+	list := []string{}
+	for _, v := range custom {
 		if strings.HasSuffix(v, "!important") {
 			important = true
-			list[i] = strings.TrimSuffix(v, "!important")
+			if v = strings.TrimSuffix(v, "!important"); v != "" {
+				list = append(list, v)
+			}
 		} else {
-			list[i] = v
+			list = append(list, v)
 		}
 	}
 	return list, important
