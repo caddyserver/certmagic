@@ -237,14 +237,17 @@ func TestRecursiveNameserversAddsPort(t *testing.T) {
 		t.Errorf("%v Expected custom resolvers to be included, but they weren't: %v", results, custom)
 	}
 
-	results = recursiveNameservers([]string{})
-	if len(results) < 4 {
-		t.Errorf("%v Expected at least 4 records as default when empty custom", results)
+}
+
+func TestRecursiveNameserversDefaults(t *testing.T) {
+	results := recursiveNameservers(nil)
+	if len(results) < 1 {
+		t.Errorf("%v Expected at least 1 records as default when nil custom", results)
 	}
 
-	results = recursiveNameservers(nil)
-	if len(results) < 4 {
-		t.Errorf("%v Expected at least 4 records as default when nil custom", results)
+	results = recursiveNameservers([]string{})
+	if len(results) < 1 {
+		t.Errorf("%v Expected at least 1 records as default when empty custom", results)
 	}
 }
 
