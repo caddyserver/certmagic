@@ -7,6 +7,7 @@ package certmagic
 // It has been modified.
 
 import (
+	"net"
 	"reflect"
 	"sort"
 	"strings"
@@ -206,18 +207,44 @@ func TestResolveConfServers(t *testing.T) {
 }
 
 func TestRecursiveNameserversAddsPort(t *testing.T) {
-	custom := []string{"127.0.0.1"}
+	type want struct {
+		port string
+	}
+	custom := []string{"127.0.0.1", "ns1.google.com:43"}
+	expectations := []want{{port: "53"}, {port: "43"}}
 	results := recursiveNameservers(custom)
+
+	if !reflect.DeepEqual(custom, []string{"127.0.0.1", "ns1.google.com:43"}) {
+		t.Errorf("Expected custom nameservers to be unmodified. got %v", custom)
+	}
+
+	if len(results) != len(expectations) {
+		t.Errorf("%v wrong results length. got %d, want %d", results, len(results), len(expectations))
+	}
 
 	var hasCustom bool
 	for i, res := range results {
 		hasCustom = hasCustom || strings.HasPrefix(res, custom[0])
-		if !strings.HasSuffix(res, ":53") {
-			t.Errorf("%v Expected all results to have a port, but result %d doesn't: %s", results, i, res)
+		if _, port, err := net.SplitHostPort(res); err != nil {
+			t.Errorf("%v Error splitting result %d into host and port: %v", results, i, err)
+		} else {
+			if port != expectations[i].port {
+				t.Errorf("%v Expected result %d to have port %s but got %s", results, i, expectations[i].port, port)
+			}
 		}
 	}
 	if !hasCustom {
 		t.Errorf("%v Expected custom resolvers to be included, but they weren't: %v", results, custom)
+	}
+
+	results = recursiveNameservers([]string{})
+	if len(results) < 4 {
+		t.Errorf("%v Expected at least 4 records as default when empty custom", results)
+	}
+
+	results = recursiveNameservers(nil)
+	if len(results) < 4 {
+		t.Errorf("%v Expected at least 4 records as default when nil custom", results)
 	}
 }
 

@@ -312,39 +312,20 @@ func updateDomainWithCName(r *dns.Msg, fqdn string) string {
 	return fqdn
 }
 
-// isImportant is used to check the custom nameservers for
-// a suffix '!important'. If found, the suffix is removed from 
-// the records and the bool result is set to true
-func isImportant(custom []string) ([]string, bool) {
-	important := false
-	list := []string{}
-	for _, v := range custom {
-		if strings.HasSuffix(v, "!important") {
-			important = true
-			if v = strings.TrimSuffix(v, "!important"); v != "" {
-				list = append(list, v)
-			}
-		} else {
-			list = append(list, v)
-		}
-	}
-	return list, important
-}
-
 // recursiveNameservers are used to pre-check DNS propagation. It
-// prepends user-configured nameservers (custom) to the defaults
-// obtained from resolv.conf and defaultNameservers and ensures
-// that all server addresses have a port value.
-// If any of the custom servers are declared as `!important` then 
-// only the custom servers are used.
+// picks user-configured nameservers (custom) OR the defaults
+// obtained from resolv.conf and defaultNameservers if none is
+// configured and ensures that all server addresses have a port value.
 func recursiveNameservers(custom []string) []string {
 	var servers []string
-	if list, important := isImportant(custom); important {
-		servers = list
+	if len(custom) == 0 {
+		servers = systemOrDefaultNameservers(defaultResolvConf, defaultNameservers)
 	} else {
-		servers = append(custom, systemOrDefaultNameservers(defaultResolvConf, defaultNameservers)...)
+		servers = make([]string, len(custom))
+		copy(servers, custom)
 	}
 	populateNameserverPorts(servers)
+	fmt.Printf("populated servers, ignoring resolve.conf: %v", servers)
 	return servers
 }
 
