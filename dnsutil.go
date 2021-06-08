@@ -325,7 +325,6 @@ func recursiveNameservers(custom []string) []string {
 		copy(servers, custom)
 	}
 	populateNameserverPorts(servers)
-	fmt.Printf("populated servers, ignoring resolve.conf: %v", servers)
 	return servers
 }
 
