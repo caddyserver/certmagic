@@ -24,6 +24,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/json"
+	"errors"
 	"fmt"
 	weakrand "math/rand"
 	"net"
@@ -247,7 +248,7 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 // interactive use (i.e. when an administrator is present) so
 // that errors can be reported and fixed immediately.
 func (cfg *Config) ManageSync(domainNames []string) error {
-	return cfg.manageAll(nil, domainNames, false)
+	return cfg.manageAll(context.Background(), domainNames, false)
 }
 
 // ClientCredentials returns a list of TLS client certificate chains for the given identifiers.
@@ -484,21 +485,37 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 		// try to obtain from each issuer until we succeed
 		var issuedCert *IssuedCertificate
 		var issuerUsed Issuer
-		for _, issuer := range cfg.Issuers {
+		for i, issuer := range cfg.Issuers {
+			log.Debug(fmt.Sprintf("trying issuer %d/%d", i+1, len(cfg.Issuers)),
+				zap.String("issuer", issuer.IssuerKey()))
+
 			if prechecker, ok := issuer.(PreChecker); ok {
 				err = prechecker.PreCheck(ctx, []string{name}, interactive)
 				if err != nil {
 					continue
 				}
 			}
+
 			issuedCert, err = issuer.Issue(ctx, csr)
 			if err == nil {
 				issuerUsed = issuer
 				break
 			}
+
+			// err is usually wrapped, which is nice for simply printing it, but
+			// with our structured error logs we only need the problem string
+			errToLog := err
+			var problem acme.Problem
+			if errors.As(err, &problem) {
+				errToLog = problem
+			}
+			log.Error("could not get certificate from issuer",
+				zap.String("identifier", name),
+				zap.String("issuer", issuer.IssuerKey()),
+				zap.Error(errToLog))
 		}
 		if err != nil {
-			// TODO: only the error from the last issuer will be returned, oh well?
+			// only the error from the last issuer will be returned, but we logged the others
 			return fmt.Errorf("[%s] Obtain: %w", name, err)
 		}
 
