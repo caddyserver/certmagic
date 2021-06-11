@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mholt/acmez/acme"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ocsp"
 )
@@ -250,7 +251,7 @@ func (certCache *Cache) queueRenewalTask(ctx context.Context, oldCert Certificat
 		}
 
 		// perform renewal - crucially, this happens OUTSIDE a lock on certCache
-		err := cfg.RenewCert(ctx, renewName, false)
+		err := cfg.RenewCertAsync(ctx, renewName, false)
 		if err != nil {
 			if cfg.OnDemand != nil {
 				// loaded dynamically, remove dynamically
@@ -296,6 +297,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	updated := make(map[string]ocspUpdate)
 	var updateQueue []updateQueueEntry
 	var renewQueue []Certificate
+	// var obtainQueue []Certificate // TODO: use this depending on revocation reason
 	configs := make(map[string]*Config)
 
 	// obtain brief read lock during our scan to see which staples need updating
@@ -369,6 +371,14 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		// If a managed certificate was revoked, we should attempt
 		// to replace it with a new one. If that fails, oh well.
 		if cert.managed && ocspResp.Status == ocsp.Revoked && len(cert.Names) > 0 {
+			// if revoked for key compromise, we can't be sure whether the storage of
+			// the key is still safe; however, we KNOW the old key is not safe, and we
+			// can only hope by the time of revocation that storage has been secured;
+			// key management is not something we want to get into, but in this case
+			// it seems prudent to replace the key
+			if ocspResp.RevocationReason == acme.ReasonKeyCompromise {
+				// TODO: delete site assets, then call Obtain instead
+			}
 			renewQueue = append(renewQueue, cert)
 			configs[cert.Names[0]] = cfg
 		}
@@ -397,7 +407,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		cfg := configs[renewName]
 
 		// TODO: consider using a new key in this situation, but we don't know if key storage has been compromised...
-		err := cfg.RenewCert(ctx, renewName, false)
+		err := cfg.RenewCertAsync(ctx, renewName, true)
 		if err != nil {
 			// probably better to not serve a revoked certificate at all
 			if log != nil {

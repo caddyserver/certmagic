@@ -327,7 +327,12 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 		}
 		// if we don't have one in storage, obtain one
 		obtain := func() error {
-			err := cfg.ObtainCert(ctx, domainName, !async)
+			var err error
+			if async {
+				err = cfg.ObtainCertAsync(ctx, domainName)
+			} else {
+				err = cfg.ObtainCertSync(ctx, domainName)
+			}
 			if err != nil {
 				return fmt.Errorf("%s: obtaining certificate: %w", domainName, err)
 			}
@@ -358,7 +363,12 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 
 	// for an existing certificate, make sure it is renewed
 	renew := func() error {
-		err := cfg.RenewCert(ctx, domainName, !async)
+		var err error
+		if async {
+			err = cfg.RenewCertAsync(ctx, domainName, false)
+		} else {
+			err = cfg.RenewCertSync(ctx, domainName, false)
+		}
 		if err != nil {
 			return fmt.Errorf("%s: renewing certificate: %w", domainName, err)
 		}
@@ -402,18 +412,34 @@ func (cfg *Config) Unmanage(domainNames []string) {
 	cfg.certCache.mu.Unlock()
 }
 
-// ObtainCert obtains a certificate for name using cfg, as long
-// as a certificate does not already exist in storage for that
-// name. The name must qualify and cfg must be flagged as Managed.
-// This function is a no-op if storage already has a certificate
-// for name.
-//
-// It only obtains and stores certificates (and their keys),
-// it does not load them into memory. If interactive is true,
-// the user may be shown a prompt.
-// TODO: consider moving interactive param into the Config struct,
-// and maybe retry settings into the Config struct as well? (same for RenewCert)
-func (cfg *Config) ObtainCert(ctx context.Context, name string, interactive bool) error {
+// // ObtainCert obtains a certificate for name using cfg, as long
+// // as a certificate does not already exist in storage for that
+// // name. The name must qualify and cfg must be flagged as Managed.
+// // This function is a no-op if storage already has a certificate
+// // for name.
+// //
+// // It only obtains and stores certificates (and their keys),
+// // it does not load them into memory. If interactive is true,
+// // the user may be shown a prompt.
+// // TODO: consider moving interactive param into the Config struct,
+// // and maybe retry settings into the Config struct as well? (same for RenewCert)
+// func (cfg *Config) ObtainCert(ctx context.Context, name string, interactive bool) error {
+// 	if len(cfg.Issuers) == 0 {
+// 		return fmt.Errorf("no issuers configured; impossible to obtain or check for existing certificate in storage")
+// 	}
+// 	if cfg.storageHasCertResourcesAnyIssuer(name) {
+// 		return nil
+// 	}
+// 	// ensure storage is writeable and readable
+// 	// TODO: this is not necessary every time; should only perform check once every so often for each storage, which may require some global state...
+// 	err := cfg.checkStorage()
+// 	if err != nil {
+// 		return fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
+// 	}
+// 	return cfg.obtainCert(ctx, name, interactive)
+// }
+
+func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool) error {
 	if len(cfg.Issuers) == 0 {
 		return fmt.Errorf("no issuers configured; impossible to obtain or check for existing certificate in storage")
 	}
@@ -426,10 +452,7 @@ func (cfg *Config) ObtainCert(ctx context.Context, name string, interactive bool
 	if err != nil {
 		return fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
 	}
-	return cfg.obtainCert(ctx, name, interactive)
-}
 
-func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool) error {
 	log := loggerNamed(cfg.Logger, "obtain")
 
 	if log != nil {
@@ -438,7 +461,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 
 	// ensure idempotency of the obtain operation for this name
 	lockKey := cfg.lockKey(certIssueLockOp, name)
-	err := acquireLock(ctx, cfg.Storage, lockKey)
+	err = acquireLock(ctx, cfg.Storage, lockKey)
 	if err != nil {
 		return fmt.Errorf("unable to acquire lock '%s': %v", lockKey, err)
 	}
@@ -558,23 +581,43 @@ func (cfg *Config) storageHasCertResourcesAnyIssuer(name string) bool {
 	return false
 }
 
-// RenewCert renews the certificate for name using cfg. It stows the
-// renewed certificate and its assets in storage if successful. It
-// DOES NOT update the in-memory cache with the new certificate.
-func (cfg *Config) RenewCert(ctx context.Context, name string, interactive bool) error {
+func (cfg *Config) ObtainCertSync(ctx context.Context, name string) error {
+	return cfg.obtainCert(ctx, name, true)
+}
+func (cfg *Config) ObtainCertAsync(ctx context.Context, name string) error {
+	return cfg.obtainCert(ctx, name, false)
+}
+
+// RenewCert renews the certificate for name using cfg in the foreground;
+// i.e. interactively. It stows the renewed certificate and its assets in
+// storage if successful. It DOES NOT update the in-memory cache with the
+// new certificate. The certificate will not be renewed if it is not close
+// to expiring or expired unless force is true.
+func (cfg *Config) RenewCertSync(ctx context.Context, name string, force bool) error {
+	return cfg.renewCert(ctx, name, force, true)
+}
+
+// RenewCert renews the certificate for name using cfg in the background;
+// i.e. non-interactively. It stows the renewed certificate and its assets in
+// storage if successful. It DOES NOT update the in-memory cache with the
+// new certificate. The certificate will not be renewed if it is not close
+// to expiring or expired unless force is true.
+func (cfg *Config) RenewCertAsync(ctx context.Context, name string, force bool) error {
+	return cfg.renewCert(ctx, name, force, false)
+}
+
+func (cfg *Config) renewCert(ctx context.Context, name string, force, interactive bool) error {
 	if len(cfg.Issuers) == 0 {
 		return fmt.Errorf("no issuers configured; impossible to renew or check existing certificate in storage")
 	}
+
 	// ensure storage is writeable and readable
 	// TODO: this is not necessary every time; should only perform check once every so often for each storage, which may require some global state...
 	err := cfg.checkStorage()
 	if err != nil {
 		return fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
 	}
-	return cfg.renewCert(ctx, name, interactive)
-}
 
-func (cfg *Config) renewCert(ctx context.Context, name string, interactive bool) error {
 	log := loggerNamed(cfg.Logger, "renew")
 
 	if log != nil {
@@ -583,7 +626,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, interactive bool)
 
 	// ensure idempotency of the renew operation for this name
 	lockKey := cfg.lockKey(certIssueLockOp, name)
-	err := acquireLock(ctx, cfg.Storage, lockKey)
+	err = acquireLock(ctx, cfg.Storage, lockKey)
 	if err != nil {
 		return fmt.Errorf("unable to acquire lock '%s': %v", lockKey, err)
 	}
@@ -614,13 +657,22 @@ func (cfg *Config) renewCert(ctx context.Context, name string, interactive bool)
 		// check if renew is still needed - might have been renewed while waiting for lock
 		timeLeft, needsRenew := cfg.managedCertNeedsRenewal(certRes)
 		if !needsRenew {
-			if log != nil {
-				log.Info("certificate appears to have been renewed already",
-					zap.String("identifier", name),
-					zap.Duration("remaining", timeLeft))
+			if force {
+				if log != nil {
+					log.Info("certificate does not need to be renewed, but renewal is being forced",
+						zap.String("identifier", name),
+						zap.Duration("remaining", timeLeft))
+				}
+			} else {
+				if log != nil {
+					log.Info("certificate appears to have been renewed already",
+						zap.String("identifier", name),
+						zap.Duration("remaining", timeLeft))
+				}
+				return nil
 			}
-			return nil
 		}
+
 		if log != nil {
 			log.Info("renewing certificate",
 				zap.String("identifier", name),
@@ -747,17 +799,9 @@ func (cfg *Config) RevokeCert(ctx context.Context, domain string, reason int, in
 
 		cfg.emit("cert_revoked", domain)
 
-		err = cfg.Storage.Delete(StorageKeys.SiteCert(issuerKey, domain))
+		err = cfg.deleteSiteAssets(issuerKey, domain)
 		if err != nil {
-			return fmt.Errorf("certificate revoked, but unable to delete certificate file: %v", err)
-		}
-		err = cfg.Storage.Delete(StorageKeys.SitePrivateKey(issuerKey, domain))
-		if err != nil {
-			return fmt.Errorf("certificate revoked, but unable to delete private key: %v", err)
-		}
-		err = cfg.Storage.Delete(StorageKeys.SiteMeta(issuerKey, domain))
-		if err != nil {
-			return fmt.Errorf("certificate revoked, but unable to delete certificate metadata: %v", err)
+			return fmt.Errorf("certificate revoked, but unable to fully clean up assets from issuer %s: %v", issuerKey, err)
 		}
 	}
 
@@ -892,6 +936,29 @@ func (cfg *Config) storageHasCertResources(issuer Issuer, domain string) bool {
 	return cfg.Storage.Exists(certKey) &&
 		cfg.Storage.Exists(keyKey) &&
 		cfg.Storage.Exists(metaKey)
+}
+
+// deleteSiteAssets deletes the folder in storage containing the
+// certificate, private key, and metadata file for domain from the
+// issuer with the given issuer key.
+func (cfg *Config) deleteSiteAssets(issuerKey, domain string) error {
+	err := cfg.Storage.Delete(StorageKeys.SiteCert(issuerKey, domain))
+	if err != nil {
+		return fmt.Errorf("deleting certificate file: %v", err)
+	}
+	err = cfg.Storage.Delete(StorageKeys.SitePrivateKey(issuerKey, domain))
+	if err != nil {
+		return fmt.Errorf("deleting private key: %v", err)
+	}
+	err = cfg.Storage.Delete(StorageKeys.SiteMeta(issuerKey, domain))
+	if err != nil {
+		return fmt.Errorf("deleting metadata file: %v", err)
+	}
+	err = cfg.Storage.Delete(StorageKeys.CertsSitePrefix(issuerKey, domain))
+	if err != nil {
+		return fmt.Errorf("deleting site asset folder: %v", err)
+	}
+	return nil
 }
 
 // lockKey returns a key for a lock that is specific to the operation
