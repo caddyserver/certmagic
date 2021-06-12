@@ -50,6 +50,7 @@ func TestSaveCertResource(t *testing.T) {
 		IssuerData: &acme.Certificate{
 			URL: "https://example.com/cert",
 		},
+		issuerKey: am.IssuerKey(),
 	}
 
 	err := testConfig.saveCertResource(am, cert)

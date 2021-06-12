@@ -412,40 +412,31 @@ func (cfg *Config) Unmanage(domainNames []string) {
 	cfg.certCache.mu.Unlock()
 }
 
-// // ObtainCert obtains a certificate for name using cfg, as long
-// // as a certificate does not already exist in storage for that
-// // name. The name must qualify and cfg must be flagged as Managed.
-// // This function is a no-op if storage already has a certificate
-// // for name.
-// //
-// // It only obtains and stores certificates (and their keys),
-// // it does not load them into memory. If interactive is true,
-// // the user may be shown a prompt.
-// // TODO: consider moving interactive param into the Config struct,
-// // and maybe retry settings into the Config struct as well? (same for RenewCert)
-// func (cfg *Config) ObtainCert(ctx context.Context, name string, interactive bool) error {
-// 	if len(cfg.Issuers) == 0 {
-// 		return fmt.Errorf("no issuers configured; impossible to obtain or check for existing certificate in storage")
-// 	}
-// 	if cfg.storageHasCertResourcesAnyIssuer(name) {
-// 		return nil
-// 	}
-// 	// ensure storage is writeable and readable
-// 	// TODO: this is not necessary every time; should only perform check once every so often for each storage, which may require some global state...
-// 	err := cfg.checkStorage()
-// 	if err != nil {
-// 		return fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
-// 	}
-// 	return cfg.obtainCert(ctx, name, interactive)
-// }
+// ObtainCertSync generates a new private key and obtains a certificate for
+// name using cfg in the foreground; i.e. interactively and without retries.
+// It stows the renewed certificate and its assets in storage if successful.
+// It DOES NOT load the certificate into the in-memory cache. This method
+// is a no-op if storage already has a certificate for name.
+func (cfg *Config) ObtainCertSync(ctx context.Context, name string) error {
+	return cfg.obtainCert(ctx, name, true)
+}
+
+// ObtainCertAsync is the same as ObtainCertSync(), except it runs in the
+// background; i.e. non-interactively, and with retries if it fails.
+func (cfg *Config) ObtainCertAsync(ctx context.Context, name string) error {
+	return cfg.obtainCert(ctx, name, false)
+}
 
 func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool) error {
 	if len(cfg.Issuers) == 0 {
 		return fmt.Errorf("no issuers configured; impossible to obtain or check for existing certificate in storage")
 	}
+
+	// if storage has all resources for this certificate, obtain is a no-op
 	if cfg.storageHasCertResourcesAnyIssuer(name) {
 		return nil
 	}
+
 	// ensure storage is writeable and readable
 	// TODO: this is not necessary every time; should only perform check once every so often for each storage, which may require some global state...
 	err := cfg.checkStorage()
@@ -491,16 +482,24 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			return nil
 		}
 
-		privateKey, err := cfg.KeySource.GenerateKey()
+		// if storage has a private key already, use it; otherwise,
+		// we'll generate our own
+		privKey, privKeyPEM, issuers, err := cfg.reusePrivateKey(name)
 		if err != nil {
 			return err
 		}
-		privKeyPEM, err := encodePrivateKey(privateKey)
-		if err != nil {
-			return err
+		if privKey == nil {
+			privKey, err = cfg.KeySource.GenerateKey()
+			if err != nil {
+				return err
+			}
+			privKeyPEM, err = encodePrivateKey(privKey)
+			if err != nil {
+				return err
+			}
 		}
 
-		csr, err := cfg.generateCSR(privateKey, []string{name})
+		csr, err := cfg.generateCSR(privKey, []string{name})
 		if err != nil {
 			return err
 		}
@@ -508,7 +507,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 		// try to obtain from each issuer until we succeed
 		var issuedCert *IssuedCertificate
 		var issuerUsed Issuer
-		for i, issuer := range cfg.Issuers {
+		for i, issuer := range issuers {
 			log.Debug(fmt.Sprintf("trying issuer %d/%d", i+1, len(cfg.Issuers)),
 				zap.String("issuer", issuer.IssuerKey()))
 
@@ -572,6 +571,46 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 	return err
 }
 
+// reusePrivateKey looks for a private key for domain in storage in the configured issuers
+// paths. For the first private key it finds, it returns that key both decoded and PEM-encoded,
+// as well as the reordered list of issuers to use instead of cfg.Issuers (because if a key
+// is found, that issuer should be tried first, so it is moved to the front in a copy of
+// cfg.Issuers).
+func (cfg *Config) reusePrivateKey(domain string) (privKey crypto.PrivateKey, privKeyPEM []byte, issuers []Issuer, err error) {
+	// make a copy of cfg.Issuers so that if we have to reorder elements, we don't
+	// inadvertently mutate the configured issuers (see append calls below)
+	issuers = make([]Issuer, len(cfg.Issuers))
+	copy(issuers, cfg.Issuers)
+
+	for i, issuer := range issuers {
+		// see if this issuer location in storage has a private key for the domain
+		privateKeyStorageKey := StorageKeys.SitePrivateKey(issuer.IssuerKey(), domain)
+		privKeyPEM, err = cfg.Storage.Load(privateKeyStorageKey)
+		if _, ok := err.(ErrNotExist); ok {
+			continue
+		}
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("loading existing private key for reuse with issuer %s: %v", issuer.IssuerKey(), err)
+		}
+
+		// we loaded a private key; try decoding it so we can use it
+		privKey, err = decodePrivateKey(privKeyPEM)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		// since the private key was found in storage for this issuer, move it
+		// to the front of the list so we prefer this issuer first
+		issuers = append([]Issuer{issuer}, append(issuers[:i], issuers[i+1:]...)...)
+		break
+	}
+
+	return
+}
+
+// storageHasCertResourcesAnyIssuer returns true if storage has all the
+// certificate resources in storage from any configured issuer. It checks
+// all configured issuers in order.
 func (cfg *Config) storageHasCertResourcesAnyIssuer(name string) bool {
 	for _, iss := range cfg.Issuers {
 		if cfg.storageHasCertResources(iss, name) {
@@ -581,27 +620,20 @@ func (cfg *Config) storageHasCertResourcesAnyIssuer(name string) bool {
 	return false
 }
 
-func (cfg *Config) ObtainCertSync(ctx context.Context, name string) error {
-	return cfg.obtainCert(ctx, name, true)
-}
-func (cfg *Config) ObtainCertAsync(ctx context.Context, name string) error {
-	return cfg.obtainCert(ctx, name, false)
-}
-
-// RenewCert renews the certificate for name using cfg in the foreground;
-// i.e. interactively. It stows the renewed certificate and its assets in
-// storage if successful. It DOES NOT update the in-memory cache with the
-// new certificate. The certificate will not be renewed if it is not close
-// to expiring or expired unless force is true.
+// RenewCertSync renews the certificate for name using cfg in the foreground;
+// i.e. interactively and without retries. It stows the renewed certificate
+// and its assets in storage if successful. It DOES NOT update the in-memory
+// cache with the new certificate. The certificate will not be renewed if it
+// is not close to expiring unless force is true.
+//
+// Renewing a certificate is the same as obtaining a certificate, except that
+// the existing private key already in storage is reused.
 func (cfg *Config) RenewCertSync(ctx context.Context, name string, force bool) error {
 	return cfg.renewCert(ctx, name, force, true)
 }
 
-// RenewCert renews the certificate for name using cfg in the background;
-// i.e. non-interactively. It stows the renewed certificate and its assets in
-// storage if successful. It DOES NOT update the in-memory cache with the
-// new certificate. The certificate will not be renewed if it is not close
-// to expiring or expired unless force is true.
+// RenewCertAsync is the same as RenewCertSync(), except it runs in the
+// background; i.e. non-interactively, and with retries if it fails.
 func (cfg *Config) RenewCertAsync(ctx context.Context, name string, force bool) error {
 	return cfg.renewCert(ctx, name, force, false)
 }
