@@ -730,14 +730,27 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 					continue
 				}
 			}
+
 			issuedCert, err = issuer.Issue(ctx, csr)
 			if err == nil {
 				issuerUsed = issuer
 				break
 			}
+
+			// err is usually wrapped, which is nice for simply printing it, but
+			// with our structured error logs we only need the problem string
+			errToLog := err
+			var problem acme.Problem
+			if errors.As(err, &problem) {
+				errToLog = problem
+			}
+			log.Error("could not get certificate from issuer",
+				zap.String("identifier", name),
+				zap.String("issuer", issuer.IssuerKey()),
+				zap.Error(errToLog))
 		}
 		if err != nil {
-			// TODO: only the error from the last issuer will be returned, oh well?
+			// only the error from the last issuer will be returned, but we logged the others
 			return fmt.Errorf("[%s] Renew: %w", name, err)
 		}
 
@@ -806,6 +819,9 @@ func (cfg *Config) generateCSR(privateKey crypto.PrivateKey, sans []string) (*x5
 // RevokeCert revokes the certificate for domain via ACME protocol. It requires
 // that cfg.Issuers is properly configured with the same issuer that issued the
 // certificate being revoked. See RFC 5280 §5.3.1 for reason codes.
+//
+// The certificate assets are deleted from storage after successful revocation
+// to prevent reuse.
 func (cfg *Config) RevokeCert(ctx context.Context, domain string, reason int, interactive bool) error {
 	for i, issuer := range cfg.Issuers {
 		issuerKey := issuer.IssuerKey()
