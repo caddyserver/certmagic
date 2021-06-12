@@ -587,6 +587,7 @@ func (cfg *Config) reusePrivateKey(domain string) (privKey crypto.PrivateKey, pr
 		privateKeyStorageKey := StorageKeys.SitePrivateKey(issuer.IssuerKey(), domain)
 		privKeyPEM, err = cfg.Storage.Load(privateKeyStorageKey)
 		if _, ok := err.(ErrNotExist); ok {
+			err = nil // obviously, it's OK to not have a private key; so don't prevent obtaining a cert
 			continue
 		}
 		if err != nil {
