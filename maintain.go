@@ -67,6 +67,11 @@ func (certCache *Cache) maintainAssets(panicCount int) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// since checking certs for renewal is done when they're loaded, we don't need
+	// to do that until the first tick; but OCSP staples aren't necessarily refreshed
+	// at load-time, so we do this real quick before the first tick (see #4191)
+	certCache.updateOCSPStaples(ctx)
+
 	for {
 		select {
 		case <-renewalTicker.C:
