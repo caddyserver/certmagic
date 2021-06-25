@@ -43,6 +43,58 @@ func Test_challengeKey(t *testing.T) {
 			want: "*.example.com",
 		},
 		{
+			name: "ok/http-dns",
+			args: args{
+				chal: acme.Challenge{
+					Type: acme.ChallengeTypeHTTP01,
+					Identifier: acme.Identifier{
+						Type:  "dns",
+						Value: "*.example.com",
+					},
+				},
+			},
+			want: "*.example.com",
+		},
+		{
+			name: "ok/tls-dns",
+			args: args{
+				chal: acme.Challenge{
+					Type: acme.ChallengeTypeTLSALPN01,
+					Identifier: acme.Identifier{
+						Type:  "dns",
+						Value: "*.example.com",
+					},
+				},
+			},
+			want: "*.example.com",
+		},
+		{
+			name: "ok/http-ipv4",
+			args: args{
+				chal: acme.Challenge{
+					Type: acme.ChallengeTypeHTTP01,
+					Identifier: acme.Identifier{
+						Type:  "ip",
+						Value: "127.0.0.1",
+					},
+				},
+			},
+			want: "127.0.0.1",
+		},
+		{
+			name: "ok/http-ipv6",
+			args: args{
+				chal: acme.Challenge{
+					Type: acme.ChallengeTypeHTTP01,
+					Identifier: acme.Identifier{
+						Type:  "ip",
+						Value: "2001:db8::1",
+					},
+				},
+			},
+			want: "2001:db8::1",
+		},
+		{
 			name: "ok/tls-ipv4",
 			args: args{
 				chal: acme.Challenge{
@@ -67,6 +119,19 @@ func Test_challengeKey(t *testing.T) {
 				},
 			},
 			want: "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa",
+		},
+		{
+			name: "fail/tls-ipv4",
+			args: args{
+				chal: acme.Challenge{
+					Type: acme.ChallengeTypeTLSALPN01,
+					Identifier: acme.Identifier{
+						Type:  "ip",
+						Value: "127.0.0.1000",
+					},
+				},
+			},
+			want: "127.0.0.1000", // reversing this fails; default to identifier value
 		},
 	}
 	for _, tt := range tests {
