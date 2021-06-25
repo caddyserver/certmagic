@@ -654,7 +654,7 @@ type Challenge struct {
 // challengeKey determines the key for a challenge Identifier
 func challengeKey(chal acme.Challenge) string {
 	key := chal.Identifier.Value
-	if chal.Type == "tls-alpn-01" && chal.Identifier.Type == "ip" {
+	if chal.Type == acme.ChallengeTypeTLSALPN01 && chal.Identifier.Type == "ip" {
 		k, err := dns.ReverseAddr(chal.Identifier.Value)
 		if err == nil {
 			key = k[:len(k)-1] // strip off .
