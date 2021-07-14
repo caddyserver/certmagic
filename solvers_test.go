@@ -133,6 +133,19 @@ func Test_challengeKey(t *testing.T) {
 			},
 			want: "127.0.0.1000", // reversing this fails; default to identifier value
 		},
+		{
+			name: "fail/tls-ipv6",
+			args: args{
+				chal: acme.Challenge{
+					Type: acme.ChallengeTypeTLSALPN01,
+					Identifier: acme.Identifier{
+						Type:  "ip",
+						Value: "2001:db8::10000",
+					},
+				},
+			},
+			want: "2001:db8::10000", // reversing this fails; default to identifier value
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

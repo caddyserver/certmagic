@@ -651,16 +651,16 @@ type Challenge struct {
 	data interface{}
 }
 
-// challengeKey determines the key for a challenge Identifier
+// challengeKey returns the map key for a given challenge; it is the identifier
+// unless it is an IP address using the TLS-ALPN challenge.
 func challengeKey(chal acme.Challenge) string {
-	key := chal.Identifier.Value
 	if chal.Type == acme.ChallengeTypeTLSALPN01 && chal.Identifier.Type == "ip" {
-		k, err := dns.ReverseAddr(chal.Identifier.Value)
+		reversed, err := dns.ReverseAddr(chal.Identifier.Value)
 		if err == nil {
-			key = k[:len(k)-1] // strip off .
+			return reversed[:len(reversed)-1] // strip off '.'
 		}
 	}
-	return key
+	return chal.Identifier.Value
 }
 
 // solverWrapper should be used to wrap all challenge solvers so that
