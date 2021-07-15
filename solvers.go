@@ -218,10 +218,6 @@ func (*tlsALPNSolver) handleConn(conn net.Conn) {
 // CleanUp removes the challenge certificate from the cache, and if
 // it is the last one to finish, stops the TLS server.
 func (s *tlsALPNSolver) CleanUp(ctx context.Context, chal acme.Challenge) error {
-	s.config.certCache.mu.Lock()
-	delete(s.config.certCache.cache, tlsALPNCertKeyName(chal.Identifier.Value))
-	s.config.certCache.mu.Unlock()
-
 	solversMu.Lock()
 	defer solversMu.Unlock()
 	si := getSolverInfo(s.address)
@@ -237,14 +233,6 @@ func (s *tlsALPNSolver) CleanUp(ctx context.Context, chal acme.Challenge) error 
 	}
 
 	return nil
-}
-
-// tlsALPNCertKeyName returns the key to use when caching a cert
-// for use with the TLS-ALPN ACME challenge. It is simply to help
-// avoid conflicts (although at time of writing, there shouldn't
-// be, since the cert cache is keyed by hash of certificate chain).
-func tlsALPNCertKeyName(sniName string) string {
-	return sniName + ":acme-tls-alpn"
 }
 
 // DNS01Solver is a type that makes libdns providers usable
