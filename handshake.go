@@ -214,9 +214,15 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 
 	name := cfg.getNameFromClientHello(hello)
 
-	// If OnDemand is enabled, then we might be able to load or
-	// obtain a needed certificate
-	if cfg.OnDemand != nil && loadIfNecessary {
+	// We might be able to load or obtain a needed certificate. Load from
+	// storage even if OnDemand isn't enabled in case a statically-managed
+	// cert was evicted from a full cache.
+	cfg.certCache.mu.RLock()
+	cacheSize := len(cfg.certCache.cache)
+	cfg.certCache.mu.RUnlock()
+	loadDynamically := cfg.OnDemand != nil || cacheSize >= cfg.certCache.options.Capacity
+
+	if loadDynamically && loadIfNecessary {
 		// Then check to see if we have one on disk
 		loadedCert, err := cfg.CacheManagedCertificate(name)
 		if _, ok := err.(ErrNotExist); ok {
@@ -236,7 +242,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 			}
 			return loadedCert, nil
 		}
-		if obtainIfNecessary {
+		if cfg.OnDemand != nil && obtainIfNecessary {
 			// By this point, we need to ask the CA for a certificate
 			return cfg.obtainOnDemandCertificate(hello)
 		}
