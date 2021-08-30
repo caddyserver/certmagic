@@ -194,9 +194,14 @@ func (certCache *Cache) cacheCertificate(cert Certificate) {
 func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 	// no-op if this certificate already exists in the cache
 	if _, ok := certCache.cache[cert.hash]; ok {
-		certCache.logger.Debug("certificate already cached",
-			zap.Strings("identifiers", cert.Names),
-			zap.Strings("hash", cert.Names))
+		if certCache.logger != nil {
+			certCache.logger.Debug("certificate already cached",
+				zap.Strings("subjects", cert.Names),
+				zap.Time("expiration", cert.Leaf.NotAfter),
+				zap.Bool("managed", cert.managed),
+				zap.String("issuer_key", cert.issuerKey),
+				zap.String("hash", cert.hash))
+		}
 		return
 	}
 
@@ -212,11 +217,13 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 		i := 0
 		for _, randomCert := range certCache.cache {
 			if i == rnd {
-				certCache.logger.Debug("cache full; evicting random certificate",
-					zap.Strings("removing_identifiers", randomCert.Names),
-					zap.String("removing_hash", randomCert.hash),
-					zap.Strings("inserting_identifiers", cert.Names),
-					zap.String("inserting_hash", cert.hash))
+				if certCache.logger != nil {
+					certCache.logger.Debug("cache full; evicting random certificate",
+						zap.Strings("removing_subjects", randomCert.Names),
+						zap.String("removing_hash", randomCert.hash),
+						zap.Strings("inserting_subjects", cert.Names),
+						zap.String("inserting_hash", cert.hash))
+				}
 				certCache.removeCertificate(randomCert)
 				break
 			}
@@ -232,12 +239,14 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 		certCache.cacheIndex[name] = append(certCache.cacheIndex[name], cert.hash)
 	}
 
-	certCache.logger.Debug("added certificate to cache",
-		zap.Strings("identifiers", cert.Names),
-		zap.Bool("managed", cert.managed),
-		zap.Time("expiration", cert.Leaf.NotAfter),
-		zap.String("hash", cert.hash),
-	)
+	if certCache.logger != nil {
+		certCache.logger.Debug("added certificate to cache",
+			zap.Strings("subjects", cert.Names),
+			zap.Time("expiration", cert.Leaf.NotAfter),
+			zap.Bool("managed", cert.managed),
+			zap.String("issuer_key", cert.issuerKey),
+			zap.String("hash", cert.hash))
+	}
 }
 
 // removeCertificate removes cert from the cache.
@@ -264,12 +273,14 @@ func (certCache *Cache) removeCertificate(cert Certificate) {
 	// delete the actual cert from the cache
 	delete(certCache.cache, cert.hash)
 
-	certCache.logger.Debug("removed certificate from cache",
-		zap.Strings("identifiers", cert.Names),
-		zap.Bool("managed", cert.managed),
-		zap.Time("expiration", cert.Leaf.NotAfter),
-		zap.String("hash", cert.hash),
-	)
+	if certCache.logger != nil {
+		certCache.logger.Debug("removed certificate from cache",
+			zap.Strings("subjects", cert.Names),
+			zap.Time("expiration", cert.Leaf.NotAfter),
+			zap.Bool("managed", cert.managed),
+			zap.String("issuer_key", cert.issuerKey),
+			zap.String("hash", cert.hash))
+	}
 }
 
 // replaceCertificate atomically replaces oldCert with newCert in
@@ -283,7 +294,7 @@ func (certCache *Cache) replaceCertificate(oldCert, newCert Certificate) {
 	certCache.mu.Unlock()
 	if certCache.logger != nil {
 		certCache.logger.Info("replaced certificate in cache",
-			zap.Strings("identifiers", newCert.Names),
+			zap.Strings("subjects", newCert.Names),
 			zap.Time("new_expiration", newCert.Leaf.NotAfter))
 	}
 }

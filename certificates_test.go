@@ -16,8 +16,10 @@ package certmagic
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestUnexportedGetCertificate(t *testing.T) {
@@ -53,7 +55,7 @@ func TestUnexportedGetCertificate(t *testing.T) {
 func TestCacheCertificate(t *testing.T) {
 	certCache := &Cache{cache: make(map[string]Certificate), cacheIndex: make(map[string][]string)}
 
-	certCache.cacheCertificate(Certificate{Names: []string{"example.com", "sub.example.com"}, hash: "foobar"})
+	certCache.cacheCertificate(Certificate{Names: []string{"example.com", "sub.example.com"}, hash: "foobar", Certificate: tls.Certificate{Leaf: &x509.Certificate{NotAfter: time.Now()}}})
 	if len(certCache.cache) != 1 {
 		t.Errorf("Expected length of certificate cache to be 1")
 	}
@@ -68,7 +70,7 @@ func TestCacheCertificate(t *testing.T) {
 	}
 
 	// using same cache; and has cert with overlapping name, but different hash
-	certCache.cacheCertificate(Certificate{Names: []string{"example.com"}, hash: "barbaz"})
+	certCache.cacheCertificate(Certificate{Names: []string{"example.com"}, hash: "barbaz", Certificate: tls.Certificate{Leaf: &x509.Certificate{NotAfter: time.Now()}}})
 	if _, ok := certCache.cache["barbaz"]; !ok {
 		t.Error("Expected second cert to be cached by key 'barbaz.com', but it wasn't")
 	}
