@@ -863,20 +863,28 @@ func (cfg *Config) RevokeCert(ctx context.Context, domain string, reason int, in
 	return nil
 }
 
-// TLSConfig is an opinionated method that returns a
-// recommended, modern TLS configuration that can be
-// used to configure TLS listeners, which also supports
-// the TLS-ALPN challenge and serves up certificates
-// managed by cfg.
+// TLSConfig is an opinionated method that returns a recommended, modern
+// TLS configuration that can be used to configure TLS listeners. Aside
+// from safe, modern defaults, this method sets two critical fields on the
+// TLS config which are required to enable automatic certificate
+// management: GetCertificate and NextProtos.
 //
-// Unlike the package TLS() function, this method does
-// not, by itself, enable certificate management for
-// any domain names.
+// The GetCertificate field is necessary to get certificates from memory
+// or storage, including both manual and automated certificates. You
+// should only change this field if you know what you are doing.
 //
-// Feel free to further customize the returned tls.Config,
-// but do not mess with the GetCertificate or NextProtos
-// fields unless you know what you're doing, as they're
-// necessary to solve the TLS-ALPN challenge.
+// The NextProtos field is pre-populated with a special value to enable
+// solving the TLS-ALPN ACME challenge. Because this method does not
+// assume any particular protocols after the TLS handshake is completed,
+// you will likely need to customize the NextProtos field by prepending
+// your application's protocols to the slice. For example, to serve
+// HTTP, you will need to prepend "h2" and "http/1.1" values. Be sure to
+// leave the acmez.ACMETLS1Protocol value intact, however, or TLS-ALPN
+// challenges will fail (which may be acceptable if you are not using
+// ACME, or specifically, the TLS-ALPN challenge).
+//
+// Unlike the package TLS() function, this method does not, by itself,
+// enable certificate management for any domain names.
 func (cfg *Config) TLSConfig() *tls.Config {
 	return &tls.Config{
 		// these two fields necessary for TLS-ALPN challenge

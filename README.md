@@ -275,6 +275,10 @@ if err != nil {
 // you can get a TLS config to use in a TLS listener!
 tlsConfig := magic.TLSConfig()
 
+// be sure to customize NextProtos if serving a specific
+// application protocol after the TLS handshake, for example:
+tlsConfig.NextProtos = append([]string{"h2", "http/1.1"}, tlsConfig.NextProtos...)
+
 //// OR ////
 
 // if you already have a TLS config you don't want to replace,
