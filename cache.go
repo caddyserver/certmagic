@@ -245,7 +245,9 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 			zap.Time("expiration", cert.Leaf.NotAfter),
 			zap.Bool("managed", cert.managed),
 			zap.String("issuer_key", cert.issuerKey),
-			zap.String("hash", cert.hash))
+			zap.String("hash", cert.hash),
+			zap.Int("cache_size", len(certCache.cache)),
+			zap.Int("cache_capacity", certCache.options.Capacity))
 	}
 }
 
@@ -279,7 +281,9 @@ func (certCache *Cache) removeCertificate(cert Certificate) {
 			zap.Time("expiration", cert.Leaf.NotAfter),
 			zap.Bool("managed", cert.managed),
 			zap.String("issuer_key", cert.issuerKey),
-			zap.String("hash", cert.hash))
+			zap.String("hash", cert.hash),
+			zap.Int("cache_size", len(certCache.cache)),
+			zap.Int("cache_capacity", certCache.options.Capacity))
 	}
 }
 

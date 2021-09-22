@@ -252,12 +252,19 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	name := cfg.getNameFromClientHello(hello)
 
 	// We might be able to load or obtain a needed certificate. Load from
-	// storage even if OnDemand isn't enabled in case a statically-managed
-	// cert was evicted from a full cache.
+	// storage if OnDemand is enabled, or if there is the possibility that
+	// a statically-managed cert was evicted from a full cache.
 	cfg.certCache.mu.RLock()
 	cacheSize := len(cfg.certCache.cache)
 	cfg.certCache.mu.RUnlock()
-	loadDynamically := cfg.OnDemand != nil || cacheSize >= cfg.certCache.options.Capacity
+
+	// A cert might have still been evicted from the cache even if the cache
+	// is no longer completely full; this happens if the newly-loaded cert is
+	// itself evicted (perhaps due to being expired or unmanaged at this point).
+	// Hence, we use an "almost full" metric to allow for the cache to not be
+	// perfectly full while still being able to load needed certs from storage.
+	cacheAlmostFull := float64(cacheSize) >= (float64(cfg.certCache.options.Capacity) * .9)
+	loadDynamically := cfg.OnDemand != nil || cacheAlmostFull
 
 	if loadDynamically && loadIfNecessary {
 		// Then check to see if we have one on disk
@@ -310,8 +317,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 			zap.String("remote", hello.Conn.RemoteAddr().String()),
 			zap.String("identifier", name),
 			zap.Uint16s("cipher_suites", hello.CipherSuites),
-			zap.Int("cache_size", cacheSize),
-			zap.Int("cache_capacity", cfg.certCache.options.Capacity),
+			zap.Float64("cert_cache_fill", float64(cacheSize)/float64(cfg.certCache.options.Capacity)), // may be approximate! because we are not within the lock
 			zap.Bool("load_if_necessary", loadIfNecessary),
 			zap.Bool("obtain_if_necessary", obtainIfNecessary),
 			zap.Bool("on_demand", cfg.OnDemand != nil))
