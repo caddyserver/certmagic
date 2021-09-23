@@ -247,8 +247,8 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 // of the given domainNames. This behavior is recommended for
 // interactive use (i.e. when an administrator is present) so
 // that errors can be reported and fixed immediately.
-func (cfg *Config) ManageSync(domainNames []string) error {
-	return cfg.manageAll(context.Background(), domainNames, false)
+func (cfg *Config) ManageSync(ctx context.Context, domainNames []string) error {
+	return cfg.manageAll(ctx, domainNames, false)
 }
 
 // ClientCredentials returns a list of TLS client certificate chains for the given identifiers.

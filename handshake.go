@@ -263,11 +263,17 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	// itself evicted (perhaps due to being expired or unmanaged at this point).
 	// Hence, we use an "almost full" metric to allow for the cache to not be
 	// perfectly full while still being able to load needed certs from storage.
+	// See https://caddy.community/t/error-tls-alert-internal-error-592-again/13272
+	// and caddyserver/caddy#4320.
 	cacheAlmostFull := float64(cacheSize) >= (float64(cfg.certCache.options.Capacity) * .9)
 	loadDynamically := cfg.OnDemand != nil || cacheAlmostFull
 
 	if loadDynamically && loadIfNecessary {
 		// Then check to see if we have one on disk
+		// TODO: As suggested here, https://caddy.community/t/error-tls-alert-internal-error-592-again/13272/30?u=matt,
+		// it might be a good idea to check with the DecisionFunc or allowlist first before even loading the certificate
+		// from storage, since if we can't renew it, why should we even try serving it (it will just get evicted after
+		// we get a return value of false anyway)?
 		loadedCert, err := cfg.CacheManagedCertificate(name)
 		if _, ok := err.(ErrNotExist); ok {
 			// If no exact match, try a wildcard variant, which is something we can still use
