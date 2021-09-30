@@ -266,7 +266,7 @@ myACME := certmagic.NewACMEManager(magic, certmagic.ACMEManager{
 magic.Issuer = myACME
 
 // this obtains certificates or renews them if necessary
-err := magic.ManageSync([]string{"example.com", "sub.example.com"})
+err := magic.ManageSync(context.TODO(), []string{"example.com", "sub.example.com"})
 if err != nil {
 	return err
 }
