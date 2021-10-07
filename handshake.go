@@ -436,7 +436,8 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 	}
 
 	// TODO: use a proper context; we use one with timeout because retries are enabled because interactive is false
-	ctx, cancel := context.WithTimeout(context.TODO(), 90*time.Second)
+	// (timeout duration is based on https://caddy.community/t/zerossl-dns-challenge-failing-often-route53-plugin/13822/24?u=matt)
+	ctx, cancel := context.WithTimeout(context.TODO(), 180*time.Second)
 	defer cancel()
 
 	// Obtain the certificate
