@@ -72,6 +72,10 @@ func encodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
 func decodePrivateKey(keyPEMBytes []byte) (crypto.Signer, error) {
 	keyBlockDER, _ := pem.Decode(keyPEMBytes)
 
+	if keyBlockDER == nil {
+		return nil, fmt.Errorf("failed to decode PEM block containing private key")
+	}
+
 	if keyBlockDER.Type != "PRIVATE KEY" && !strings.HasSuffix(keyBlockDER.Type, " PRIVATE KEY") {
 		return nil, fmt.Errorf("unknown PEM header %q", keyBlockDER.Type)
 	}
