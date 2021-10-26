@@ -44,6 +44,12 @@ func TestEncodeDecodeRSAPrivateKey(t *testing.T) {
 		t.Error("error loading private key:", err)
 	}
 
+	// test load (should fail)
+	_, err = decodePrivateKey(savedBytes[2:])
+	if err == nil {
+		t.Error("loading private key should have failed")
+	}
+
 	// verify loaded key is correct
 	if !privateKeysSame(privateKey, loadedKey) {
 		t.Error("Expected key bytes to be the same, but they weren't")
