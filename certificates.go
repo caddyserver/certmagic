@@ -27,6 +27,46 @@ import (
 	"golang.org/x/crypto/ocsp"
 )
 
+func init() {
+	// Prepare a list of reserved IP spaces which public ACME CAs
+	// are generally unable to issue certs for. See
+	// https://en.wikipedia.org/wiki/Reserved_IP_addresses.
+	for _, ipRange := range []string{
+		// https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml
+		"0.0.0.0/8",
+		"10.0.0.0/8",
+		"100.64.0.0/10",
+		"127.0.0.0/8",
+		"169.254.0.0/16",
+		"172.16.0.0/12",
+		"192.0.0.0/24",
+		"192.168.0.0/16",
+		"192.88.99.0/24",
+		"198.18.0.0/15",
+		"198.51.100.0/24",
+		"203.0.113.0/24",
+		"240.0.0.0/4",
+		"255.255.255.255/32",
+
+		// https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml
+		"::/128",
+		"::1/128",
+		"100::/64",
+		"2001:10::/28",
+		"2001:2::/48",
+		"2001:db8::/32",
+		"64:ff9b:1::/48",
+		"fc00::/7",
+		"fe80::/10",
+	} {
+		_, cidr, err := net.ParseCIDR(ipRange)
+		if err != nil {
+			panic(fmt.Sprintf("bad CIDR range %s: %v", ipRange, err))
+		}
+		reservedIPRanges = append(reservedIPRanges, cidr)
+	}
+}
+
 // Certificate is a tls.Certificate with associated metadata tacked on.
 // Even if the metadata can be obtained by parsing the certificate,
 // we are more efficient by extracting the metadata onto this struct,
@@ -347,8 +387,8 @@ func SubjectQualifiesForCert(subj string) bool {
 
 // SubjectQualifiesForPublicCert returns true if the subject
 // name appears eligible for automagic TLS with a public
-// CA such as Let's Encrypt. For example: localhost and IP
-// addresses are not eligible because we cannot obtain certs
+// CA such as Let's Encrypt. For example: localhost and internal
+// IP addresses are not eligible because we cannot obtain certs
 // for those names with a public CA. Wildcard names are
 // allowed, as long as they conform to CABF requirements (only
 // one wildcard label, and it must be the left-most label).
@@ -356,12 +396,9 @@ func SubjectQualifiesForPublicCert(subj string) bool {
 	// must at least qualify for a certificate
 	return SubjectQualifiesForCert(subj) &&
 
-		// localhost, .localhost TLD, and .local TLD are ineligible
+		// localhost, .localhost TLD, and .local TLD are ineligible,
+		// as well as some reserved IP ranges
 		!SubjectIsInternal(subj) &&
-
-		// cannot be an IP address (as of yet), see
-		// https://community.letsencrypt.org/t/certificate-for-static-ip/84/2?u=mholt
-		!SubjectIsIP(subj) &&
 
 		// only one wildcard label allowed, and it must be left-most, with 3+ labels
 		(!strings.Contains(subj, "*") ||
@@ -376,9 +413,12 @@ func SubjectIsIP(subj string) bool {
 	return net.ParseIP(subj) != nil
 }
 
-// SubjectIsInternal returns true if subj is an internal-facing
-// hostname or address.
+// SubjectIsInternal returns true if subj is an
+// internal-facing hostname or address.
 func SubjectIsInternal(subj string) bool {
+	if ip := net.ParseIP(subj); ip != nil {
+		return isReservedIP(ip)
+	}
 	return subj == "localhost" ||
 		strings.HasSuffix(subj, ".localhost") ||
 		strings.HasSuffix(subj, ".local")
@@ -412,3 +452,17 @@ func MatchWildcard(subject, wildcard string) bool {
 	}
 	return false
 }
+
+// isReservedIP returns true if ip is reserved according to
+// the IANA Special Address Registry.
+func isReservedIP(ip net.IP) bool {
+	for _, reserved := range reservedIPRanges {
+		if reserved.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// List of reserved IPs. Populated by init().
+var reservedIPRanges []*net.IPNet
