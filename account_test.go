@@ -258,3 +258,7 @@ func TestGetEmailFromRecent(t *testing.T) {
 		t.Errorf("Did not get correct email from storage; expected '%s' but got '%s'", "test4-3@foo.com", am.Email)
 	}
 }
+
+// agreementTestURL is set during tests to skip requiring
+// setting up an entire ACME CA endpoint.
+var agreementTestURL string
