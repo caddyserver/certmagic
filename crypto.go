@@ -147,12 +147,12 @@ func (cfg *Config) saveCertResource(issuer Issuer, cert CertificateResource) err
 
 	all := []keyValue{
 		{
-			key:   StorageKeys.SiteCert(issuerKey, certKey),
-			value: cert.CertificatePEM,
-		},
-		{
 			key:   StorageKeys.SitePrivateKey(issuerKey, certKey),
 			value: cert.PrivateKeyPEM,
+		},
+		{
+			key:   StorageKeys.SiteCert(issuerKey, certKey),
+			value: cert.CertificatePEM,
 		},
 		{
 			key:   StorageKeys.SiteMeta(issuerKey, certKey),
