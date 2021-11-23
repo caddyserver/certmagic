@@ -197,9 +197,6 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	if cfg.DefaultServerName == "" {
 		cfg.DefaultServerName = Default.DefaultServerName
 	}
-	if cfg.OnDemand == nil {
-		cfg.OnDemand = Default.OnDemand
-	}
 	if !cfg.MustStaple {
 		cfg.MustStaple = Default.MustStaple
 	}
