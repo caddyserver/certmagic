@@ -217,7 +217,7 @@ func (*ACMEManager) issuerKey(ca string) string {
 // renewing a certificate with ACME, and returns whether this
 // batch is eligible for certificates if using Let's Encrypt.
 // It also ensures that an email address is available.
-func (am *ACMEManager) PreCheck(_ context.Context, names []string, interactive bool) error {
+func (am *ACMEManager) PreCheck(ctx context.Context, names []string, interactive bool) error {
 	publicCA := strings.Contains(am.CA, "api.letsencrypt.org") || strings.Contains(am.CA, "acme.zerossl.com")
 	if publicCA {
 		for _, name := range names {
@@ -226,7 +226,7 @@ func (am *ACMEManager) PreCheck(_ context.Context, names []string, interactive b
 			}
 		}
 	}
-	return am.getEmail(interactive)
+	return am.getEmail(ctx, interactive)
 }
 
 // Issue implements the Issuer interface. It obtains a certificate for the given csr using

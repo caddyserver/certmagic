@@ -36,13 +36,13 @@ type FileStorage struct {
 }
 
 // Exists returns true if key exists in fs.
-func (fs *FileStorage) Exists(key string) bool {
+func (fs *FileStorage) Exists(ctx context.Context, key string) bool {
 	_, err := os.Stat(fs.Filename(key))
 	return !os.IsNotExist(err)
 }
 
 // Store saves value at key.
-func (fs *FileStorage) Store(key string, value []byte) error {
+func (fs *FileStorage) Store(ctx context.Context, key string, value []byte) error {
 	filename := fs.Filename(key)
 	err := os.MkdirAll(filepath.Dir(filename), 0700)
 	if err != nil {
@@ -52,7 +52,7 @@ func (fs *FileStorage) Store(key string, value []byte) error {
 }
 
 // Load retrieves the value at key.
-func (fs *FileStorage) Load(key string) ([]byte, error) {
+func (fs *FileStorage) Load(ctx context.Context, key string) ([]byte, error) {
 	contents, err := ioutil.ReadFile(fs.Filename(key))
 	if os.IsNotExist(err) {
 		return nil, ErrNotExist(err)
@@ -61,7 +61,7 @@ func (fs *FileStorage) Load(key string) ([]byte, error) {
 }
 
 // Delete deletes the value at key.
-func (fs *FileStorage) Delete(key string) error {
+func (fs *FileStorage) Delete(ctx context.Context, key string) error {
 	err := os.Remove(fs.Filename(key))
 	if os.IsNotExist(err) {
 		return ErrNotExist(err)
@@ -70,7 +70,7 @@ func (fs *FileStorage) Delete(key string) error {
 }
 
 // List returns all keys that match prefix.
-func (fs *FileStorage) List(prefix string, recursive bool) ([]string, error) {
+func (fs *FileStorage) List(ctx context.Context, prefix string, recursive bool) ([]string, error) {
 	var keys []string
 	walkPrefix := fs.Filename(prefix)
 
@@ -101,7 +101,7 @@ func (fs *FileStorage) List(prefix string, recursive bool) ([]string, error) {
 }
 
 // Stat returns information about key.
-func (fs *FileStorage) Stat(key string) (KeyInfo, error) {
+func (fs *FileStorage) Stat(ctx context.Context, key string) (KeyInfo, error) {
 	fi, err := os.Stat(fs.Filename(key))
 	if os.IsNotExist(err) {
 		return KeyInfo{}, ErrNotExist(err)
@@ -181,7 +181,7 @@ func (fs *FileStorage) Lock(ctx context.Context, key string) error {
 }
 
 // Unlock releases the lock for name.
-func (fs *FileStorage) Unlock(key string) error {
+func (fs *FileStorage) Unlock(ctx context.Context, key string) error {
 	return removeLockfile(fs.lockFilename(key))
 }
 

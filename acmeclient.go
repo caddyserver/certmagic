@@ -61,7 +61,7 @@ func (am *ACMEManager) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 	if am.AccountKeyPEM != "" {
 		account, err = am.GetAccount(ctx, []byte(am.AccountKeyPEM))
 	} else {
-		account, err = am.getAccount(client.Directory, am.Email)
+		account, err = am.getAccount(ctx, client.Directory, am.Email)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting ACME account: %v", err)
@@ -116,7 +116,7 @@ func (am *ACMEManager) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 		}
 
 		// persist the account to storage
-		err = am.saveAccount(client.Directory, account)
+		err = am.saveAccount(ctx, client.Directory, account)
 		if err != nil {
 			return nil, fmt.Errorf("could not save account %v: %v", account.Contact, err)
 		}

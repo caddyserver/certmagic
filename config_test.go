@@ -15,6 +15,7 @@
 package certmagic
 
 import (
+	"context"
 	"os"
 	"reflect"
 	"testing"
@@ -23,6 +24,8 @@ import (
 )
 
 func TestSaveCertResource(t *testing.T) {
+	ctx := context.Background()
+
 	am := &ACMEManager{CA: "https://example.com/acme/directory"}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
@@ -53,7 +56,7 @@ func TestSaveCertResource(t *testing.T) {
 		issuerKey: am.IssuerKey(),
 	}
 
-	err := testConfig.saveCertResource(am, cert)
+	err := testConfig.saveCertResource(ctx, am, cert)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -64,7 +67,7 @@ func TestSaveCertResource(t *testing.T) {
 		"url": "https://example.com/cert",
 	}
 
-	siteData, err := testConfig.loadCertResource(am, domain)
+	siteData, err := testConfig.loadCertResource(ctx, am, domain)
 	if err != nil {
 		t.Fatalf("Expected no error reading site, got: %v", err)
 	}

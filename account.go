@@ -35,8 +35,8 @@ import (
 
 // getAccount either loads or creates a new account, depending on if
 // an account can be found in storage for the given CA + email combo.
-func (am *ACMEManager) getAccount(ca, email string) (acme.Account, error) {
-	acct, err := am.loadAccount(ca, email)
+func (am *ACMEManager) getAccount(ctx context.Context, ca, email string) (acme.Account, error) {
+	acct, err := am.loadAccount(ctx, ca, email)
 	if err != nil {
 		if _, ok := err.(ErrNotExist); ok {
 			return am.newAccount(email)
@@ -47,12 +47,12 @@ func (am *ACMEManager) getAccount(ca, email string) (acme.Account, error) {
 }
 
 // loadAccount loads an account from storage, but does not create a new one.
-func (am *ACMEManager) loadAccount(ca, email string) (acme.Account, error) {
-	regBytes, err := am.config.Storage.Load(am.storageKeyUserReg(ca, email))
+func (am *ACMEManager) loadAccount(ctx context.Context, ca, email string) (acme.Account, error) {
+	regBytes, err := am.config.Storage.Load(ctx, am.storageKeyUserReg(ca, email))
 	if err != nil {
 		return acme.Account{}, err
 	}
-	keyBytes, err := am.config.Storage.Load(am.storageKeyUserPrivateKey(ca, email))
+	keyBytes, err := am.config.Storage.Load(ctx, am.storageKeyUserPrivateKey(ca, email))
 	if err != nil {
 		return acme.Account{}, err
 	}
@@ -104,18 +104,18 @@ func (am *ACMEManager) GetAccount(ctx context.Context, privateKeyPEM []byte) (ac
 // If it does not exist, an error of type ErrNotExist is returned. This is not very efficient
 // for lots of accounts.
 func (am *ACMEManager) loadAccountByKey(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
-	accountList, err := am.config.Storage.List(am.storageKeyUsersPrefix(am.CA), false)
+	accountList, err := am.config.Storage.List(ctx, am.storageKeyUsersPrefix(am.CA), false)
 	if err != nil {
 		return acme.Account{}, err
 	}
 	for _, accountFolderKey := range accountList {
 		email := path.Base(accountFolderKey)
-		keyBytes, err := am.config.Storage.Load(am.storageKeyUserPrivateKey(am.CA, email))
+		keyBytes, err := am.config.Storage.Load(ctx, am.storageKeyUserPrivateKey(am.CA, email))
 		if err != nil {
 			return acme.Account{}, err
 		}
 		if bytes.Equal(bytes.TrimSpace(keyBytes), bytes.TrimSpace(privateKeyPEM)) {
-			return am.loadAccount(am.CA, email)
+			return am.loadAccount(ctx, am.CA, email)
 		}
 	}
 	return acme.Account{}, ErrNotExist(fmt.Errorf("no account found with that key"))
@@ -142,7 +142,7 @@ func (am *ACMEManager) lookUpAccount(ctx context.Context, privateKeyPEM []byte) 
 	}
 
 	// save the account details to storage
-	err = am.saveAccount(client.Directory, account)
+	err = am.saveAccount(ctx, client.Directory, account)
 	if err != nil {
 		return account, fmt.Errorf("could not save account to storage: %v", err)
 	}
@@ -152,7 +152,7 @@ func (am *ACMEManager) lookUpAccount(ctx context.Context, privateKeyPEM []byte) 
 
 // saveAccount persists an ACME account's info and private key to storage.
 // It does NOT register the account via ACME or prompt the user.
-func (am *ACMEManager) saveAccount(ca string, account acme.Account) error {
+func (am *ACMEManager) saveAccount(ctx context.Context, ca string, account acme.Account) error {
 	regBytes, err := json.MarshalIndent(account, "", "\t")
 	if err != nil {
 		return err
@@ -173,7 +173,7 @@ func (am *ACMEManager) saveAccount(ca string, account acme.Account) error {
 			value: keyBytes,
 		},
 	}
-	return storeTx(am.config.Storage, all)
+	return storeTx(ctx, am.config.Storage, all)
 }
 
 // getEmail does everything it can to obtain an email address
@@ -183,7 +183,7 @@ func (am *ACMEManager) saveAccount(ca string, account acme.Account) error {
 // the consequences of an empty email.) This function MAY prompt
 // the user for input. If allowPrompts is false, the user
 // will NOT be prompted and an empty email may be returned.
-func (am *ACMEManager) getEmail(allowPrompts bool) error {
+func (am *ACMEManager) getEmail(ctx context.Context, allowPrompts bool) error {
 	leEmail := am.Email
 
 	// First try package default email, or a discovered email address
@@ -199,7 +199,7 @@ func (am *ACMEManager) getEmail(allowPrompts bool) error {
 	// Then try to get most recent user email from storage
 	var gotRecentEmail bool
 	if leEmail == "" {
-		leEmail, gotRecentEmail = am.mostRecentAccountEmail(am.CA)
+		leEmail, gotRecentEmail = am.mostRecentAccountEmail(ctx, am.CA)
 	}
 	if !gotRecentEmail && leEmail == "" && allowPrompts {
 		// Looks like there is no email address readily available,
@@ -336,8 +336,8 @@ func (*ACMEManager) emailUsername(email string) string {
 // in storage. Since this is part of a complex sequence to get a user
 // account, errors here are discarded to simplify code flow in
 // the caller, and errors are not important here anyway.
-func (am *ACMEManager) mostRecentAccountEmail(caURL string) (string, bool) {
-	accountList, err := am.config.Storage.List(am.storageKeyUsersPrefix(caURL), false)
+func (am *ACMEManager) mostRecentAccountEmail(ctx context.Context, caURL string) (string, bool) {
+	accountList, err := am.config.Storage.List(ctx, am.storageKeyUsersPrefix(caURL), false)
 	if err != nil || len(accountList) == 0 {
 		return "", false
 	}
@@ -347,7 +347,7 @@ func (am *ACMEManager) mostRecentAccountEmail(caURL string) (string, bool) {
 	stats := make(map[string]KeyInfo)
 	for i := 0; i < len(accountList); i++ {
 		u := accountList[i]
-		keyInfo, err := am.config.Storage.Stat(u)
+		keyInfo, err := am.config.Storage.Stat(ctx, u)
 		if err != nil {
 			continue
 		}
@@ -375,7 +375,7 @@ func (am *ACMEManager) mostRecentAccountEmail(caURL string) (string, bool) {
 		return "", false
 	}
 
-	account, err := am.getAccount(caURL, path.Base(accountList[0]))
+	account, err := am.getAccount(ctx, caURL, path.Base(accountList[0]))
 	if err != nil {
 		return "", false
 	}

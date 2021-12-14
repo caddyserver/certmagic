@@ -44,29 +44,29 @@ type Storage interface {
 	Locker
 
 	// Store puts value at key.
-	Store(key string, value []byte) error
+	Store(ctx context.Context, key string, value []byte) error
 
 	// Load retrieves the value at key.
-	Load(key string) ([]byte, error)
+	Load(ctx context.Context, key string) ([]byte, error)
 
 	// Delete deletes key. An error should be
 	// returned only if the key still exists
 	// when the method returns.
-	Delete(key string) error
+	Delete(ctx context.Context, key string) error
 
 	// Exists returns true if the key exists
 	// and there was no error checking.
-	Exists(key string) bool
+	Exists(ctx context.Context, key string) bool
 
 	// List returns all keys that match prefix.
 	// If recursive is true, non-terminal keys
 	// will be enumerated (i.e. "directories"
 	// should be walked); otherwise, only keys
 	// prefixed exactly by prefix will be listed.
-	List(prefix string, recursive bool) ([]string, error)
+	List(ctx context.Context, prefix string, recursive bool) ([]string, error)
 
 	// Stat returns information about key.
-	Stat(key string) (KeyInfo, error)
+	Stat(ctx context.Context, key string) (KeyInfo, error)
 }
 
 // Locker facilitates synchronization of certificate tasks across
@@ -98,7 +98,7 @@ type Locker interface {
 	// called after a successful call to Lock, and only after the
 	// critical section is finished, even if it errored or timed
 	// out. Unlock cleans up any resources allocated during Lock.
-	Unlock(key string) error
+	Unlock(ctx context.Context, key string) error
 }
 
 // KeyInfo holds information about a key in storage.
@@ -116,12 +116,12 @@ type KeyInfo struct {
 }
 
 // storeTx stores all the values or none at all.
-func storeTx(s Storage, all []keyValue) error {
+func storeTx(ctx context.Context, s Storage, all []keyValue) error {
 	for i, kv := range all {
-		err := s.Store(kv.key, kv.value)
+		err := s.Store(ctx, kv.key, kv.value)
 		if err != nil {
 			for j := i - 1; j >= 0; j-- {
-				s.Delete(all[j].key)
+				s.Delete(ctx, all[j].key)
 			}
 			return err
 		}
@@ -215,11 +215,11 @@ func (keys KeyBuilder) Safe(str string) string {
 // the locks are synchronizing, this should be
 // called only immediately before process exit.
 // Errors are only reported if a logger is given.
-func CleanUpOwnLocks(logger *zap.Logger) {
+func CleanUpOwnLocks(ctx context.Context, logger *zap.Logger) {
 	locksMu.Lock()
 	defer locksMu.Unlock()
 	for lockKey, storage := range locks {
-		err := storage.Unlock(lockKey)
+		err := storage.Unlock(ctx, lockKey)
 		if err == nil {
 			delete(locks, lockKey)
 		} else if logger != nil {
@@ -242,8 +242,8 @@ func acquireLock(ctx context.Context, storage Storage, lockKey string) error {
 	return err
 }
 
-func releaseLock(storage Storage, lockKey string) error {
-	err := storage.Unlock(lockKey)
+func releaseLock(ctx context.Context, storage Storage, lockKey string) error {
+	err := storage.Unlock(ctx, lockKey)
 	if err == nil {
 		locksMu.Lock()
 		delete(locks, lockKey)

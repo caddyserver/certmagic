@@ -269,17 +269,19 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	loadDynamically := cfg.OnDemand != nil || cacheAlmostFull
 
 	if loadDynamically && loadIfNecessary {
+		ctx := hello.Context()
+
 		// Then check to see if we have one on disk
 		// TODO: As suggested here, https://caddy.community/t/error-tls-alert-internal-error-592-again/13272/30?u=matt,
 		// it might be a good idea to check with the DecisionFunc or allowlist first before even loading the certificate
 		// from storage, since if we can't renew it, why should we even try serving it (it will just get evicted after
 		// we get a return value of false anyway)?
-		loadedCert, err := cfg.CacheManagedCertificate(name)
+		loadedCert, err := cfg.CacheManagedCertificate(ctx, name)
 		if _, ok := err.(ErrNotExist); ok {
 			// If no exact match, try a wildcard variant, which is something we can still use
 			labels := strings.Split(name, ".")
 			labels[0] = "*"
-			loadedCert, err = cfg.CacheManagedCertificate(strings.Join(labels, "."))
+			loadedCert, err = cfg.CacheManagedCertificate(ctx, strings.Join(labels, "."))
 		}
 		if err == nil {
 			if log != nil {
@@ -435,9 +437,9 @@ func (cfg *Config) obtainOnDemandCertificate(hello *tls.ClientHelloInfo) (Certif
 		log.Info("obtaining new certificate", zap.String("server_name", name))
 	}
 
-	// TODO: use a proper context; we use one with timeout because retries are enabled because interactive is false
+	// we set a timeout because retries are enabled because interactive is false
 	// (timeout duration is based on https://caddy.community/t/zerossl-dns-challenge-failing-often-route53-plugin/13822/24?u=matt)
-	ctx, cancel := context.WithTimeout(context.TODO(), 180*time.Second)
+	ctx, cancel := context.WithTimeout(hello.Context(), 180*time.Second)
 	defer cancel()
 
 	// Obtain the certificate
@@ -475,7 +477,7 @@ func (cfg *Config) handshakeMaintenance(hello *tls.ClientHelloInfo, cert Certifi
 	if cert.ocsp != nil {
 		refreshTime := cert.ocsp.ThisUpdate.Add(cert.ocsp.NextUpdate.Sub(cert.ocsp.ThisUpdate) / 2)
 		if time.Now().After(refreshTime) {
-			_, err := stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
+			_, err := stapleOCSP(hello.Context(), cfg.OCSP, cfg.Storage, &cert, nil)
 			if err != nil {
 				// An error with OCSP stapling is not the end of the world, and in fact, is
 				// quite common considering not all certs have issuer URLs that support it.
@@ -591,7 +593,7 @@ func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCe
 			// even though the recursive nature of the dynamic cert loading
 			// would just call this function anyway, we do it here to
 			// make the replacement as atomic as possible.
-			newCert, err := cfg.CacheManagedCertificate(name)
+			newCert, err := cfg.CacheManagedCertificate(ctx, name)
 			if err != nil {
 				if log != nil {
 					log.Error("loading renewed certificate", zap.String("server_name", name), zap.Error(err))
@@ -614,16 +616,18 @@ func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCe
 		return getCertWithoutReobtaining()
 	}
 
+	ctx := hello.Context()
+
 	// if the certificate hasn't expired, we can serve what we have and renew in the background
 	if timeLeft > 0 {
-		// TODO: get a proper context; we use one with timeout because retries are enabled because interactive is false
-		ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Minute)
+		// we use this timeout because retries are enabled because interactive is false
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		go renewAndReload(ctx, cancel)
 		return currentCert, nil
 	}
 
 	// otherwise, we have to block while we renew an expired certificate
-	ctx, cancel := context.WithTimeout(context.TODO(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	return renewAndReload(ctx, cancel)
 }
 
@@ -634,7 +638,7 @@ func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCe
 // solving). True is returned if the challenge is being solved distributed (there
 // is no semantic difference with distributed solving; it is mainly for logging).
 func (cfg *Config) getTLSALPNChallengeCert(clientHello *tls.ClientHelloInfo) (*tls.Certificate, bool, error) {
-	chalData, distributed, err := cfg.getChallengeInfo(clientHello.ServerName)
+	chalData, distributed, err := cfg.getChallengeInfo(clientHello.Context(), clientHello.ServerName)
 	if err != nil {
 		return nil, distributed, err
 	}

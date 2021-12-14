@@ -71,7 +71,7 @@ func (am *ACMEManager) distributedHTTPChallengeSolver(w http.ResponseWriter, r *
 		return false
 	}
 	host := hostOnly(r.Host)
-	chalInfo, distributed, err := am.config.getChallengeInfo(host)
+	chalInfo, distributed, err := am.config.getChallengeInfo(r.Context(), host)
 	if err != nil {
 		if am.Logger != nil {
 			am.Logger.Error("looking up info for HTTP challenge",

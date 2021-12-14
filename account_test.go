@@ -16,6 +16,7 @@ package certmagic
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -50,6 +51,8 @@ func TestNewAccount(t *testing.T) {
 }
 
 func TestSaveAccount(t *testing.T) {
+	ctx := context.Background()
+
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
@@ -72,17 +75,19 @@ func TestSaveAccount(t *testing.T) {
 		t.Fatalf("Error creating account: %v", err)
 	}
 
-	err = am.saveAccount(am.CA, account)
+	err = am.saveAccount(ctx, am.CA, account)
 	if err != nil {
 		t.Fatalf("Error saving account: %v", err)
 	}
-	_, err = am.getAccount(am.CA, email)
+	_, err = am.getAccount(ctx, am.CA, email)
 	if err != nil {
 		t.Errorf("Cannot access account data, error: %v", err)
 	}
 }
 
 func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
+	ctx := context.Background()
+
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
@@ -91,7 +96,7 @@ func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
 	}
 	am.config = testConfig
 
-	account, err := am.getAccount(am.CA, "account_does_not_exist@foobar.com")
+	account, err := am.getAccount(ctx, am.CA, "account_does_not_exist@foobar.com")
 	if err != nil {
 		t.Fatalf("Error getting account: %v", err)
 	}
@@ -102,6 +107,8 @@ func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
 }
 
 func TestGetAccountAlreadyExists(t *testing.T) {
+	ctx := context.Background()
+
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
@@ -125,13 +132,13 @@ func TestGetAccountAlreadyExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error creating account: %v", err)
 	}
-	err = am.saveAccount(am.CA, account)
+	err = am.saveAccount(ctx, am.CA, account)
 	if err != nil {
 		t.Fatalf("Error saving account: %v", err)
 	}
 
 	// Expect to load account from disk
-	loadedAccount, err := am.getAccount(am.CA, email)
+	loadedAccount, err := am.getAccount(ctx, am.CA, email)
 	if err != nil {
 		t.Fatalf("Error getting account: %v", err)
 	}
@@ -148,6 +155,8 @@ func TestGetAccountAlreadyExists(t *testing.T) {
 }
 
 func TestGetEmailFromPackageDefault(t *testing.T) {
+	ctx := context.Background()
+
 	DefaultACME.Email = "tEsT2@foo.com"
 	defer func() {
 		DefaultACME.Email = ""
@@ -162,7 +171,7 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 	}
 	am.config = testConfig
 
-	err := am.getEmail(true)
+	err := am.getEmail(ctx, true)
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}
@@ -173,6 +182,8 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 }
 
 func TestGetEmailFromUserInput(t *testing.T) {
+	ctx := context.Background()
+
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
@@ -192,7 +203,7 @@ func TestGetEmailFromUserInput(t *testing.T) {
 
 	email := "test3@foo.com"
 	stdin = bytes.NewBufferString(email + "\n")
-	err := am.getEmail(true)
+	err := am.getEmail(ctx, true)
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}
@@ -205,6 +216,8 @@ func TestGetEmailFromUserInput(t *testing.T) {
 }
 
 func TestGetEmailFromRecent(t *testing.T) {
+	ctx := context.Background()
+
 	am := &ACMEManager{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
@@ -233,7 +246,7 @@ func TestGetEmailFromRecent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Error creating user %d: %v", i, err)
 		}
-		err = am.saveAccount(am.CA, account)
+		err = am.saveAccount(ctx, am.CA, account)
 		if err != nil {
 			t.Fatalf("Error saving user %d: %v", i, err)
 		}
@@ -250,7 +263,7 @@ func TestGetEmailFromRecent(t *testing.T) {
 			t.Fatalf("Could not change user folder mod time for '%s': %v", eml, err)
 		}
 	}
-	err := am.getEmail(true)
+	err := am.getEmail(ctx, true)
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}

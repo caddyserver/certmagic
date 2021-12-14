@@ -16,6 +16,7 @@ package certmagic
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -39,7 +40,7 @@ import (
 //
 // If a status was received, it returns that status. Note that the
 // returned status is not always stapled to the certificate.
-func stapleOCSP(ocspConfig OCSPConfig, storage Storage, cert *Certificate, pemBundle []byte) (*ocsp.Response, error) {
+func stapleOCSP(ctx context.Context, ocspConfig OCSPConfig, storage Storage, cert *Certificate, pemBundle []byte) (*ocsp.Response, error) {
 	if ocspConfig.DisableStapling {
 		return nil, nil
 	}
@@ -61,7 +62,7 @@ func stapleOCSP(ocspConfig OCSPConfig, storage Storage, cert *Certificate, pemBu
 	// First try to load OCSP staple from storage and see if
 	// we can still use it.
 	ocspStapleKey := StorageKeys.OCSPStaple(cert, pemBundle)
-	cachedOCSP, err := storage.Load(ocspStapleKey)
+	cachedOCSP, err := storage.Load(ctx, ocspStapleKey)
 	if err == nil {
 		resp, err := ocsp.ParseResponse(cachedOCSP, nil)
 		if err == nil {
@@ -77,7 +78,7 @@ func stapleOCSP(ocspConfig OCSPConfig, storage Storage, cert *Certificate, pemBu
 			// because we loaded it by name, whereas the maintenance routine
 			// just iterates the list of files, even if somehow a non-staple
 			// file gets in the folder. in this case we are sure it is corrupt.)
-			err := storage.Delete(ocspStapleKey)
+			err := storage.Delete(ctx, ocspStapleKey)
 			if err != nil {
 				log.Printf("[WARNING] Unable to delete invalid OCSP staple file: %v", err)
 			}
@@ -112,7 +113,7 @@ func stapleOCSP(ocspConfig OCSPConfig, storage Storage, cert *Certificate, pemBu
 		cert.Certificate.OCSPStaple = ocspBytes
 		cert.ocsp = ocspResp
 		if gotNewOCSP {
-			err := storage.Store(ocspStapleKey, ocspBytes)
+			err := storage.Store(ctx, ocspStapleKey, ocspBytes)
 			if err != nil {
 				return ocspResp, fmt.Errorf("unable to write OCSP staple file for %v: %v", cert.Names, err)
 			}
