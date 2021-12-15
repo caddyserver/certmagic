@@ -265,7 +265,8 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	// perfectly full while still being able to load needed certs from storage.
 	// See https://caddy.community/t/error-tls-alert-internal-error-592-again/13272
 	// and caddyserver/caddy#4320.
-	cacheAlmostFull := float64(cacheSize) >= (float64(cfg.certCache.options.Capacity) * .9)
+	cacheCapacity := float64(cfg.certCache.options.Capacity)
+	cacheAlmostFull := cacheCapacity > 0 && float64(cacheSize) >= cacheCapacity*.9
 	loadDynamically := cfg.OnDemand != nil || cacheAlmostFull
 
 	if loadDynamically && loadIfNecessary {
@@ -323,7 +324,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 			zap.String("remote", hello.Conn.RemoteAddr().String()),
 			zap.String("identifier", name),
 			zap.Uint16s("cipher_suites", hello.CipherSuites),
-			zap.Float64("cert_cache_fill", float64(cacheSize)/float64(cfg.certCache.options.Capacity)), // may be approximate! because we are not within the lock
+			zap.Float64("cert_cache_fill", float64(cacheSize)/cacheCapacity), // may be approximate! because we are not within the lock
 			zap.Bool("load_if_necessary", loadIfNecessary),
 			zap.Bool("obtain_if_necessary", obtainIfNecessary),
 			zap.Bool("on_demand", cfg.OnDemand != nil))
