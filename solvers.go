@@ -261,13 +261,6 @@ func (s *DNS01Solver) Present(ctx context.Context, challenge acme.Challenge) err
 	dnsName := challenge.DNS01TXTRecordName()
 	keyAuth := challenge.DNS01KeyAuthorization()
 
-	// multiple identifiers can have the same ACME challenge
-	// domain (e.g. example.com and *.example.com) so we need
-	// to ensure that we don't solve those concurrently and
-	// step on each challenges' metaphorical toes; see
-	// https://github.com/caddyserver/caddy/issues/3474
-	activeDNSChallenges.Lock(dnsName)
-
 	zone, err := findZoneByFQDN(dnsName, recursiveNameservers(s.Resolvers))
 	if err != nil {
 		return fmt.Errorf("could not determine zone for domain %q: %v", dnsName, err)
@@ -344,9 +337,6 @@ func (s *DNS01Solver) CleanUp(ctx context.Context, challenge acme.Challenge) err
 		s.txtRecordsMu.Lock()
 		delete(s.txtRecords, dnsName)
 		s.txtRecordsMu.Unlock()
-
-		// always do this last - but always do it!
-		activeDNSChallenges.Unlock(dnsName)
 	}()
 
 	// recall the record we created and zone we looked up
@@ -380,47 +370,6 @@ type dnsPresentMemory struct {
 type ACMEDNSProvider interface {
 	libdns.RecordAppender
 	libdns.RecordDeleter
-}
-
-// activeDNSChallenges synchronizes DNS challenges for
-// names to ensure that challenges for the same ACME
-// DNS name do not overlap; for example, the TXT record
-// to make for both example.com and *.example.com are
-// the same; thus we cannot solve them concurrently.
-var activeDNSChallenges = newMapMutex()
-
-// mapMutex implements named mutexes.
-type mapMutex struct {
-	cond *sync.Cond
-	set  map[interface{}]struct{}
-}
-
-func newMapMutex() *mapMutex {
-	return &mapMutex{
-		cond: sync.NewCond(new(sync.Mutex)),
-		set:  make(map[interface{}]struct{}),
-	}
-}
-
-func (mmu *mapMutex) Lock(key interface{}) {
-	mmu.cond.L.Lock()
-	defer mmu.cond.L.Unlock()
-	for mmu.locked(key) {
-		mmu.cond.Wait()
-	}
-	mmu.set[key] = struct{}{}
-}
-
-func (mmu *mapMutex) Unlock(key interface{}) {
-	mmu.cond.L.Lock()
-	defer mmu.cond.L.Unlock()
-	delete(mmu.set, key)
-	mmu.cond.Broadcast()
-}
-
-func (mmu *mapMutex) locked(key interface{}) (ok bool) {
-	_, ok = mmu.set[key]
-	return
 }
 
 // distributedSolver allows the ACME HTTP-01 and TLS-ALPN challenges
