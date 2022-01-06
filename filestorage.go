@@ -17,8 +17,10 @@ package certmagic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"log"
 	"os"
@@ -31,19 +33,50 @@ import (
 // FileStorage facilitates forming file paths derived from a root
 // directory. It is used to get file paths in a consistent,
 // cross-platform way or persisting ACME assets on the file system.
+// The presence of a lock file for a given key indicates a lock
+// is held and is thus unavailable.
+//
+// Locks are created atomically by relying on the file system to
+// enforce the O_EXCL flag. Acquirers that are forcefully terminated
+// will not have a chance to clean up their locks before they exit,
+// so locks may become stale. That is why, while a lock is actively
+// held, the contents of the lockfile are updated with the current
+// timestamp periodically. If another instance tries to acquire the
+// lock but fails, it can see if the timestamp within is still fresh.
+// If so, it patiently waits by polling occasionally. Otherwise,
+// the stale lockfile is deleted, essentially forcing an unlock.
+//
+// While locking is atomic, unlocking is not perfectly atomic. File
+// systems offer native atomic operations when creating files, but
+// not necessarily when deleting them. It is theoretically possible
+// for two instances to discover the same stale lock and both proceed
+// to delete it, but if one instance is able to delete the lockfile
+// and create a new one before the other one calls delete, then the
+// new lock file created by the first instance will get deleted by
+// mistake. This does mean that mutual exclusion is not guaranteed
+// to be perfectly enforced in the presence of stale locks. One
+// alternative is to lock the unlock operation by using ".unlock"
+// files; and we did this for some time, but those files themselves
+// may become stale, leading applications into infinite loops if
+// they always expect the unlock file to be deleted by the instance
+// that created it. We instead prefer the simpler solution that
+// implies imperfect mutual exclusion if locks become stale, but
+// that is probably less severe a consequence than infinite loops.
+//
+// See https://github.com/caddyserver/caddy/issues/4448 for discussion.
 type FileStorage struct {
 	Path string
 }
 
-// Exists returns true if key exists in fs.
-func (fs *FileStorage) Exists(key string) bool {
-	_, err := os.Stat(fs.Filename(key))
+// Exists returns true if key exists in s.
+func (s *FileStorage) Exists(key string) bool {
+	_, err := os.Stat(s.Filename(key))
 	return !os.IsNotExist(err)
 }
 
 // Store saves value at key.
-func (fs *FileStorage) Store(key string, value []byte) error {
-	filename := fs.Filename(key)
+func (s *FileStorage) Store(key string, value []byte) error {
+	filename := s.Filename(key)
 	err := os.MkdirAll(filepath.Dir(filename), 0700)
 	if err != nil {
 		return err
@@ -52,8 +85,8 @@ func (fs *FileStorage) Store(key string, value []byte) error {
 }
 
 // Load retrieves the value at key.
-func (fs *FileStorage) Load(key string) ([]byte, error) {
-	contents, err := ioutil.ReadFile(fs.Filename(key))
+func (s *FileStorage) Load(key string) ([]byte, error) {
+	contents, err := ioutil.ReadFile(s.Filename(key))
 	if os.IsNotExist(err) {
 		return nil, ErrNotExist(err)
 	}
@@ -61,8 +94,8 @@ func (fs *FileStorage) Load(key string) ([]byte, error) {
 }
 
 // Delete deletes the value at key.
-func (fs *FileStorage) Delete(key string) error {
-	err := os.Remove(fs.Filename(key))
+func (s *FileStorage) Delete(key string) error {
+	err := os.Remove(s.Filename(key))
 	if os.IsNotExist(err) {
 		return ErrNotExist(err)
 	}
@@ -70,9 +103,9 @@ func (fs *FileStorage) Delete(key string) error {
 }
 
 // List returns all keys that match prefix.
-func (fs *FileStorage) List(prefix string, recursive bool) ([]string, error) {
+func (s *FileStorage) List(prefix string, recursive bool) ([]string, error) {
 	var keys []string
-	walkPrefix := fs.Filename(prefix)
+	walkPrefix := s.Filename(prefix)
 
 	err := filepath.Walk(walkPrefix, func(fpath string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -101,8 +134,8 @@ func (fs *FileStorage) List(prefix string, recursive bool) ([]string, error) {
 }
 
 // Stat returns information about key.
-func (fs *FileStorage) Stat(key string) (KeyInfo, error) {
-	fi, err := os.Stat(fs.Filename(key))
+func (s *FileStorage) Stat(key string) (KeyInfo, error) {
+	fi, err := os.Stat(s.Filename(key))
 	if os.IsNotExist(err) {
 		return KeyInfo{}, ErrNotExist(err)
 	}
@@ -118,15 +151,15 @@ func (fs *FileStorage) Stat(key string) (KeyInfo, error) {
 }
 
 // Filename returns the key as a path on the file
-// system prefixed by fs.Path.
-func (fs *FileStorage) Filename(key string) string {
-	return filepath.Join(fs.Path, filepath.FromSlash(key))
+// system prefixed by s.Path.
+func (s *FileStorage) Filename(key string) string {
+	return filepath.Join(s.Path, filepath.FromSlash(key))
 }
 
 // Lock obtains a lock named by the given key. It blocks
 // until the lock can be obtained or an error is returned.
-func (fs *FileStorage) Lock(ctx context.Context, key string) error {
-	filename := fs.lockFilename(key)
+func (s *FileStorage) Lock(ctx context.Context, key string) error {
+	filename := s.lockFilename(key)
 
 	for {
 		err := createLockfile(filename)
@@ -161,10 +194,18 @@ func (fs *FileStorage) Lock(ctx context.Context, key string) error {
 			return fmt.Errorf("accessing lock file: %v", err)
 
 		case fileLockIsStale(meta):
-			// lock file is stale - delete it and try again to create one
+			// lock file is stale - delete it and try again to obtain lock
+			// (NOTE: locking becomes imperfect if lock files are stale; known solutions
+			// either have potential to cause infinite loops, as in caddyserver/caddy#4448,
+			// or must give up on perfect mutual exclusivity; however, these cases are rare,
+			// so we prefer the simpler solution that avoids infinite loops)
 			log.Printf("[INFO][%s] Lock for '%s' is stale (created: %s, last update: %s); removing then retrying: %s",
-				fs, key, meta.Created, meta.Updated, filename)
-			removeLockfile(filename)
+				s, key, meta.Created, meta.Updated, filename)
+			if err = os.Remove(filename); err != nil { // hopefully we can replace the lock file quickly!
+				if !errors.Is(err, fs.ErrNotExist) {
+					return fmt.Errorf("unable to delete stale lock; deadlocked: %w", err)
+				}
+			}
 			continue
 
 		default:
@@ -181,20 +222,20 @@ func (fs *FileStorage) Lock(ctx context.Context, key string) error {
 }
 
 // Unlock releases the lock for name.
-func (fs *FileStorage) Unlock(key string) error {
-	return removeLockfile(fs.lockFilename(key))
+func (s *FileStorage) Unlock(key string) error {
+	return os.Remove(s.lockFilename(key))
 }
 
-func (fs *FileStorage) String() string {
-	return "FileStorage:" + fs.Path
+func (s *FileStorage) String() string {
+	return "FileStorage:" + s.Path
 }
 
-func (fs *FileStorage) lockFilename(key string) string {
-	return filepath.Join(fs.lockDir(), StorageKeys.Safe(key)+".lock")
+func (s *FileStorage) lockFilename(key string) string {
+	return filepath.Join(s.lockDir(), StorageKeys.Safe(key)+".lock")
 }
 
-func (fs *FileStorage) lockDir() string {
-	return filepath.Join(fs.Path, "locks")
+func (s *FileStorage) lockDir() string {
+	return filepath.Join(s.Path, "locks")
 }
 
 func fileLockIsStale(meta lockMeta) bool {
@@ -219,29 +260,7 @@ func createLockfile(filename string) error {
 
 	go keepLockfileFresh(filename)
 
-	// if the app crashes in removeLockfile(), there is a
-	// small chance the .unlock file is left behind; it's
-	// safe to simply remove it as it's a guard against
-	// double removal of the .lock file.
-	_ = os.Remove(filename + ".unlock")
 	return nil
-}
-
-// removeLockfile atomically removes filename,
-// which must be a lockfile created by createLockfile.
-// See discussion in PR #7 for more background:
-// https://github.com/caddyserver/certmagic/pull/7
-func removeLockfile(filename string) error {
-	unlockFilename := filename + ".unlock"
-	if err := atomicallyCreateFile(unlockFilename, false); err != nil {
-		if os.IsExist(err) {
-			// another process is handling the unlocking
-			return nil
-		}
-		return err
-	}
-	defer os.Remove(unlockFilename)
-	return os.Remove(filename)
 }
 
 // keepLockfileFresh continuously updates the lock file
@@ -300,7 +319,7 @@ func updateLockfileFreshness(filename string) (bool, error) {
 	if err := f.Truncate(0); err != nil {
 		return true, err
 	}
-	if _, err := f.Seek(0, 0); err != nil {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return true, err
 	}
 
