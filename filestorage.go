@@ -64,6 +64,8 @@ import (
 // that is probably less severe a consequence than infinite loops.
 //
 // See https://github.com/caddyserver/caddy/issues/4448 for discussion.
+// See commit 468bfd25e452196b140148928cdd1f1a2285ae4b for where we
+// switched away from using .unlock files.
 type FileStorage struct {
 	Path string
 }
