@@ -249,6 +249,33 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 		return cert, nil
 	}
 
+	// If a custom GetCertificate is configured, use that to get the
+	// certificate rather than our own "automagic" management logic.
+	// Only continue to use our own logic if it returns nil+nil.
+	if cfg.CustomGetCertificate != nil {
+		upstreamCert, err := cfg.CustomGetCertificate(hello)
+		if err != nil {
+			return Certificate{}, fmt.Errorf("custom GetCertificate: %s: %v", hello.ServerName, err)
+		}
+		if upstreamCert != nil {
+			var cert Certificate
+			err = fillCertFromLeaf(&cert, *upstreamCert)
+			if err != nil {
+				return Certificate{}, fmt.Errorf("custom GetCertificate: %s: filling cert from leaf: %v", hello.ServerName, err)
+			}
+			if log != nil {
+				log.Debug("using custom certificate",
+					zap.String("sni", hello.ServerName),
+					zap.Strings("names", cert.Names),
+					zap.Time("expiration", cert.Leaf.NotAfter))
+			}
+			return cert, nil
+		}
+		if log != nil {
+			log.Debug("custom GetCertificate yielded no certificate and no error", zap.String("sni", hello.ServerName))
+		}
+	}
+
 	name := cfg.getNameFromClientHello(hello)
 
 	// We might be able to load or obtain a needed certificate. Load from
