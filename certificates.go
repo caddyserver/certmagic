@@ -54,6 +54,12 @@ type Certificate struct {
 	issuerKey string
 }
 
+// Empty returns true if the certificate struct is not filled out; at
+// least the tls.Certificate.Certificate field is expected to be set.
+func (cert Certificate) Empty() bool {
+	return len(cert.Certificate.Certificate) == 0
+}
+
 // NeedsRenewal returns true if the certificate is
 // expiring soon (according to cfg) or has expired.
 func (cert Certificate) NeedsRenewal(cfg *Config) bool {

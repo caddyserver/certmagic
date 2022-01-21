@@ -262,6 +262,21 @@ type OnDemandConfig struct {
 	// request will be denied.
 	DecisionFunc func(name string) error
 
+	// CustomGetCertificate is an optional override for
+	// CertMagic's built-in GetCertificate for this
+	// config. If set, it will be called at every TLS
+	// handshake. If it returns a nil certificate and
+	// nil error, CertMagic's own GetCertificate will
+	// still continue as normal. Otherwise, the cert
+	// or error returned from this function will be used.
+	// If true is the middle return value, the certificate
+	// will be cached until close to expiration and reused
+	// until then; otherwise it will not be cached.
+	// Setting this field will not interrupt ACME TLS-ALPN
+	// challenge handshakes.
+	// TODO: EXPERIMENTAL: subject to change and/or removal.
+	CustomGetCertificate func(*tls.ClientHelloInfo) (*tls.Certificate, bool, error)
+
 	// List of whitelisted hostnames (SNI values) for
 	// deferred (on-demand) obtaining of certificates.
 	// Used only by higher-level functions in this

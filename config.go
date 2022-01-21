@@ -87,19 +87,6 @@ type Config struct {
 	// be used.
 	CertSelection CertificateSelector
 
-	// CustomGetCertificate is an optional override for
-	// CertMagic's built-in GetCertificate for this
-	// config. If set, it will be called at every TLS
-	// handshake. If it returns a nil certificate and
-	// nil error, CertMagic's own GetCertificate will
-	// still continue as normal. Otherwise, the cert
-	// or error returned from this function will be used.
-	// Certs returned from this function are not cached,
-	// so implementations must do their own caching.
-	// Setting this field will not interrupt ACME TLS-ALPN
-	// challenge handshakes.
-	CustomGetCertificate func(*tls.ClientHelloInfo) (*tls.Certificate, error)
-
 	// OCSP configures how OCSP is handled. By default,
 	// OCSP responses are fetched for every certificate
 	// with a responder URL, and cached on disk. Changing
