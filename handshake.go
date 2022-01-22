@@ -600,7 +600,7 @@ func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCe
 		defer cancel()
 
 		// if a custom GetCertificate is specified, just use that
-		if cfg.OnDemand.CustomGetCertificate != nil {
+		if cfg.OnDemand != nil && cfg.OnDemand.CustomGetCertificate != nil {
 			return cfg.getCertFromCustomGetCertificate(hello, log, currentCert)
 		}
 
@@ -666,6 +666,7 @@ func (cfg *Config) getCertFromCustomGetCertificate(hello *tls.ClientHelloInfo, l
 	if err != nil {
 		return Certificate{}, fmt.Errorf("custom GetCertificate: %s: filling cert from leaf: %v", hello.ServerName, err)
 	}
+	cert.managed = true // allows handshake-time maintenance/"renewal" later on
 
 	if log != nil {
 		log.Debug("using custom certificate",
