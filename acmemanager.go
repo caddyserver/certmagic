@@ -229,6 +229,37 @@ func (am *ACMEManager) PreCheck(_ context.Context, names []string, interactive b
 	return am.getEmail(interactive)
 }
 
+func (am *ACMEManager) CheckAccountTOS(ctx context.Context, useTestCA, interactive bool) error {
+	initialAMAgreed := am.Agreed
+	client, err := am.newACMEClientWithAccount(ctx, useTestCA, interactive)
+	if err != nil {
+		return err
+	}
+	// override the default logic when creating new account in newACMEClient
+	if !interactive && !initialAMAgreed && am.Agreed {
+		am.Agreed = false
+		account := client.account
+		account.TermsOfServiceAgreed = false
+		err = am.saveAccount(client.acmeClient.Directory, account)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("initialized account non-interactively, but TOS was not accepted")
+	}
+	if !client.account.TermsOfServiceAgreed {
+		var termsURL string
+		dir, err := client.acmeClient.GetDirectory(ctx)
+		if err != nil {
+			return err
+		}
+		if dir.Meta != nil {
+			termsURL = dir.Meta.TermsOfService
+		}
+		return fmt.Errorf("cached account does not accept CA's TOS [%s]", termsURL)
+	}
+	return nil
+}
+
 // Issue implements the Issuer interface. It obtains a certificate for the given csr using
 // the ACME configuration am.
 func (am *ACMEManager) Issue(ctx context.Context, csr *x509.CertificateRequest) (*IssuedCertificate, error) {
