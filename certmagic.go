@@ -275,7 +275,7 @@ type OnDemandConfig struct {
 	// Setting this field will not interrupt ACME TLS-ALPN
 	// challenge handshakes.
 	// TODO: EXPERIMENTAL: subject to change and/or removal.
-	CustomGetCertificate func(*tls.ClientHelloInfo) (*tls.Certificate, bool, error)
+	CustomGetCertificate CertificateGetter
 
 	// List of whitelisted hostnames (SNI values) for
 	// deferred (on-demand) obtaining of certificates.
@@ -294,6 +294,18 @@ type OnDemandConfig struct {
 	// have their run of any domain names they want.
 	// Only enforced if len > 0.
 	hostWhitelist []string
+}
+
+// CertificateGetter is a type that can get a certificate during
+// every TLS handshake (so it should be as fast as possible).
+// TODO: This is an EXPERIMENTAL API. It is subject to change/removal.
+type CertificateGetter interface {
+	// GetCertificate returns the certificate to use to complete the handshake,
+	// and true if CertMagic should cache and reuse the certificate until close to
+	// expiration, or false if it should not be cached. It returns nil+false+nil
+	// if there is no certificate available (but no error to speak of, either),
+	// and normal certificate logic will continue.
+	GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, bool, error)
 }
 
 func (o *OnDemandConfig) whitelistContains(name string) bool {
