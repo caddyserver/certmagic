@@ -190,10 +190,14 @@ func TestMatchWildcard(t *testing.T) {
 		expect            bool
 	}{
 		{"hostname", "hostname", true},
+		{"HOSTNAME", "hostname", true},
+		{"hostname", "HOSTNAME", true},
 		{"foo.localhost", "foo.localhost", true},
 		{"foo.localhost", "bar.localhost", false},
 		{"foo.localhost", "*.localhost", true},
 		{"bar.localhost", "*.localhost", true},
+		{"FOO.LocalHost", "*.localhost", true},
+		{"Bar.localhost", "*.LOCALHOST", true},
 		{"foo.bar.localhost", "*.localhost", false},
 		{".localhost", "*.localhost", false},
 		{"foo.localhost", "foo.*", false},

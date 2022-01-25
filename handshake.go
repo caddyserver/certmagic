@@ -650,7 +650,7 @@ func (cfg *Config) renewDynamicCertificate(hello *tls.ClientHelloInfo, currentCe
 // It turns the result (if any) into a filled-in Certificate value, and adds it to the cache if
 // applicable (replacing oldCert, if non-empty).
 func (cfg *Config) getCertFromCustomGetCertificate(hello *tls.ClientHelloInfo, log *zap.Logger, oldCert Certificate) (Certificate, error) {
-	upstreamCert, addToCache, err := cfg.OnDemand.CustomGetCertificate.GetCertificate(hello)
+	upstreamCert, addToCache, err := cfg.OnDemand.CustomGetCertificate.GetCertificate(context.Background(), hello)
 	if err != nil {
 		return Certificate{}, fmt.Errorf("custom GetCertificate: %s: %v", hello.ServerName, err)
 	}

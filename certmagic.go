@@ -305,7 +305,7 @@ type CertificateGetter interface {
 	// expiration, or false if it should not be cached. It returns nil+false+nil
 	// if there is no certificate available (but no error to speak of, either),
 	// and normal certificate logic will continue.
-	GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, bool, error)
+	GetCertificate(context.Context, *tls.ClientHelloInfo) (*tls.Certificate, bool, error)
 }
 
 func (o *OnDemandConfig) whitelistContains(name string) bool {
