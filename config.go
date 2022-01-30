@@ -490,7 +490,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			if err != nil {
 				return err
 			}
-			privKeyPEM, err = encodePrivateKey(privKey)
+			privKeyPEM, err = PEMEncodePrivateKey(privKey)
 			if err != nil {
 				return err
 			}
@@ -596,7 +596,7 @@ func (cfg *Config) reusePrivateKey(domain string) (privKey crypto.PrivateKey, pr
 		}
 
 		// we loaded a private key; try decoding it so we can use it
-		privKey, err = decodePrivateKey(privKeyPEM)
+		privKey, err = PEMDecodePrivateKey(privKeyPEM)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -713,7 +713,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 				zap.Duration("remaining", timeLeft))
 		}
 
-		privateKey, err := decodePrivateKey(certRes.PrivateKeyPEM)
+		privateKey, err := PEMDecodePrivateKey(certRes.PrivateKeyPEM)
 		if err != nil {
 			return err
 		}
