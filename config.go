@@ -370,7 +370,7 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 			return fmt.Errorf("%s: renewing certificate: %w", domainName, err)
 		}
 		// successful renewal, so update in-memory cache
-		err = cfg.reloadManagedCertificate(cert)
+		_, err = cfg.reloadManagedCertificate(cert)
 		if err != nil {
 			return fmt.Errorf("%s: reloading renewed certificate into memory: %v", domainName, err)
 		}

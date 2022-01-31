@@ -191,7 +191,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 		cfg := configs[oldCert.Names[0]]
 
 		// crucially, this happens OUTSIDE a lock on the certCache
-		err := cfg.reloadManagedCertificate(oldCert)
+		_, err := cfg.reloadManagedCertificate(oldCert)
 		if err != nil {
 			if log != nil {
 				log.Error("loading renewed certificate",
@@ -264,7 +264,7 @@ func (certCache *Cache) queueRenewalTask(ctx context.Context, oldCert Certificat
 
 		// successful renewal, so update in-memory cache by loading
 		// renewed certificate so it will be used with handshakes
-		err = cfg.reloadManagedCertificate(oldCert)
+		_, err = cfg.reloadManagedCertificate(oldCert)
 		if err != nil {
 			return ErrNoRetry{fmt.Errorf("%v %v", oldCert.Names, err)}
 		}
@@ -372,7 +372,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		}
 
 		// If a managed certificate was revoked, we should attempt to replace it with a new one.
-		if cert.managed && ocspResp.Status == ocsp.Revoked && len(cert.Names) > 0 {
+		if certShouldBeForceRenewed(cert, ocspResp) {
 			renewQueue = append(renewQueue, renewQueueEntry{
 				oldCert:  cert,
 				ocspResp: ocspResp,
@@ -395,7 +395,12 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	// Crucially, this happens OUTSIDE a lock on the certCache.
 	for _, renew := range renewQueue {
 		cfg := configs[renew.oldCert.Names[0]]
-		cfg.forceRenewIfCertRevoked(ctx, logger, renew.oldCert, renew.ocspResp)
+		_, err := cfg.forceRenew(ctx, logger, renew.oldCert, renew.ocspResp)
+		if err != nil && logger != nil {
+			logger.Info("forcefully renewing certificate due to REVOKED status",
+				zap.Strings("identifiers", renew.oldCert.Names),
+				zap.Error(err))
+		}
 	}
 }
 
@@ -543,18 +548,22 @@ func deleteExpiredCerts(ctx context.Context, storage Storage, gracePeriod time.D
 	return nil
 }
 
-// forceRenewIfCertRevoked forcefully renews cert if ocspResp has a status of Revoked. (It is a no-op otherwise.)
-// Due to nuances with error handling, any errors are logged with the provided logger rather than returned.
-// This MUST NOT be called within a lock on cfg.certCacheMu.
-func (cfg *Config) forceRenewIfCertRevoked(ctx context.Context, logger *zap.Logger, cert Certificate, ocspResp *ocsp.Response) {
-	if !cert.managed || ocspResp.Status != ocsp.Revoked || len(cert.Names) == 0 {
-		return
-	}
-
+// forceRenew forcefully renews cert and replaces it in the cache, and returns the new certificate. It is
+// intended for use primarily in the case of cert revocation. The latest OCSP response must be passed in,
+// since stapleOCSP() only staples Good responses to a Certificate. This MUST NOT be called within a lock
+// on cfg.certCacheMu.
+func (cfg *Config) forceRenew(ctx context.Context, logger *zap.Logger, cert Certificate, ocspResp *ocsp.Response) (Certificate, error) {
 	if logger != nil {
-		logger.Warn("OCSP status for managed certificate is REVOKED; attempting to replace with new certificate",
-			zap.Strings("identifiers", cert.Names),
-			zap.Time("expiration", cert.Leaf.NotAfter))
+		if ocspResp.Status == ocsp.Revoked {
+			logger.Warn("OCSP status for managed certificate is REVOKED; attempting to replace with new certificate",
+				zap.Strings("identifiers", cert.Names),
+				zap.Time("expiration", cert.Leaf.NotAfter))
+		} else {
+			logger.Warn("forcefully renewing certificate",
+				zap.Strings("identifiers", cert.Names),
+				zap.Time("expiration", cert.Leaf.NotAfter),
+				zap.Int("ocsp_status", ocspResp.Status))
+		}
 	}
 
 	renewName := cert.Names[0]
@@ -588,26 +597,21 @@ func (cfg *Config) forceRenewIfCertRevoked(ctx context.Context, logger *zap.Logg
 		err = cfg.RenewCertAsync(ctx, renewName, true)
 	}
 	if err != nil {
-		// probably better to not serve a revoked certificate at all
-		if logger != nil {
-			logger.Error("unable to obtain new to certificate after OCSP status of REVOKED; removing from cache",
-				zap.Strings("identifiers", cert.Names),
-				zap.Error(err))
+		if ocspResp.Status == ocsp.Revoked {
+			// probably better to not serve a revoked certificate at all
+			if logger != nil {
+				logger.Error("unable to obtain new to certificate after OCSP status of REVOKED; removing from cache",
+					zap.Strings("identifiers", cert.Names),
+					zap.Error(err))
+			}
+			cfg.certCache.mu.Lock()
+			cfg.certCache.removeCertificate(cert)
+			cfg.certCache.mu.Unlock()
 		}
-		cfg.certCache.mu.Lock()
-		cfg.certCache.removeCertificate(cert)
-		cfg.certCache.mu.Unlock()
-		return
+		return cert, fmt.Errorf("unable to forcefully get new certificate for %v: %w", cert.Names, err)
 	}
-	err = cfg.reloadManagedCertificate(cert)
-	if err != nil {
-		if logger != nil {
-			logger.Error("after obtaining new certificate due to OCSP status of REVOKED",
-				zap.Strings("identifiers", cert.Names),
-				zap.Error(err))
-		}
-		return
-	}
+
+	return cfg.reloadManagedCertificate(cert)
 }
 
 // moveCompromisedPrivateKey moves the private key for cert to a ".compromised" file
@@ -639,6 +643,12 @@ func (cfg *Config) moveCompromisedPrivateKey(cert Certificate, logger *zap.Logge
 		zap.String("issuer", cert.issuerKey))
 
 	return nil
+}
+
+// certShouldBeForceRenewed returns true if cert should be forcefully renewed
+// according to ocspResp (i.e. if it is Revoked).
+func certShouldBeForceRenewed(cert Certificate, ocspResp *ocsp.Response) bool {
+	return cert.managed && len(cert.Names) > 0 && ocspResp.Status == ocsp.Revoked
 }
 
 const (

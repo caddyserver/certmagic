@@ -310,17 +310,17 @@ func (cfg *Config) managedCertInStorageExpiresSoon(cert Certificate) (bool, erro
 // on oldCert into the cache, from storage. This also replaces the old certificate
 // with the new one, so that all configurations that used the old cert now point
 // to the new cert. It assumes that the new certificate for oldCert.Names[0] is
-// already in storage.
-func (cfg *Config) reloadManagedCertificate(oldCert Certificate) error {
+// already in storage. It returns the newly-loaded certificate if successful.
+func (cfg *Config) reloadManagedCertificate(oldCert Certificate) (Certificate, error) {
 	if cfg.Logger != nil {
 		cfg.Logger.Info("reloading managed certificate", zap.Strings("identifiers", oldCert.Names))
 	}
 	newCert, err := cfg.loadManagedCertificate(oldCert.Names[0])
 	if err != nil {
-		return fmt.Errorf("loading managed certificate for %v from storage: %v", oldCert.Names, err)
+		return Certificate{}, fmt.Errorf("loading managed certificate for %v from storage: %v", oldCert.Names, err)
 	}
 	cfg.certCache.replaceCertificate(oldCert, newCert)
-	return nil
+	return newCert, nil
 }
 
 // SubjectQualifiesForCert returns true if subj is a name which,
