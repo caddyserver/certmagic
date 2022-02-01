@@ -293,14 +293,15 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		cert           Certificate
 		certHash       string
 		lastNextUpdate time.Time
+		cfg            *Config
 	}
 	type renewQueueEntry struct {
 		oldCert Certificate
+		cfg     *Config
 	}
 	updated := make(map[string]ocspUpdate)
 	var updateQueue []updateQueueEntry // certs that need a refreshed staple
 	var renewQueue []renewQueueEntry   // certs that need to be renewed (due to revocation)
-	configs := make(map[string]*Config)
 
 	// obtain brief read lock during our scan to see which staples need updating
 	certCache.mu.RLock()
@@ -309,11 +310,20 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		if cert.Leaf == nil || cert.Expired() {
 			continue
 		}
-		// always try to replace revoked certificates, even if status is fresh
-		// TODO: set the config here... hmm.
+		cfg, err := certCache.getConfig(cert)
+		if err != nil {
+			if logger != nil {
+				logger.Error("unable to get automation config for certificate; maintenance for this certificate will likely fail",
+					zap.Strings("identifiers", cert.Names),
+					zap.Error(err))
+			}
+			continue
+		}
+		// always try to replace revoked certificates, even if OCSP response is still fresh
 		if certShouldBeForceRenewed(cert) {
 			renewQueue = append(renewQueue, renewQueueEntry{
 				oldCert: cert,
+				cfg:     cfg,
 			})
 			continue
 		}
@@ -322,10 +332,11 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		if cert.ocsp != nil {
 			lastNextUpdate = cert.ocsp.NextUpdate
 			if cert.ocsp.Status != ocsp.Unknown && freshOCSP(cert.ocsp) {
-				continue // no need to update staple if ours is still fresh
+				// no need to update our staple if still fresh and not Unknown
+				continue
 			}
 		}
-		updateQueue = append(updateQueue, updateQueueEntry{cert, certHash, lastNextUpdate})
+		updateQueue = append(updateQueue, updateQueueEntry{cert, certHash, lastNextUpdate, cfg})
 	}
 	certCache.mu.RUnlock()
 
@@ -335,16 +346,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		certHash := qe.certHash
 		lastNextUpdate := qe.lastNextUpdate
 
-		cfg, err := certCache.getConfig(cert)
-		if err != nil {
-			if logger != nil {
-				logger.Error("unable to refresh OCSP staple because getting automation config for certificate failed",
-					zap.Strings("identifiers", cert.Names),
-					zap.Error(err))
-			}
-			continue
-		}
-		if cfg == nil {
+		if qe.cfg == nil {
 			// this is bad if this happens, probably a programmer error (oops)
 			if logger != nil {
 				logger.Error("no configuration associated with certificate; unable to manage OCSP staples",
@@ -353,7 +355,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 			continue
 		}
 
-		err = stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
+		err := stapleOCSP(qe.cfg.OCSP, qe.cfg.Storage, &cert, nil)
 		if err != nil {
 			if cert.ocsp != nil {
 				// if there was no staple before, that's fine; otherwise we should log the error
@@ -380,13 +382,12 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 			updated[certHash] = ocspUpdate{rawBytes: cert.Certificate.OCSPStaple, parsed: cert.ocsp}
 		}
 
-		// If a managed certificate was revoked, we should attempt to replace
-		// it with a new one.
+		// If the updated staple shows that the certificate was revoked, we should immediately renew it
 		if certShouldBeForceRenewed(cert) {
 			renewQueue = append(renewQueue, renewQueueEntry{
 				oldCert: cert,
+				cfg:     qe.cfg,
 			})
-			configs[cert.Names[0]] = cfg
 		}
 	}
 
@@ -403,8 +404,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	// We attempt to replace any certificates that were revoked.
 	// Crucially, this happens OUTSIDE a lock on the certCache.
 	for _, renew := range renewQueue {
-		cfg := configs[renew.oldCert.Names[0]]
-		_, err := cfg.forceRenew(ctx, logger, renew.oldCert)
+		_, err := renew.cfg.forceRenew(ctx, logger, renew.oldCert)
 		if err != nil && logger != nil {
 			logger.Info("forcefully renewing certificate due to REVOKED status",
 				zap.Strings("identifiers", renew.oldCert.Names),
