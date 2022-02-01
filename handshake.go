@@ -295,7 +295,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 			loadedCert, err = cfg.handshakeMaintenance(ctx, hello, loadedCert)
 			if err != nil {
 				if log != nil {
-					log.Error("maintining newly-loaded certificate",
+					log.Error("maintaining newly-loaded certificate",
 						zap.String("server_name", name),
 						zap.Error(err))
 				}
@@ -472,6 +472,14 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 
 	// Check OCSP staple validity
 	if cert.ocsp != nil && !freshOCSP(cert.ocsp) {
+		if log != nil {
+			log.Debug("OCSP response needs refreshing",
+				zap.Strings("identifiers", cert.Names),
+				zap.Int("ocsp_status", cert.ocsp.Status),
+				zap.Time("this_update", cert.ocsp.ThisUpdate),
+				zap.Time("next_update", cert.ocsp.NextUpdate))
+		}
+
 		err := stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
 		if err != nil {
 			// An error with OCSP stapling is not the end of the world, and in fact, is
@@ -481,18 +489,34 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 					zap.String("server_name", hello.ServerName),
 					zap.Error(err))
 			}
+		} else if log != nil {
+			if log != nil {
+				log.Debug("successfully stapled new OCSP response",
+					zap.Strings("identifiers", cert.Names),
+					zap.Int("ocsp_status", cert.ocsp.Status),
+					zap.Time("this_update", cert.ocsp.ThisUpdate),
+					zap.Time("next_update", cert.ocsp.NextUpdate))
+			}
 		}
 
 		// our copy of cert has the new OCSP staple, so replace it in the cache
 		cfg.certCache.mu.Lock()
 		cfg.certCache.cache[cert.hash] = cert
 		cfg.certCache.mu.Unlock()
+	}
 
-		// We attempt to replace any certificates that were revoked.
-		// Crucially, this happens OUTSIDE a lock on the certCache.
-		if certShouldBeForceRenewed(cert) {
-			return cfg.renewDynamicCertificate(ctx, hello, cert)
+	// We attempt to replace any certificates that were revoked.
+	// Crucially, this happens OUTSIDE a lock on the certCache.
+	if certShouldBeForceRenewed(cert) {
+		if log != nil {
+			log.Warn("on-demand certificate's OCSP status is REVOKED; will try to forcefully renew",
+				zap.Strings("identifiers", cert.Names),
+				zap.Int("ocsp_status", cert.ocsp.Status),
+				zap.Time("revoked_at", cert.ocsp.RevokedAt),
+				zap.Time("this_update", cert.ocsp.ThisUpdate),
+				zap.Time("next_update", cert.ocsp.NextUpdate))
 		}
+		return cfg.renewDynamicCertificate(ctx, hello, cert)
 	}
 
 	// Check cert expiration
