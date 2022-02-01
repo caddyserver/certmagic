@@ -295,7 +295,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 			loadedCert, err = cfg.handshakeMaintenance(ctx, hello, loadedCert)
 			if err != nil {
 				if log != nil {
-					log.Error("maintining newly-loaded certificate",
+					log.Error("maintaining newly-loaded certificate",
 						zap.String("server_name", name),
 						zap.Error(err))
 				}
@@ -471,6 +471,9 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 	log := loggerNamed(cfg.Logger, "on_demand")
 
 	// Check OCSP staple validity
+	if log != nil {
+		log.Debug("checking OCSP", zap.Strings("identifiers", cert.Names), zap.Any("ocsp", cert.ocsp))
+	}
 	if cert.ocsp != nil && !freshOCSP(cert.ocsp) {
 		err := stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
 		if err != nil {
@@ -481,6 +484,8 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 					zap.String("server_name", hello.ServerName),
 					zap.Error(err))
 			}
+		} else if log != nil {
+			log.Debug("stapled OCSP", zap.Strings("identifiers", cert.Names), zap.Int("status", cert.ocsp.Status), zap.Bool("fresh_ocsp", freshOCSP(cert.ocsp)), zap.Any("next_update", cert.ocsp.NextUpdate))
 		}
 
 		// our copy of cert has the new OCSP staple, so replace it in the cache
@@ -491,6 +496,9 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 		// We attempt to replace any certificates that were revoked.
 		// Crucially, this happens OUTSIDE a lock on the certCache.
 		if certShouldBeForceRenewed(cert) {
+			if log != nil {
+				log.Debug("cert should be force-renewed", zap.Strings("identifiers", cert.Names))
+			}
 			return cfg.renewDynamicCertificate(ctx, hello, cert)
 		}
 	}
