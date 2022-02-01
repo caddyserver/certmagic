@@ -492,15 +492,15 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 		cfg.certCache.mu.Lock()
 		cfg.certCache.cache[cert.hash] = cert
 		cfg.certCache.mu.Unlock()
+	}
 
-		// We attempt to replace any certificates that were revoked.
-		// Crucially, this happens OUTSIDE a lock on the certCache.
-		if certShouldBeForceRenewed(cert) {
-			if log != nil {
-				log.Debug("cert should be force-renewed", zap.Strings("identifiers", cert.Names))
-			}
-			return cfg.renewDynamicCertificate(ctx, hello, cert)
+	// We attempt to replace any certificates that were revoked.
+	// Crucially, this happens OUTSIDE a lock on the certCache.
+	if certShouldBeForceRenewed(cert) {
+		if log != nil {
+			log.Debug("cert should be force-renewed", zap.Strings("identifiers", cert.Names))
 		}
+		return cfg.renewDynamicCertificate(ctx, hello, cert)
 	}
 
 	// Check cert expiration
