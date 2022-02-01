@@ -35,6 +35,7 @@ import (
 	"github.com/mholt/acmez"
 	"github.com/mholt/acmez/acme"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ocsp"
 	"golang.org/x/net/idna"
 )
 
@@ -358,33 +359,41 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 		return obtain()
 	}
 
-	// for an existing certificate, make sure it is renewed
+	// for an existing certificate, make sure it is renewed; or if it is revoked,
+	// force a renewal even if it's not expiring
 	renew := func() error {
-		var err error
-		if async {
-			err = cfg.RenewCertAsync(ctx, domainName, false)
-		} else {
-			err = cfg.RenewCertSync(ctx, domainName, false)
+		// first, ensure status is not revoked (it was just refreshed in CacheManagedCertificate above)
+		if !cert.Expired() && cert.ocsp != nil && cert.ocsp.Status == ocsp.Revoked {
+			_, err = cfg.forceRenew(ctx, cfg.Logger, cert)
+			return err
 		}
-		if err != nil {
-			return fmt.Errorf("%s: renewing certificate: %w", domainName, err)
+
+		// otherwise, simply renew the certificate if needed
+		if cert.NeedsRenewal(cfg) {
+			var err error
+			if async {
+				err = cfg.RenewCertAsync(ctx, domainName, false)
+			} else {
+				err = cfg.RenewCertSync(ctx, domainName, false)
+			}
+			if err != nil {
+				return fmt.Errorf("%s: renewing certificate: %w", domainName, err)
+			}
+			// successful renewal, so update in-memory cache
+			_, err = cfg.reloadManagedCertificate(cert)
+			if err != nil {
+				return fmt.Errorf("%s: reloading renewed certificate into memory: %v", domainName, err)
+			}
 		}
-		// successful renewal, so update in-memory cache
-		err = cfg.reloadManagedCertificate(cert)
-		if err != nil {
-			return fmt.Errorf("%s: reloading renewed certificate into memory: %v", domainName, err)
-		}
+
 		return nil
 	}
-	if cert.NeedsRenewal(cfg) {
-		if async {
-			jm.Submit(cfg.Logger, "renew_"+domainName, renew)
-			return nil
-		}
-		return renew()
-	}
 
-	return nil
+	if async {
+		jm.Submit(cfg.Logger, "renew_"+domainName, renew)
+		return nil
+	}
+	return renew()
 }
 
 // Unmanage causes the certificates for domainNames to stop being managed.
