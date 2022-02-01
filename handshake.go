@@ -472,7 +472,7 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 
 	// Check OCSP staple validity
 	if cert.ocsp != nil && !freshOCSP(cert.ocsp) {
-		ocspResp, err := stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
+		err := stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
 		if err != nil {
 			// An error with OCSP stapling is not the end of the world, and in fact, is
 			// quite common considering not all certs have issuer URLs that support it.
@@ -490,14 +490,14 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 
 		// We attempt to replace any certificates that were revoked.
 		// Crucially, this happens OUTSIDE a lock on the certCache.
-		if certShouldBeForceRenewed(cert, ocspResp) {
-			return cfg.renewDynamicCertificate(ctx, hello, cert, ocspResp)
+		if certShouldBeForceRenewed(cert) {
+			return cfg.renewDynamicCertificate(ctx, hello, cert)
 		}
 	}
 
 	// Check cert expiration
 	if currentlyInRenewalWindow(cert.Leaf.NotBefore, cert.Leaf.NotAfter, cfg.RenewalWindowRatio) {
-		return cfg.renewDynamicCertificate(ctx, hello, cert, nil)
+		return cfg.renewDynamicCertificate(ctx, hello, cert)
 	}
 
 	return cert, nil
@@ -510,17 +510,16 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 // and the renewal will happen in the background; otherwise this blocks until the
 // certificate has been renewed, and returns the renewed certificate.
 //
-// If the certificate is being renewed because it was revoked and not because it was
-// expiring, set ocspResp to not nil, and if its status is Revoked, the renewal will be
-// forced.
+// If the certificate's OCSP status (currentCert.ocsp) is Revoked, it will be forcefully
+// renewed even if it is not expiring.
 //
 // This function is safe for use by multiple concurrent goroutines.
-func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.ClientHelloInfo, currentCert Certificate, ocspResp *ocsp.Response) (Certificate, error) {
+func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.ClientHelloInfo, currentCert Certificate) (Certificate, error) {
 	log := loggerNamed(cfg.Logger, "on_demand")
 
 	name := cfg.getNameFromClientHello(hello)
 	timeLeft := time.Until(currentCert.Leaf.NotAfter)
-	revoked := ocspResp != nil && ocspResp.Status == ocsp.Revoked
+	revoked := currentCert.ocsp != nil && currentCert.ocsp.Status == ocsp.Revoked
 
 	getCertWithoutReobtaining := func() (Certificate, error) {
 		// very important to set the obtainIfNecessary argument to false, so we don't repeat this infinitely
@@ -608,7 +607,7 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 		var err error
 
 		if revoked {
-			newCert, err = cfg.forceRenew(ctx, log, currentCert, ocspResp)
+			newCert, err = cfg.forceRenew(ctx, log, currentCert)
 		} else {
 			err = cfg.RenewCertAsync(ctx, name, false)
 			if err == nil {

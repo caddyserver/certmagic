@@ -295,8 +295,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		lastNextUpdate time.Time
 	}
 	type renewQueueEntry struct {
-		oldCert  Certificate
-		ocspResp *ocsp.Response
+		oldCert Certificate
 	}
 	updated := make(map[string]ocspUpdate)
 	var updateQueue []updateQueueEntry // certs that need a refreshed staple
@@ -313,7 +312,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		var lastNextUpdate time.Time
 		if cert.ocsp != nil {
 			lastNextUpdate = cert.ocsp.NextUpdate
-			if freshOCSP(cert.ocsp) {
+			if cert.ocsp.Status != ocsp.Unknown && freshOCSP(cert.ocsp) {
 				continue // no need to update staple if ours is still fresh
 			}
 		}
@@ -345,8 +344,8 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 			continue
 		}
 
-		ocspResp, err := stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
-		if err != nil || ocspResp == nil {
+		err = stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
+		if err != nil {
 			if cert.ocsp != nil {
 				// if there was no staple before, that's fine; otherwise we should log the error
 				if logger != nil {
@@ -360,8 +359,9 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 
 		// By this point, we've obtained the latest OCSP response.
 		// If there was no staple before, or if the response is updated, make
-		// sure we apply the update to all names on the certificate.
-		if cert.ocsp != nil && (lastNextUpdate.IsZero() || lastNextUpdate != cert.ocsp.NextUpdate) {
+		// sure we apply the update to all names on the certificate if
+		// the status is still Good.
+		if cert.ocsp != nil && cert.ocsp.Status == ocsp.Good && (lastNextUpdate.IsZero() || lastNextUpdate != cert.ocsp.NextUpdate) {
 			if logger != nil {
 				logger.Info("advancing OCSP staple",
 					zap.Strings("identifiers", cert.Names),
@@ -371,11 +371,11 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 			updated[certHash] = ocspUpdate{rawBytes: cert.Certificate.OCSPStaple, parsed: cert.ocsp}
 		}
 
-		// If a managed certificate was revoked, we should attempt to replace it with a new one.
-		if certShouldBeForceRenewed(cert, ocspResp) {
+		// If a managed certificate was revoked, we should attempt to replace
+		// it with a new one.
+		if certShouldBeForceRenewed(cert) {
 			renewQueue = append(renewQueue, renewQueueEntry{
-				oldCert:  cert,
-				ocspResp: ocspResp,
+				oldCert: cert,
 			})
 			configs[cert.Names[0]] = cfg
 		}
@@ -395,7 +395,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	// Crucially, this happens OUTSIDE a lock on the certCache.
 	for _, renew := range renewQueue {
 		cfg := configs[renew.oldCert.Names[0]]
-		_, err := cfg.forceRenew(ctx, logger, renew.oldCert, renew.ocspResp)
+		_, err := cfg.forceRenew(ctx, logger, renew.oldCert)
 		if err != nil && logger != nil {
 			logger.Info("forcefully renewing certificate due to REVOKED status",
 				zap.Strings("identifiers", renew.oldCert.Names),
@@ -548,21 +548,18 @@ func deleteExpiredCerts(ctx context.Context, storage Storage, gracePeriod time.D
 	return nil
 }
 
-// forceRenew forcefully renews cert and replaces it in the cache, and returns the new certificate. It is
-// intended for use primarily in the case of cert revocation. The latest OCSP response must be passed in,
-// since stapleOCSP() only staples Good responses to a Certificate. This MUST NOT be called within a lock
-// on cfg.certCacheMu.
-func (cfg *Config) forceRenew(ctx context.Context, logger *zap.Logger, cert Certificate, ocspResp *ocsp.Response) (Certificate, error) {
+// forceRenew forcefully renews cert and replaces it in the cache, and returns the new certificate. It is intended
+// for use primarily in the case of cert revocation. This MUST NOT be called within a lock on cfg.certCacheMu.
+func (cfg *Config) forceRenew(ctx context.Context, logger *zap.Logger, cert Certificate) (Certificate, error) {
 	if logger != nil {
-		if ocspResp.Status == ocsp.Revoked {
+		if cert.ocsp != nil && cert.ocsp.Status == ocsp.Revoked {
 			logger.Warn("OCSP status for managed certificate is REVOKED; attempting to replace with new certificate",
 				zap.Strings("identifiers", cert.Names),
 				zap.Time("expiration", cert.Leaf.NotAfter))
 		} else {
 			logger.Warn("forcefully renewing certificate",
 				zap.Strings("identifiers", cert.Names),
-				zap.Time("expiration", cert.Leaf.NotAfter),
-				zap.Int("ocsp_status", ocspResp.Status))
+				zap.Time("expiration", cert.Leaf.NotAfter))
 		}
 	}
 
@@ -576,7 +573,7 @@ func (cfg *Config) forceRenew(ctx context.Context, logger *zap.Logger, cert Cert
 	// of a prior key, we can't do a "renew" to replace the cert if we need a
 	// new key, so we'll have to do an obtain instead
 	var obtainInsteadOfRenew bool
-	if ocspResp.RevocationReason == acme.ReasonKeyCompromise {
+	if cert.ocsp != nil && cert.ocsp.RevocationReason == acme.ReasonKeyCompromise {
 		err := cfg.moveCompromisedPrivateKey(cert, logger)
 		if err != nil && logger != nil {
 			logger.Error("could not remove compromised private key from use",
@@ -597,7 +594,7 @@ func (cfg *Config) forceRenew(ctx context.Context, logger *zap.Logger, cert Cert
 		err = cfg.RenewCertAsync(ctx, renewName, true)
 	}
 	if err != nil {
-		if ocspResp.Status == ocsp.Revoked {
+		if cert.ocsp != nil && cert.ocsp.Status == ocsp.Revoked {
 			// probably better to not serve a revoked certificate at all
 			if logger != nil {
 				logger.Error("unable to obtain new to certificate after OCSP status of REVOKED; removing from cache",
@@ -646,9 +643,12 @@ func (cfg *Config) moveCompromisedPrivateKey(cert Certificate, logger *zap.Logge
 }
 
 // certShouldBeForceRenewed returns true if cert should be forcefully renewed
-// according to ocspResp (i.e. if it is Revoked).
-func certShouldBeForceRenewed(cert Certificate, ocspResp *ocsp.Response) bool {
-	return cert.managed && len(cert.Names) > 0 && ocspResp.Status == ocsp.Revoked
+// (like if it is revoked according to its OCSP response).
+func certShouldBeForceRenewed(cert Certificate) bool {
+	return cert.managed &&
+		len(cert.Names) > 0 &&
+		cert.ocsp != nil &&
+		cert.ocsp.Status == ocsp.Revoked
 }
 
 const (

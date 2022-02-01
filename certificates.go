@@ -42,6 +42,9 @@ type Certificate struct {
 	Tags []string
 
 	// OCSP contains the certificate's parsed OCSP response.
+	// It is not necessarily the response that is stapled
+	// (e.g. if the status is not Good), it is simply the
+	// most recent OCSP response we have for this certificate.
 	ocsp *ocsp.Response
 
 	// The hex-encoded hash of this cert's chain's bytes.
@@ -159,7 +162,7 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(tlsCert tls.Certificate, tags []
 	if err != nil {
 		return err
 	}
-	_, err = stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
+	err = stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
 	if err != nil && cfg.Logger != nil {
 		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
 	}
@@ -207,9 +210,9 @@ func (cfg Config) makeCertificateWithOCSP(certPEMBlock, keyPEMBlock []byte) (Cer
 	if err != nil {
 		return cert, err
 	}
-	_, err = stapleOCSP(cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
+	err = stapleOCSP(cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
 	if err != nil && cfg.Logger != nil {
-		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
+		cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
 	}
 	return cert, nil
 }
