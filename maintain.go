@@ -309,6 +309,15 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		if cert.Leaf == nil || cert.Expired() {
 			continue
 		}
+		// always try to replace revoked certificates, even if status is fresh
+		// TODO: set the config here... hmm.
+		if certShouldBeForceRenewed(cert) {
+			renewQueue = append(renewQueue, renewQueueEntry{
+				oldCert: cert,
+			})
+			continue
+		}
+		// if the status is not fresh, get a new one
 		var lastNextUpdate time.Time
 		if cert.ocsp != nil {
 			lastNextUpdate = cert.ocsp.NextUpdate
