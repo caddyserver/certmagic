@@ -511,16 +511,16 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 // certificate has been renewed, and returns the renewed certificate.
 //
 // If the certificate is being renewed because it was revoked and not because it was
-// expiring, set revokedOCSP to not nil, then it will be assumed the certificate has
-// been revoked and the renewal will be forced.
+// expiring, set ocspResp to not nil, and if its status is Revoked, the renewal will be
+// forced.
 //
 // This function is safe for use by multiple concurrent goroutines.
-func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.ClientHelloInfo, currentCert Certificate, revokedOCSP *ocsp.Response) (Certificate, error) {
+func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.ClientHelloInfo, currentCert Certificate, ocspResp *ocsp.Response) (Certificate, error) {
 	log := loggerNamed(cfg.Logger, "on_demand")
 
 	name := cfg.getNameFromClientHello(hello)
 	timeLeft := time.Until(currentCert.Leaf.NotAfter)
-	revoked := revokedOCSP != nil
+	revoked := ocspResp != nil && ocspResp.Status == ocsp.Revoked
 
 	getCertWithoutReobtaining := func() (Certificate, error) {
 		// very important to set the obtainIfNecessary argument to false, so we don't repeat this infinitely
@@ -604,15 +604,18 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 	renewAndReload := func(ctx context.Context, cancel context.CancelFunc) (Certificate, error) {
 		defer cancel()
 
+		var newCert Certificate
+		var err error
+
 		if revoked {
-			return cfg.forceRenew(ctx, log, currentCert, revokedOCSP)
+			newCert, err = cfg.forceRenew(ctx, log, currentCert, ocspResp)
 		} else {
 			err = cfg.RenewCertAsync(ctx, name, false)
 			if err == nil {
 				// even though the recursive nature of the dynamic cert loading
 				// would just call this function anyway, we do it here to
 				// make the replacement as atomic as possible.
-				newCert, err := cfg.CacheManagedCertificate(name)
+				newCert, err = cfg.CacheManagedCertificate(name)
 				if err != nil {
 					if log != nil {
 						log.Error("loading renewed certificate", zap.String("server_name", name), zap.Error(err))
@@ -630,7 +633,13 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 		unblockWaiters()
 
 		if err != nil {
-			return Certificate{}, err
+			if log != nil {
+				log.Error("renewing and reloading certificate",
+					zap.String("server_name", name),
+					zap.Error(err),
+					zap.Bool("forced", revoked))
+			}
+			return newCert, err
 		}
 
 		return getCertWithoutReobtaining()
