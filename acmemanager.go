@@ -229,35 +229,35 @@ func (am *ACMEManager) PreCheck(_ context.Context, names []string, interactive b
 	return am.getEmail(interactive)
 }
 
-func (am *ACMEManager) CheckAccountTOS(ctx context.Context, useTestCA, interactive bool) error {
-	initialAMAgreed := am.Agreed
+func (am *ACMEManager) CheckAccountTOS(ctx context.Context, useTestCA, interactive bool) (bool, string, error) {
+	agreed := am.Agreed
+	TOS := ""
+	// Make sure the email is retrieved first
+	err := am.getEmail(interactive)
+	if err != nil {
+		return agreed, TOS, err
+	}
+
+	// Create the new client if necessary and get a client
 	client, err := am.newACMEClientWithAccount(ctx, useTestCA, interactive)
 	if err != nil {
-		return err
+		return agreed, TOS, err
 	}
-	// override the default logic when creating new account in newACMEClient
-	if !interactive && !initialAMAgreed && am.Agreed {
-		am.Agreed = false
-		account := client.account
-		account.TermsOfServiceAgreed = false
-		err = am.saveAccount(client.acmeClient.Directory, account)
-		if err != nil {
-			return err
-		}
-		return fmt.Errorf("initialized account non-interactively, but TOS was not accepted")
+	agreed = client.account.TermsOfServiceAgreed
+	// Get the most recent TOS
+	var dir acme.Directory
+	dir, err = client.acmeClient.GetDirectory(ctx)
+	if err != nil {
+		return agreed, TOS, err
 	}
-	if !client.account.TermsOfServiceAgreed {
-		var termsURL string
-		dir, err := client.acmeClient.GetDirectory(ctx)
-		if err != nil {
-			return err
-		}
-		if dir.Meta != nil {
-			termsURL = dir.Meta.TermsOfService
-		}
-		return fmt.Errorf("cached account does not accept CA's TOS [%s]", termsURL)
+	if dir.Meta != nil {
+		TOS = dir.Meta.TermsOfService
 	}
-	return nil
+	// If no TOS is found, then it should be implied to be accepted
+	if len(TOS) == 0 {
+		agreed = true
+	}
+	return agreed, TOS, nil
 }
 
 // Issue implements the Issuer interface. It obtains a certificate for the given csr using
@@ -332,6 +332,9 @@ func (am *ACMEManager) doIssue(ctx context.Context, csr *x509.CertificateRequest
 	client, err := am.newACMEClientWithAccount(ctx, useTestCA, false)
 	if err != nil {
 		return nil, false, err
+	}
+	if !client.account.TermsOfServiceAgreed {
+		return nil, false, fmt.Errorf("user must agree to CA terms")
 	}
 	usingTestCA := client.usingTestCA()
 
@@ -446,6 +449,10 @@ func (am *ACMEManager) Revoke(ctx context.Context, cert CertificateResource, rea
 	client, err := am.newACMEClientWithAccount(ctx, false, false)
 	if err != nil {
 		return err
+	}
+	// TODO: Maybe the user does not need to accept TOS just to revoke a certificate
+	if !client.account.TermsOfServiceAgreed {
+		return fmt.Errorf("user must agree to CA terms")
 	}
 
 	certs, err := parseCertsFromPEMBundle(cert.CertificatePEM)

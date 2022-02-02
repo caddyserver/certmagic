@@ -76,7 +76,7 @@ func (am *ACMEManager) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 			}
 		}
 
-		// agree to terms
+		// Prompt to agree to TOS, otherwise use AccountManager's settings
 		if interactive {
 			if !am.Agreed {
 				var termsURL string
@@ -94,10 +94,6 @@ func (am *ACMEManager) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 					}
 				}
 			}
-		} else {
-			// can't prompt a user who isn't there; they should
-			// have reviewed the terms beforehand
-			am.Agreed = true
 		}
 		account.TermsOfServiceAgreed = am.Agreed
 
