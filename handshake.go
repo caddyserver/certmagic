@@ -228,8 +228,7 @@ func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificat
 func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNecessary, obtainIfNecessary bool) (Certificate, error) {
 	log := loggerNamed(cfg.Logger, "handshake")
 
-	// TODO: get a proper context... somehow...?
-	ctx := context.Background()
+	ctx := context.TODO() // TODO: get a proper context? from somewhere...
 
 	// First check our in-memory cache to see if we've already loaded it
 	cert, matched, defaulted := cfg.getCertificate(hello)
@@ -253,14 +252,12 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	// If a custom GetCertificate is configured, use that to get the
 	// certificate rather than our own "automagic" management logic.
 	// Only continue to use our own logic if it returns nil+nil.
-	if cfg.OnDemand != nil && cfg.OnDemand.CustomGetCertificate != nil {
-		customCert, err := cfg.getCertFromCustomGetCertificate(hello, log, Certificate{})
-		if err != nil {
-			return Certificate{}, err
-		}
-		if !customCert.Empty() {
-			return customCert, nil
-		}
+	customCert, err := cfg.getCertFromAnyCustomGetCertificate(hello, log, Certificate{})
+	if err != nil {
+		return Certificate{}, err
+	}
+	if !customCert.Empty() {
+		return customCert, nil
 	}
 
 	name := cfg.getNameFromClientHello(hello)
@@ -606,9 +603,13 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 	renewAndReload := func(ctx context.Context, cancel context.CancelFunc) (Certificate, error) {
 		defer cancel()
 
-		// if a custom GetCertificate is specified, just use that
-		if cfg.OnDemand != nil && cfg.OnDemand.CustomGetCertificate != nil {
-			return cfg.getCertFromCustomGetCertificate(hello, log, currentCert)
+		// if a custom GetCertificate is specified and returned a valid value, just use that
+		cert, err := cfg.getCertFromAnyCustomGetCertificate(hello, log, currentCert)
+		if err != nil {
+			return Certificate{}, err
+		}
+		if !cert.Empty() {
+			return cert, nil
 		}
 
 		// otherwise, renew with issuer, etc.
@@ -652,17 +653,35 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 	return renewAndReload(ctx, cancel)
 }
 
-// getCertFromCustomGetCertificate calls CustomGetCertificate to get the certificate for hello.
-// It turns the result (if any) into a filled-in Certificate value, and adds it to the cache if
-// applicable (replacing oldCert, if non-empty).
-func (cfg *Config) getCertFromCustomGetCertificate(hello *tls.ClientHelloInfo, log *zap.Logger, oldCert Certificate) (Certificate, error) {
-	upstreamCert, addToCache, err := cfg.OnDemand.CustomGetCertificate.GetCertificate(context.Background(), hello)
-	if err != nil {
-		return Certificate{}, fmt.Errorf("custom GetCertificate: %s: %v", hello.ServerName, err)
+// getCertFromAnyCustomGetCertificate gets a certificate from cfg's CustomGetCertificates in its OnDemand
+// config. If OnDemand config is nil, or there are no CustomGetCertificates defined, this is a no-op and
+// returns empty values. Otherwise, it gets a certificate for hello from the first CustomGetCertificate that
+// returns a certificate and no error. The certificate will be added to the cache if the CertificateGetter
+// indicates that the result should be cached. If oldCert is non-empty, it will be replaced in the cache; or,
+// if the new certificate is not to be cached, the old one will be removed instead.
+func (cfg *Config) getCertFromAnyCustomGetCertificate(hello *tls.ClientHelloInfo, log *zap.Logger, oldCert Certificate) (Certificate, error) {
+	// fast path if nothing to do
+	if cfg.OnDemand == nil || len(cfg.OnDemand.CustomGetCertificates) == 0 {
+		return Certificate{}, nil
+	}
+
+	var upstreamCert *tls.Certificate
+	var addToCache bool
+	var err error
+
+	// try all the custom GetCertificate functions; use first one that returns a certificate
+	for i, customGetCert := range cfg.OnDemand.CustomGetCertificates {
+		upstreamCert, addToCache, err = customGetCert.GetCertificate(context.TODO(), hello)
+		if err != nil {
+			return Certificate{}, fmt.Errorf("custom GetCertificate %d: %s: %v", i, hello.ServerName, err)
+		}
+		if upstreamCert != nil {
+			break
+		}
 	}
 	if upstreamCert == nil {
 		if log != nil {
-			log.Debug("custom GetCertificate yielded no certificate and no error", zap.String("sni", hello.ServerName))
+			log.Debug("all custom GetCertificates yielded no certificates and no errors", zap.String("sni", hello.ServerName))
 		}
 		return Certificate{}, nil
 	}
@@ -672,7 +691,6 @@ func (cfg *Config) getCertFromCustomGetCertificate(hello *tls.ClientHelloInfo, l
 	if err != nil {
 		return Certificate{}, fmt.Errorf("custom GetCertificate: %s: filling cert from leaf: %v", hello.ServerName, err)
 	}
-	cert.managed = true // allows handshake-time maintenance/"renewal" later on
 
 	if log != nil {
 		log.Debug("using custom certificate",
@@ -683,11 +701,17 @@ func (cfg *Config) getCertFromCustomGetCertificate(hello *tls.ClientHelloInfo, l
 	}
 
 	if addToCache {
+		cert.managed = true // allows handshake-time maintenance/"renewal" later on
 		if oldCert.Empty() {
 			cfg.certCache.cacheCertificate(cert)
 		} else {
 			cfg.certCache.replaceCertificate(oldCert, cert)
 		}
+	} else if !oldCert.Empty() {
+		// new certificate shouldn't be cached, but old cert still in cache, so remove it
+		cfg.certCache.mu.Lock()
+		cfg.certCache.removeCertificate(oldCert)
+		cfg.certCache.mu.Unlock()
 	}
 
 	return cert, nil

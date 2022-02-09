@@ -275,7 +275,7 @@ type OnDemandConfig struct {
 	// Setting this field will not interrupt ACME TLS-ALPN
 	// challenge handshakes.
 	// TODO: EXPERIMENTAL: subject to change and/or removal.
-	CustomGetCertificate CertificateGetter
+	CustomGetCertificates []CertificateGetter
 
 	// List of whitelisted hostnames (SNI values) for
 	// deferred (on-demand) obtaining of certificates.
