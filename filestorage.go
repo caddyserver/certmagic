@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"io/ioutil"
 	"log"
 	"os"
 	"path"
@@ -73,7 +72,7 @@ type FileStorage struct {
 // Exists returns true if key exists in s.
 func (s *FileStorage) Exists(key string) bool {
 	_, err := os.Stat(s.Filename(key))
-	return !os.IsNotExist(err)
+	return !errors.Is(err, fs.ErrNotExist)
 }
 
 // Store saves value at key.
@@ -83,25 +82,17 @@ func (s *FileStorage) Store(key string, value []byte) error {
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(filename, value, 0600)
+	return os.WriteFile(filename, value, 0600)
 }
 
 // Load retrieves the value at key.
 func (s *FileStorage) Load(key string) ([]byte, error) {
-	contents, err := ioutil.ReadFile(s.Filename(key))
-	if os.IsNotExist(err) {
-		return nil, ErrNotExist(err)
-	}
-	return contents, nil
+	return os.ReadFile(s.Filename(key))
 }
 
 // Delete deletes the value at key.
 func (s *FileStorage) Delete(key string) error {
-	err := os.Remove(s.Filename(key))
-	if os.IsNotExist(err) {
-		return ErrNotExist(err)
-	}
-	return err
+	return os.Remove(s.Filename(key))
 }
 
 // List returns all keys that match prefix.
@@ -138,9 +129,6 @@ func (s *FileStorage) List(prefix string, recursive bool) ([]string, error) {
 // Stat returns information about key.
 func (s *FileStorage) Stat(key string) (KeyInfo, error) {
 	fi, err := os.Stat(s.Filename(key))
-	if os.IsNotExist(err) {
-		return KeyInfo{}, ErrNotExist(err)
-	}
 	if err != nil {
 		return KeyInfo{}, err
 	}
@@ -308,7 +296,7 @@ func updateLockfileFreshness(filename string) (bool, error) {
 	defer f.Close()
 
 	// read contents
-	metaBytes, err := ioutil.ReadAll(io.LimitReader(f, 2048))
+	metaBytes, err := io.ReadAll(io.LimitReader(f, 2048))
 	if err != nil {
 		return true, err
 	}

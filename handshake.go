@@ -17,7 +17,9 @@ package certmagic
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"strings"
 	"sync"
@@ -278,7 +280,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 		// from storage, since if we can't renew it, why should we even try serving it (it will just get evicted after
 		// we get a return value of false anyway)?
 		loadedCert, err := cfg.CacheManagedCertificate(name)
-		if _, ok := err.(ErrNotExist); ok {
+		if errors.Is(err, fs.ErrNotExist) {
 			// If no exact match, try a wildcard variant, which is something we can still use
 			labels := strings.Split(name, ".")
 			labels[0] = "*"

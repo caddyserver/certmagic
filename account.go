@@ -22,8 +22,10 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"sort"
@@ -37,11 +39,8 @@ import (
 // an account can be found in storage for the given CA + email combo.
 func (am *ACMEManager) getAccount(ca, email string) (acme.Account, error) {
 	acct, err := am.loadAccount(ca, email)
-	if err != nil {
-		if _, ok := err.(ErrNotExist); ok {
-			return am.newAccount(email)
-		}
-		return acct, err
+	if errors.Is(err, fs.ErrNotExist) {
+		return am.newAccount(email)
 	}
 	return acct, err
 }
@@ -90,18 +89,14 @@ func (*ACMEManager) newAccount(email string) (acme.Account, error) {
 // The account must already exist; it does not create a new account.
 func (am *ACMEManager) GetAccount(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
 	account, err := am.loadAccountByKey(ctx, privateKeyPEM)
-	if err != nil {
-		if _, ok := err.(ErrNotExist); ok {
-			account, err = am.lookUpAccount(ctx, privateKeyPEM)
-		} else {
-			return account, err
-		}
+	if errors.Is(err, fs.ErrNotExist) {
+		account, err = am.lookUpAccount(ctx, privateKeyPEM)
 	}
 	return account, err
 }
 
 // loadAccountByKey loads the account with the given private key from storage, if it exists.
-// If it does not exist, an error of type ErrNotExist is returned. This is not very efficient
+// If it does not exist, an error of type fs.ErrNotExist is returned. This is not very efficient
 // for lots of accounts.
 func (am *ACMEManager) loadAccountByKey(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
 	accountList, err := am.config.Storage.List(am.storageKeyUsersPrefix(am.CA), false)
@@ -118,7 +113,7 @@ func (am *ACMEManager) loadAccountByKey(ctx context.Context, privateKeyPEM []byt
 			return am.loadAccount(am.CA, email)
 		}
 	}
-	return acme.Account{}, ErrNotExist(fmt.Errorf("no account found with that key"))
+	return acme.Account{}, fs.ErrNotExist
 }
 
 // lookUpAccount looks up the account associated with privateKeyPEM from the ACME server.

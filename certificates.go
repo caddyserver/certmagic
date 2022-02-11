@@ -18,8 +18,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"io/ioutil"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -192,11 +192,11 @@ func (cfg *Config) CacheUnmanagedCertificatePEMBytes(certBytes, keyBytes []byte,
 // the certificate except for the Managed and OnDemand flags.
 // (It is up to the caller to set those.) It staples OCSP.
 func (cfg Config) makeCertificateFromDiskWithOCSP(storage Storage, certFile, keyFile string) (Certificate, error) {
-	certPEMBlock, err := ioutil.ReadFile(certFile)
+	certPEMBlock, err := os.ReadFile(certFile)
 	if err != nil {
 		return Certificate{}, err
 	}
-	keyPEMBlock, err := ioutil.ReadFile(keyFile)
+	keyPEMBlock, err := os.ReadFile(keyFile)
 	if err != nil {
 		return Certificate{}, err
 	}
