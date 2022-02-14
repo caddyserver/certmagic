@@ -71,7 +71,7 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 	return &cert.Certificate, err
 }
 
-// getCertificate gets a certificate that matches name from the in-memory
+// getCertificateFromCache gets a certificate that matches name from the in-memory
 // cache, according to the lookup table associated with cfg. The lookup then
 // points to a certificate in the Instance certificate cache.
 //
@@ -87,7 +87,7 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 // which is by the Go Authors.
 //
 // This function is safe for concurrent use.
-func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate, matched, defaulted bool) {
+func (cfg *Config) getCertificateFromCache(hello *tls.ClientHelloInfo) (cert Certificate, matched, defaulted bool) {
 	name := normalizedName(hello.ServerName)
 
 	if name == "" {
@@ -232,7 +232,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	ctx := context.TODO() // TODO: get a proper context? from somewhere...
 
 	// First check our in-memory cache to see if we've already loaded it
-	cert, matched, defaulted := cfg.getCertificate(hello)
+	cert, matched, defaulted := cfg.getCertificateFromCache(hello)
 	if matched {
 		if log != nil {
 			log.Debug("matched certificate in cache",
@@ -648,8 +648,6 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 
 		// otherwise, renew with issuer, etc.
 		var newCert Certificate
-		var err error
-    
 		if revoked {
 			newCert, err = cfg.forceRenew(ctx, log, currentCert)
 		} else {
