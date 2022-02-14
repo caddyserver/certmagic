@@ -25,6 +25,7 @@ import (
 
 	"github.com/mholt/acmez"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ocsp"
 )
 
 // GetCertificate gets a certificate to satisfy clientHello. In getting
@@ -304,7 +305,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 			loadedCert, err = cfg.handshakeMaintenance(ctx, hello, loadedCert)
 			if err != nil {
 				if log != nil {
-					log.Error("maintining newly-loaded certificate",
+					log.Error("maintaining newly-loaded certificate",
 						zap.String("server_name", name),
 						zap.Error(err))
 				}
@@ -479,14 +480,17 @@ func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.Cli
 func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHelloInfo, cert Certificate) (Certificate, error) {
 	log := loggerNamed(cfg.Logger, "on_demand")
 
-	// Check cert expiration
-	if currentlyInRenewalWindow(cert.Leaf.NotBefore, cert.Leaf.NotAfter, cfg.RenewalWindowRatio) {
-		return cfg.renewDynamicCertificate(ctx, hello, cert)
-	}
-
 	// Check OCSP staple validity
 	if cert.ocsp != nil && !freshOCSP(cert.ocsp) {
-		ocspResp, err := stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
+		if log != nil {
+			log.Debug("OCSP response needs refreshing",
+				zap.Strings("identifiers", cert.Names),
+				zap.Int("ocsp_status", cert.ocsp.Status),
+				zap.Time("this_update", cert.ocsp.ThisUpdate),
+				zap.Time("next_update", cert.ocsp.NextUpdate))
+		}
+
+		err := stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
 		if err != nil {
 			// An error with OCSP stapling is not the end of the world, and in fact, is
 			// quite common considering not all certs have issuer URLs that support it.
@@ -495,16 +499,39 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 					zap.String("server_name", hello.ServerName),
 					zap.Error(err))
 			}
+		} else if log != nil {
+			if log != nil {
+				log.Debug("successfully stapled new OCSP response",
+					zap.Strings("identifiers", cert.Names),
+					zap.Int("ocsp_status", cert.ocsp.Status),
+					zap.Time("this_update", cert.ocsp.ThisUpdate),
+					zap.Time("next_update", cert.ocsp.NextUpdate))
+			}
 		}
 
 		// our copy of cert has the new OCSP staple, so replace it in the cache
 		cfg.certCache.mu.Lock()
 		cfg.certCache.cache[cert.hash] = cert
 		cfg.certCache.mu.Unlock()
+	}
 
-		// We attempt to replace any certificates that were revoked.
-		// Crucially, this happens OUTSIDE a lock on the certCache.
-		cfg.forceRenewIfCertRevoked(ctx, log, cert, ocspResp)
+	// We attempt to replace any certificates that were revoked.
+	// Crucially, this happens OUTSIDE a lock on the certCache.
+	if certShouldBeForceRenewed(cert) {
+		if log != nil {
+			log.Warn("on-demand certificate's OCSP status is REVOKED; will try to forcefully renew",
+				zap.Strings("identifiers", cert.Names),
+				zap.Int("ocsp_status", cert.ocsp.Status),
+				zap.Time("revoked_at", cert.ocsp.RevokedAt),
+				zap.Time("this_update", cert.ocsp.ThisUpdate),
+				zap.Time("next_update", cert.ocsp.NextUpdate))
+		}
+		return cfg.renewDynamicCertificate(ctx, hello, cert)
+	}
+
+	// Check cert expiration
+	if currentlyInRenewalWindow(cert.Leaf.NotBefore, cert.Leaf.NotAfter, cfg.RenewalWindowRatio) {
+		return cfg.renewDynamicCertificate(ctx, hello, cert)
 	}
 
 	return cert, nil
@@ -517,12 +544,16 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 // and the renewal will happen in the background; otherwise this blocks until the
 // certificate has been renewed, and returns the renewed certificate.
 //
+// If the certificate's OCSP status (currentCert.ocsp) is Revoked, it will be forcefully
+// renewed even if it is not expiring.
+//
 // This function is safe for use by multiple concurrent goroutines.
 func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.ClientHelloInfo, currentCert Certificate) (Certificate, error) {
 	log := loggerNamed(cfg.Logger, "on_demand")
 
 	name := cfg.getNameFromClientHello(hello)
 	timeLeft := time.Until(currentCert.Leaf.NotAfter)
+	revoked := currentCert.ocsp != nil && currentCert.ocsp.Status == ocsp.Revoked
 
 	getCertWithoutReobtaining := func() (Certificate, error) {
 		// very important to set the obtainIfNecessary argument to false, so we don't repeat this infinitely
@@ -536,9 +567,10 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 		// lucky us -- another goroutine is already renewing the certificate
 		obtainCertWaitChansMu.Unlock()
 
-		if timeLeft > 0 {
-			// the current certificate hasn't expired, and another goroutine is already
-			// renewing it, so we might as well serve what we have without blocking
+		// the current certificate hasn't expired, and another goroutine is already
+		// renewing it, so we might as well serve what we have without blocking, UNLESS
+		// we're forcing renewal, in which case the current certificate is not usable
+		if timeLeft > 0 && !revoked {
 			if log != nil {
 				log.Debug("certificate expires soon but is already being renewed; serving current certificate",
 					zap.Strings("subjects", currentCert.Names),
@@ -548,12 +580,13 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 		}
 
 		// otherwise, we'll have to wait for the renewal to finish so we don't serve
-		// an expired certificate
+		// a revoked or expired certificate
 
 		if log != nil {
 			log.Debug("certificate has expired, but is already being renewed; waiting for renewal to complete",
 				zap.Strings("subjects", currentCert.Names),
-				zap.Time("expired", currentCert.Leaf.NotAfter))
+				zap.Time("expired", currentCert.Leaf.NotAfter),
+				zap.Bool("revoked", revoked))
 		}
 
 		// TODO: see if we can get a proper context in here, for true cancellation
@@ -585,7 +618,8 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 			zap.String("server_name", name),
 			zap.Strings("subjects", currentCert.Names),
 			zap.Time("expiration", currentCert.Leaf.NotAfter),
-			zap.Duration("remaining", timeLeft))
+			zap.Duration("remaining", timeLeft),
+			zap.Bool("revoked", revoked))
 	}
 
 	// Make sure a certificate for this name should be obtained on-demand
@@ -613,19 +647,26 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 		}
 
 		// otherwise, renew with issuer, etc.
-		err = cfg.RenewCertAsync(ctx, name, false)
-		if err == nil {
-			// even though the recursive nature of the dynamic cert loading
-			// would just call this function anyway, we do it here to
-			// make the replacement as atomic as possible.
-			newCert, err := cfg.CacheManagedCertificate(name)
-			if err != nil {
-				if log != nil {
-					log.Error("loading renewed certificate", zap.String("server_name", name), zap.Error(err))
+		var newCert Certificate
+		var err error
+    
+		if revoked {
+			newCert, err = cfg.forceRenew(ctx, log, currentCert)
+		} else {
+			err = cfg.RenewCertAsync(ctx, name, false)
+			if err == nil {
+				// even though the recursive nature of the dynamic cert loading
+				// would just call this function anyway, we do it here to
+				// make the replacement as atomic as possible.
+				newCert, err = cfg.CacheManagedCertificate(name)
+				if err != nil {
+					if log != nil {
+						log.Error("loading renewed certificate", zap.String("server_name", name), zap.Error(err))
+					}
+				} else {
+					// replace the old certificate with the new one
+					cfg.certCache.replaceCertificate(currentCert, newCert)
 				}
-			} else {
-				// replace the old certificate with the new one
-				cfg.certCache.replaceCertificate(currentCert, newCert)
 			}
 		}
 
@@ -635,7 +676,13 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 		unblockWaiters()
 
 		if err != nil {
-			return Certificate{}, err
+			if log != nil {
+				log.Error("renewing and reloading certificate",
+					zap.String("server_name", name),
+					zap.Error(err),
+					zap.Bool("forced", revoked))
+			}
+			return newCert, err
 		}
 
 		return getCertWithoutReobtaining()
