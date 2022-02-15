@@ -240,16 +240,16 @@ func (cfg *Config) loadCertResource(issuer Issuer, certNamesKey string) (Certifi
 		return CertificateResource{}, fmt.Errorf("converting '%s' to ASCII: %v", certNamesKey, err)
 	}
 
-	certBytes, err := cfg.Storage.Load(StorageKeys.SiteCert(certRes.issuerKey, normalizedName))
-	if err != nil {
-		return CertificateResource{}, err
-	}
-	certRes.CertificatePEM = certBytes
 	keyBytes, err := cfg.Storage.Load(StorageKeys.SitePrivateKey(certRes.issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err
 	}
 	certRes.PrivateKeyPEM = keyBytes
+	certBytes, err := cfg.Storage.Load(StorageKeys.SiteCert(certRes.issuerKey, normalizedName))
+	if err != nil {
+		return CertificateResource{}, err
+	}
+	certRes.CertificatePEM = certBytes
 	metaBytes, err := cfg.Storage.Load(StorageKeys.SiteMeta(certRes.issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err
