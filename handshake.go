@@ -29,11 +29,15 @@ import (
 )
 
 // GetCertificate gets a certificate to satisfy clientHello. In getting
-// the certificate, it abides the rules and settings defined in the
-// Config that matches clientHello.ServerName. It first checks the in-
-// memory cache, then, if the config enables "OnDemand", it accesses
-// disk, then accesses the network if it must obtain a new certificate
-// via ACME.
+// the certificate, it abides the rules and settings defined in the Config
+// that matches clientHello.ServerName. It tries to get certificates in
+// this order:
+//
+// 1. Exact match in the in-memory cache
+// 2. Wildcard match in the in-memory cache
+// 3. Managers (if any)
+// 4. Storage (if on-demand is enabled)
+// 5. Issuers (if on-demand is enabled)
 //
 // This method is safe for use as a tls.Config.GetCertificate callback.
 func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -216,14 +220,16 @@ func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificat
 }
 
 // getCertDuringHandshake will get a certificate for hello. It first tries
-// the in-memory cache. If no certificate for hello is in the cache, the
+// the in-memory cache. If no exact certificate for hello is in the cache, the
 // config most closely corresponding to hello (like a wildcard) will be loaded.
-// If that config allows it (OnDemand!=nil) and if loadIfNecessary == true, it
-// calls CustomGetCertificate or goes to disk to load it into the cache and serve
-// it. If it's not on disk and if obtainIfNecessary == true, the certificate will
-// be obtained from the CA, cached, and served. If obtainIfNecessary is true, then
-// loadIfNecessary must also be set to true. An error will be returned if and only
-// if no certificate is available.
+// If none could be matched from the cache, it invokes the configured certificate
+// managers to get a certificate and uses the first one that returns a certificate.
+// If no certificate managers return a value, and if the config allows it
+// (OnDemand!=nil) and if loadIfNecessary == true, it goes to storage to load the
+// cert into the cache and serve it. If it's not on disk and if
+// obtainIfNecessary == true, the certificate will be obtained from the CA, cached,
+// and served. If obtainIfNecessary == true, then loadIfNecessary must also be == true.
+// An error will be returned if and only if no certificate is available.
 //
 // This function is safe for concurrent use.
 func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNecessary, obtainIfNecessary bool) (Certificate, error) {
@@ -252,12 +258,12 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 
 	// If an external CertificateManager is configured, try to get it from them.
 	// Only continue to use our own logic if it returns empty+nil.
-	customCert, err := cfg.getCertFromAnyCertManager(ctx, hello, log)
+	externalCert, err := cfg.getCertFromAnyCertManager(ctx, hello, log)
 	if err != nil {
 		return Certificate{}, err
 	}
-	if !customCert.Empty() {
-		return customCert, nil
+	if !externalCert.Empty() {
+		return externalCert, nil
 	}
 
 	name := cfg.getNameFromClientHello(hello)
@@ -699,7 +705,7 @@ func (cfg *Config) getCertFromAnyCertManager(ctx context.Context, hello *tls.Cli
 
 	var upstreamCert *tls.Certificate
 
-	// try all the custom GetCertificate functions; use first one that returns a certificate
+	// try all the GetCertificate methods on external managers; use first one that returns a certificate
 	for i, certManager := range cfg.Managers {
 		var err error
 		upstreamCert, err = certManager.GetCertificate(ctx, hello)
