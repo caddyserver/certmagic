@@ -29,11 +29,15 @@ import (
 )
 
 // GetCertificate gets a certificate to satisfy clientHello. In getting
-// the certificate, it abides the rules and settings defined in the
-// Config that matches clientHello.ServerName. It first checks the in-
-// memory cache, then, if the config enables "OnDemand", it accesses
-// disk, then accesses the network if it must obtain a new certificate
-// via ACME.
+// the certificate, it abides the rules and settings defined in the Config
+// that matches clientHello.ServerName. It tries to get certificates in
+// this order:
+//
+// 1. Exact match in the in-memory cache
+// 2. Wildcard match in the in-memory cache
+// 3. Managers (if any)
+// 4. Storage (if on-demand is enabled)
+// 5. Issuers (if on-demand is enabled)
 //
 // This method is safe for use as a tls.Config.GetCertificate callback.
 func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -71,7 +75,7 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 	return &cert.Certificate, err
 }
 
-// getCertificate gets a certificate that matches name from the in-memory
+// getCertificateFromCache gets a certificate that matches name from the in-memory
 // cache, according to the lookup table associated with cfg. The lookup then
 // points to a certificate in the Instance certificate cache.
 //
@@ -87,7 +91,7 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 // which is by the Go Authors.
 //
 // This function is safe for concurrent use.
-func (cfg *Config) getCertificate(hello *tls.ClientHelloInfo) (cert Certificate, matched, defaulted bool) {
+func (cfg *Config) getCertificateFromCache(hello *tls.ClientHelloInfo) (cert Certificate, matched, defaulted bool) {
 	name := normalizedName(hello.ServerName)
 
 	if name == "" {
@@ -216,24 +220,25 @@ func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificat
 }
 
 // getCertDuringHandshake will get a certificate for hello. It first tries
-// the in-memory cache. If no certificate for hello is in the cache, the
-// config most closely corresponding to hello will be loaded. If that config
-// allows it (OnDemand==true) and if loadIfNecessary == true, it goes to disk
-// to load it into the cache and serve it. If it's not on disk and if
-// obtainIfNecessary == true, the certificate will be obtained from the CA,
-// cached, and served. If obtainIfNecessary is true, then loadIfNecessary
-// must also be set to true. An error will be returned if and only if no
-// certificate is available.
+// the in-memory cache. If no exact certificate for hello is in the cache, the
+// config most closely corresponding to hello (like a wildcard) will be loaded.
+// If none could be matched from the cache, it invokes the configured certificate
+// managers to get a certificate and uses the first one that returns a certificate.
+// If no certificate managers return a value, and if the config allows it
+// (OnDemand!=nil) and if loadIfNecessary == true, it goes to storage to load the
+// cert into the cache and serve it. If it's not on disk and if
+// obtainIfNecessary == true, the certificate will be obtained from the CA, cached,
+// and served. If obtainIfNecessary == true, then loadIfNecessary must also be == true.
+// An error will be returned if and only if no certificate is available.
 //
 // This function is safe for concurrent use.
 func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNecessary, obtainIfNecessary bool) (Certificate, error) {
 	log := loggerNamed(cfg.Logger, "handshake")
 
-	// TODO: get a proper context... somehow...?
-	ctx := context.Background()
+	ctx := context.TODO() // TODO: get a proper context? from somewhere...
 
 	// First check our in-memory cache to see if we've already loaded it
-	cert, matched, defaulted := cfg.getCertificate(hello)
+	cert, matched, defaulted := cfg.getCertificateFromCache(hello)
 	if matched {
 		if log != nil {
 			log.Debug("matched certificate in cache",
@@ -249,6 +254,16 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 			return cfg.optionalMaintenance(ctx, loggerNamed(cfg.Logger, "on_demand"), cert, hello)
 		}
 		return cert, nil
+	}
+
+	// If an external CertificateManager is configured, try to get it from them.
+	// Only continue to use our own logic if it returns empty+nil.
+	externalCert, err := cfg.getCertFromAnyCertManager(ctx, hello, log)
+	if err != nil {
+		return Certificate{}, err
+	}
+	if !externalCert.Empty() {
+		return externalCert, nil
 	}
 
 	name := cfg.getNameFromClientHello(hello)
@@ -627,9 +642,8 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 	renewAndReload := func(ctx context.Context, cancel context.CancelFunc) (Certificate, error) {
 		defer cancel()
 
+		// otherwise, renew with issuer, etc.
 		var newCert Certificate
-		var err error
-
 		if revoked {
 			newCert, err = cfg.forceRenew(ctx, log, currentCert)
 		} else {
@@ -678,6 +692,55 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 	// otherwise, we have to block while we renew an expired certificate
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	return renewAndReload(ctx, cancel)
+}
+
+// getCertFromAnyCertManager gets a certificate from cfg's Managers. If there are no Managers defined, this is
+// a no-op that returns empty values. Otherwise, it gets a certificate for hello from the first Manager that
+// returns a certificate and no error.
+func (cfg *Config) getCertFromAnyCertManager(ctx context.Context, hello *tls.ClientHelloInfo, log *zap.Logger) (Certificate, error) {
+	// fast path if nothing to do
+	if len(cfg.Managers) == 0 {
+		return Certificate{}, nil
+	}
+
+	var upstreamCert *tls.Certificate
+
+	// try all the GetCertificate methods on external managers; use first one that returns a certificate
+	for i, certManager := range cfg.Managers {
+		var err error
+		upstreamCert, err = certManager.GetCertificate(ctx, hello)
+		if err != nil {
+			log.Error("getting certificate from external certificate manager",
+				zap.String("sni", hello.ServerName),
+				zap.Int("cert_manager", i),
+				zap.Error(err))
+			continue
+		}
+		if upstreamCert != nil {
+			break
+		}
+	}
+	if upstreamCert == nil {
+		if log != nil {
+			log.Debug("all external certificate managers yielded no certificates and no errors", zap.String("sni", hello.ServerName))
+		}
+		return Certificate{}, nil
+	}
+
+	var cert Certificate
+	err := fillCertFromLeaf(&cert, *upstreamCert)
+	if err != nil {
+		return Certificate{}, fmt.Errorf("external certificate manager: %s: filling cert from leaf: %v", hello.ServerName, err)
+	}
+
+	if log != nil {
+		log.Debug("using externally-managed certificate",
+			zap.String("sni", hello.ServerName),
+			zap.Strings("names", cert.Names),
+			zap.Time("expiration", cert.Leaf.NotAfter))
+	}
+
+	return cert, nil
 }
 
 // getTLSALPNChallengeCert is to be called when the clientHello pertains to

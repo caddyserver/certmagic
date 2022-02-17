@@ -62,7 +62,7 @@ func (am *ACMEManager) loadAccount(ca, email string) (acme.Account, error) {
 	if err != nil {
 		return acct, err
 	}
-	acct.PrivateKey, err = decodePrivateKey(keyBytes)
+	acct.PrivateKey, err = PEMDecodePrivateKey(keyBytes)
 	if err != nil {
 		return acct, fmt.Errorf("could not decode account's private key: %v", err)
 	}
@@ -129,7 +129,7 @@ func (am *ACMEManager) lookUpAccount(ctx context.Context, privateKeyPEM []byte) 
 		return acme.Account{}, fmt.Errorf("creating ACME client: %v", err)
 	}
 
-	privateKey, err := decodePrivateKey([]byte(privateKeyPEM))
+	privateKey, err := PEMDecodePrivateKey([]byte(privateKeyPEM))
 	if err != nil {
 		return acme.Account{}, fmt.Errorf("decoding private key: %v", err)
 	}
@@ -157,7 +157,7 @@ func (am *ACMEManager) saveAccount(ca string, account acme.Account) error {
 	if err != nil {
 		return err
 	}
-	keyBytes, err := encodePrivateKey(account.PrivateKey)
+	keyBytes, err := PEMEncodePrivateKey(account.PrivateKey)
 	if err != nil {
 		return err
 	}

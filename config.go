@@ -72,11 +72,20 @@ type Config struct {
 	// Adds the must staple TLS extension to the CSR.
 	MustStaple bool
 
-	// The source for getting new certificates; the
-	// default Issuer is ACMEManager. If multiple
+	// Sources for getting new, managed certificates;
+	// the default Issuer is ACMEManager. If multiple
 	// issuers are specified, they will be tried in
 	// turn until one succeeds.
 	Issuers []Issuer
+
+	// Sources for getting new, unmanaged certificates.
+	// They will be invoked only during TLS handshakes
+	// before on-demand certificate management occurs,
+	// for certificates that are not already loaded into
+	// the in-memory cache.
+	//
+	// TODO: EXPERIMENTAL: subject to change and/or removal.
+	Managers []CertificateManager
 
 	// The source of new private keys for certificates;
 	// the default KeySource is StandardKeyGenerator.
@@ -499,7 +508,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			if err != nil {
 				return err
 			}
-			privKeyPEM, err = encodePrivateKey(privKey)
+			privKeyPEM, err = PEMEncodePrivateKey(privKey)
 			if err != nil {
 				return err
 			}
@@ -605,7 +614,7 @@ func (cfg *Config) reusePrivateKey(domain string) (privKey crypto.PrivateKey, pr
 		}
 
 		// we loaded a private key; try decoding it so we can use it
-		privKey, err = decodePrivateKey(privKeyPEM)
+		privKey, err = PEMDecodePrivateKey(privKeyPEM)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -722,7 +731,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 				zap.Duration("remaining", timeLeft))
 		}
 
-		privateKey, err := decodePrivateKey(certRes.PrivateKeyPEM)
+		privateKey, err := PEMDecodePrivateKey(certRes.PrivateKeyPEM)
 		if err != nil {
 			return err
 		}

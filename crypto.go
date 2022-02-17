@@ -36,8 +36,10 @@ import (
 	"golang.org/x/net/idna"
 )
 
-// encodePrivateKey marshals a EC or RSA private key into a PEM-encoded array of bytes.
-func encodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
+// PEMEncodePrivateKey marshals a private key into a PEM-encoded block.
+// The private key must be one of *ecdsa.PrivateKey, *rsa.PrivateKey, or
+// *ed25519.PrivateKey.
+func PEMEncodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
 	var pemType string
 	var keyBytes []byte
 	switch key := key.(type) {
@@ -65,11 +67,13 @@ func encodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
 	return pem.EncodeToMemory(&pemKey), nil
 }
 
-// decodePrivateKey loads a PEM-encoded ECC/RSA private key from an array of bytes.
+// PEMDecodePrivateKey loads a PEM-encoded ECC/RSA private key from an array of bytes.
 // Borrowed from Go standard library, to handle various private key and PEM block types.
-// https://github.com/golang/go/blob/693748e9fa385f1e2c3b91ca9acbb6c0ad2d133d/src/crypto/tls/tls.go#L291-L308
-// https://github.com/golang/go/blob/693748e9fa385f1e2c3b91ca9acbb6c0ad2d133d/src/crypto/tls/tls.go#L238)
-func decodePrivateKey(keyPEMBytes []byte) (crypto.Signer, error) {
+func PEMDecodePrivateKey(keyPEMBytes []byte) (crypto.Signer, error) {
+	// Modified from original:
+	// https://github.com/golang/go/blob/693748e9fa385f1e2c3b91ca9acbb6c0ad2d133d/src/crypto/tls/tls.go#L291-L308
+	// https://github.com/golang/go/blob/693748e9fa385f1e2c3b91ca9acbb6c0ad2d133d/src/crypto/tls/tls.go#L238
+
 	keyBlockDER, _ := pem.Decode(keyPEMBytes)
 
 	if keyBlockDER == nil {

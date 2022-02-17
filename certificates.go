@@ -57,6 +57,12 @@ type Certificate struct {
 	issuerKey string
 }
 
+// Empty returns true if the certificate struct is not filled out; at
+// least the tls.Certificate.Certificate field is expected to be set.
+func (cert Certificate) Empty() bool {
+	return len(cert.Certificate.Certificate) == 0
+}
+
 // NeedsRenewal returns true if the certificate is
 // expiring soon (according to cfg) or has expired.
 func (cert Certificate) NeedsRenewal(cfg *Config) bool {
@@ -251,11 +257,15 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 	// the leaf cert should be the one for the site; we must set
 	// the tls.Certificate.Leaf field so that TLS handshakes are
 	// more efficient
-	leaf, err := x509.ParseCertificate(tlsCert.Certificate[0])
-	if err != nil {
-		return err
+	leaf := cert.Certificate.Leaf
+	if leaf == nil {
+		var err error
+		leaf, err = x509.ParseCertificate(tlsCert.Certificate[0])
+		if err != nil {
+			return err
+		}
+		cert.Certificate.Leaf = leaf
 	}
-	cert.Certificate.Leaf = leaf
 
 	// for convenience, we do want to assemble all the
 	// subjects on the certificate into one list
@@ -393,9 +403,10 @@ func SubjectIsInternal(subj string) bool {
 // states that IP addresses must match exactly, but this function
 // does not attempt to distinguish IP addresses from internal or
 // external DNS names that happen to look like IP addresses.
-// It uses DNS wildcard matching logic.
+// It uses DNS wildcard matching logic and is case-insensitive.
 // https://tools.ietf.org/html/rfc2818#section-3.1
 func MatchWildcard(subject, wildcard string) bool {
+	subject, wildcard = strings.ToLower(subject), strings.ToLower(wildcard)
 	if subject == wildcard {
 		return true
 	}
