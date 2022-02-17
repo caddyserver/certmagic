@@ -72,11 +72,20 @@ type Config struct {
 	// Adds the must staple TLS extension to the CSR.
 	MustStaple bool
 
-	// The source for getting new certificates; the
-	// default Issuer is ACMEManager. If multiple
+	// Sources for getting new, managed certificates;
+	// the default Issuer is ACMEManager. If multiple
 	// issuers are specified, they will be tried in
 	// turn until one succeeds.
 	Issuers []Issuer
+
+	// Sources for getting new, unmanaged certificates.
+	// They will be invoked only during TLS handshakes
+	// before on-demand certificate management occurs,
+	// for certificates that are not already loaded into
+	// the in-memory cache.
+	//
+	// TODO: EXPERIMENTAL: subject to change and/or removal.
+	Managers []CertificateManager
 
 	// The source of new private keys for certificates;
 	// the default KeySource is StandardKeyGenerator.

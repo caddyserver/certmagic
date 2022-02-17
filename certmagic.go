@@ -262,21 +262,6 @@ type OnDemandConfig struct {
 	// request will be denied.
 	DecisionFunc func(name string) error
 
-	// CustomGetCertificate is an optional override for
-	// CertMagic's built-in GetCertificate for this
-	// config. If set, it will be called at every TLS
-	// handshake. If it returns a nil certificate and
-	// nil error, CertMagic's own GetCertificate will
-	// still continue as normal. Otherwise, the cert
-	// or error returned from this function will be used.
-	// If true is the middle return value, the certificate
-	// will be cached until close to expiration and reused
-	// until then; otherwise it will not be cached.
-	// Setting this field will not interrupt ACME TLS-ALPN
-	// challenge handshakes.
-	// TODO: EXPERIMENTAL: subject to change and/or removal.
-	CustomGetCertificates []CertificateGetter
-
 	// List of whitelisted hostnames (SNI values) for
 	// deferred (on-demand) obtaining of certificates.
 	// Used only by higher-level functions in this
@@ -294,18 +279,6 @@ type OnDemandConfig struct {
 	// have their run of any domain names they want.
 	// Only enforced if len > 0.
 	hostWhitelist []string
-}
-
-// CertificateGetter is a type that can get a certificate during
-// every TLS handshake (so it should be as fast as possible).
-// TODO: This is an EXPERIMENTAL API. It is subject to change/removal.
-type CertificateGetter interface {
-	// GetCertificate returns the certificate to use to complete the handshake,
-	// and true if CertMagic should cache and reuse the certificate until close to
-	// expiration, or false if it should not be cached. It returns nil+false+nil
-	// if there is no certificate available (but no error to speak of, either),
-	// and normal certificate logic will continue.
-	GetCertificate(context.Context, *tls.ClientHelloInfo) (*tls.Certificate, bool, error)
 }
 
 func (o *OnDemandConfig) whitelistContains(name string) bool {
@@ -399,6 +372,18 @@ type Issuer interface {
 // and are available as constants in our ACME library.
 type Revoker interface {
 	Revoke(ctx context.Context, cert CertificateResource, reason int) error
+}
+
+// CertificateManager is a type that manages certificates (keeps them renewed)
+// such that we can get certificates during TLS handshakes to immediately serve
+// to clients.
+//
+// TODO: This is an EXPERIMENTAL API. It is subject to change/removal.
+type CertificateManager interface {
+	// GetCertificate returns the certificate to use to complete the handshake.
+	// Since this is called during every TLS handshake, it must be very fast and not block.
+	// Returning (nil, nil) is valid and is simply treated as a no-op.
+	GetCertificate(context.Context, *tls.ClientHelloInfo) (*tls.Certificate, error)
 }
 
 // KeyGenerator can generate a private key.

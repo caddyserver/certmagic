@@ -257,11 +257,15 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 	// the leaf cert should be the one for the site; we must set
 	// the tls.Certificate.Leaf field so that TLS handshakes are
 	// more efficient
-	leaf, err := x509.ParseCertificate(tlsCert.Certificate[0])
-	if err != nil {
-		return err
+	leaf := cert.Certificate.Leaf
+	if leaf == nil {
+		var err error
+		leaf, err = x509.ParseCertificate(tlsCert.Certificate[0])
+		if err != nil {
+			return err
+		}
+		cert.Certificate.Leaf = leaf
 	}
-	cert.Certificate.Leaf = leaf
 
 	// for convenience, we do want to assemble all the
 	// subjects on the certificate into one list
