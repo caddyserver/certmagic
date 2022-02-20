@@ -252,6 +252,11 @@ type DNS01Solver struct {
 	// Preferred DNS resolver(s) to use when doing DNS lookups.
 	Resolvers []string
 
+	// Override the domain to set the TXT record on. This is
+	// to delegate the chanllenge to a different domain. Note
+	// that the solver doesn't follow CNAME/NS record.
+	OverrideDomain string
+
 	txtRecords   map[string]dnsPresentMemory // keyed by domain name
 	txtRecordsMu sync.Mutex
 }
@@ -259,6 +264,9 @@ type DNS01Solver struct {
 // Present creates the DNS TXT record for the given ACME challenge.
 func (s *DNS01Solver) Present(ctx context.Context, challenge acme.Challenge) error {
 	dnsName := challenge.DNS01TXTRecordName()
+	if s.OverrideDomain != "" {
+		dnsName = s.OverrideDomain
+	}
 	keyAuth := challenge.DNS01KeyAuthorization()
 
 	// multiple identifiers can have the same ACME challenge
@@ -304,6 +312,9 @@ func (s *DNS01Solver) Present(ctx context.Context, challenge acme.Challenge) err
 // timeout, whichever is first.
 func (s *DNS01Solver) Wait(ctx context.Context, challenge acme.Challenge) error {
 	dnsName := challenge.DNS01TXTRecordName()
+	if s.OverrideDomain != "" {
+		dnsName = s.OverrideDomain
+	}
 	keyAuth := challenge.DNS01KeyAuthorization()
 
 	timeout := s.PropagationTimeout
