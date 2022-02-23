@@ -185,8 +185,8 @@ func (am *ACMEManager) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 		transport := &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
 			DialContext:           dialer.DialContext,
-			TLSHandshakeTimeout:   15 * time.Second,
-			ResponseHeaderTimeout: 15 * time.Second,
+			TLSHandshakeTimeout:   HTTPTimeout,
+			ResponseHeaderTimeout: HTTPTimeout,
 			ExpectContinueTimeout: 2 * time.Second,
 			ForceAttemptHTTP2:     true,
 		}
