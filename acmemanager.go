@@ -231,33 +231,33 @@ func (am *ACMEManager) PreCheck(_ context.Context, names []string, interactive b
 
 func (am *ACMEManager) CheckAccountTOS(ctx context.Context, useTestCA, interactive bool) (bool, string, error) {
 	agreed := am.Agreed
-	TOS := ""
+	termsURL := ""
 	// Make sure the email is retrieved first
 	err := am.getEmail(interactive)
 	if err != nil {
-		return agreed, TOS, err
+		return agreed, termsURL, err
 	}
 
 	// Create the new client if necessary and get a client
 	client, err := am.newACMEClientWithAccount(ctx, useTestCA, interactive)
 	if err != nil {
-		return agreed, TOS, err
+		return agreed, termsURL, err
 	}
 	agreed = client.account.TermsOfServiceAgreed
 	// Get the most recent TOS
 	var dir acme.Directory
 	dir, err = client.acmeClient.GetDirectory(ctx)
 	if err != nil {
-		return agreed, TOS, err
+		return agreed, termsURL, err
 	}
 	if dir.Meta != nil {
-		TOS = dir.Meta.TermsOfService
+		termsURL = dir.Meta.TermsOfService
 	}
 	// If no TOS is found, then it should be implied to be accepted
-	if len(TOS) == 0 {
+	if len(termsURL) == 0 {
 		agreed = true
 	}
-	return agreed, TOS, nil
+	return agreed, termsURL, nil
 }
 
 // Issue implements the Issuer interface. It obtains a certificate for the given csr using
@@ -449,10 +449,6 @@ func (am *ACMEManager) Revoke(ctx context.Context, cert CertificateResource, rea
 	client, err := am.newACMEClientWithAccount(ctx, false, false)
 	if err != nil {
 		return err
-	}
-	// TODO: Maybe the user does not need to accept TOS just to revoke a certificate
-	if !client.account.TermsOfServiceAgreed {
-		return fmt.Errorf("user must agree to CA terms")
 	}
 
 	certs, err := parseCertsFromPEMBundle(cert.CertificatePEM)
