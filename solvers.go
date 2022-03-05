@@ -253,7 +253,7 @@ type DNS01Solver struct {
 	Resolvers []string
 
 	// Override the domain to set the TXT record on. This is
-	// to delegate the chanllenge to a different domain. Note
+	// to delegate the challenge to a different domain. Note
 	// that the solver doesn't follow CNAME/NS record.
 	OverrideDomain string
 
