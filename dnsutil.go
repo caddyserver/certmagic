@@ -214,10 +214,20 @@ func checkDNSPropagation(fqdn, value string, resolvers []string) (bool, error) {
 		fqdn += "."
 	}
 
+	// Initial attempt to resolve at the recursive NS
+	r, err := dnsQuery(fqdn, dns.TypeTXT, resolvers, true)
+	if err != nil {
+		return false, err
+	}
+
 	// TODO: make this configurable, maybe
 	// if !p.requireCompletePropagation {
 	// 	return true, nil
 	// }
+
+	if r.Rcode == dns.RcodeSuccess {
+		fqdn = updateDomainWithCName(r, fqdn)
+	}
 
 	authoritativeNss, err := lookupNameservers(fqdn, resolvers)
 	if err != nil {
