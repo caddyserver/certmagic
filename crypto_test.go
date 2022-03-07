@@ -33,19 +33,19 @@ func TestEncodeDecodeRSAPrivateKey(t *testing.T) {
 	}
 
 	// test save
-	savedBytes, err := encodePrivateKey(privateKey)
+	savedBytes, err := PEMEncodePrivateKey(privateKey)
 	if err != nil {
 		t.Fatal("error saving private key:", err)
 	}
 
 	// test load
-	loadedKey, err := decodePrivateKey(savedBytes)
+	loadedKey, err := PEMDecodePrivateKey(savedBytes)
 	if err != nil {
 		t.Error("error loading private key:", err)
 	}
 
 	// test load (should fail)
-	_, err = decodePrivateKey(savedBytes[2:])
+	_, err = PEMDecodePrivateKey(savedBytes[2:])
 	if err == nil {
 		t.Error("loading private key should have failed")
 	}
@@ -63,13 +63,13 @@ func TestSaveAndLoadECCPrivateKey(t *testing.T) {
 	}
 
 	// test save
-	savedBytes, err := encodePrivateKey(privateKey)
+	savedBytes, err := PEMEncodePrivateKey(privateKey)
 	if err != nil {
 		t.Fatal("error saving private key:", err)
 	}
 
 	// test load
-	loadedKey, err := decodePrivateKey(savedBytes)
+	loadedKey, err := PEMDecodePrivateKey(savedBytes)
 	if err != nil {
 		t.Error("error loading private key:", err)
 	}

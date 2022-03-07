@@ -401,6 +401,18 @@ type Revoker interface {
 	Revoke(ctx context.Context, cert CertificateResource, reason int) error
 }
 
+// CertificateManager is a type that manages certificates (keeps them renewed)
+// such that we can get certificates during TLS handshakes to immediately serve
+// to clients.
+//
+// TODO: This is an EXPERIMENTAL API. It is subject to change/removal.
+type CertificateManager interface {
+	// GetCertificate returns the certificate to use to complete the handshake.
+	// Since this is called during every TLS handshake, it must be very fast and not block.
+	// Returning (nil, nil) is valid and is simply treated as a no-op.
+	GetCertificate(context.Context, *tls.ClientHelloInfo) (*tls.Certificate, error)
+}
+
 // KeyGenerator can generate a private key.
 type KeyGenerator interface {
 	// GenerateKey generates a private key. The returned

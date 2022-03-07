@@ -35,7 +35,7 @@ import (
 // with the cluster.
 //
 // The Load, Delete, List, and Stat methods should return
-// ErrNotExist if the key does not exist.
+// fs.ErrNotExist if the key does not exist.
 //
 // Implementations of Storage must be safe for concurrent use.
 type Storage interface {
@@ -273,14 +273,6 @@ const (
 // safeKeyRE matches any undesirable characters in storage keys.
 // Note that this allows dots, so you'll have to strip ".." manually.
 var safeKeyRE = regexp.MustCompile(`[^\w@.-]`)
-
-// ErrNotExist is returned by Storage implementations when
-// a resource is not found. It is similar to os.IsNotExist
-// except this is a type, not a variable.
-// TODO: use new Go error wrapping conventions
-type ErrNotExist interface {
-	error
-}
 
 // defaultFileStorage is a convenient, default storage
 // implementation using the local file system.

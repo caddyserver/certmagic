@@ -19,8 +19,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"io/ioutil"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -43,6 +43,9 @@ type Certificate struct {
 	Tags []string
 
 	// OCSP contains the certificate's parsed OCSP response.
+	// It is not necessarily the response that is stapled
+	// (e.g. if the status is not Good), it is simply the
+	// most recent OCSP response we have for this certificate.
 	ocsp *ocsp.Response
 
 	// The hex-encoded hash of this cert's chain's bytes.
@@ -53,6 +56,12 @@ type Certificate struct {
 
 	// The unique string identifying the issuer of this certificate.
 	issuerKey string
+}
+
+// Empty returns true if the certificate struct is not filled out; at
+// least the tls.Certificate.Certificate field is expected to be set.
+func (cert Certificate) Empty() bool {
+	return len(cert.Certificate.Certificate) == 0
 }
 
 // NeedsRenewal returns true if the certificate is
@@ -160,7 +169,7 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls
 	if err != nil {
 		return err
 	}
-	_, err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
+	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
 	if err != nil && cfg.Logger != nil {
 		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
 	}
@@ -190,11 +199,11 @@ func (cfg *Config) CacheUnmanagedCertificatePEMBytes(ctx context.Context, certBy
 // the certificate except for the Managed and OnDemand flags.
 // (It is up to the caller to set those.) It staples OCSP.
 func (cfg Config) makeCertificateFromDiskWithOCSP(ctx context.Context, storage Storage, certFile, keyFile string) (Certificate, error) {
-	certPEMBlock, err := ioutil.ReadFile(certFile)
+	certPEMBlock, err := os.ReadFile(certFile)
 	if err != nil {
 		return Certificate{}, err
 	}
-	keyPEMBlock, err := ioutil.ReadFile(keyFile)
+	keyPEMBlock, err := os.ReadFile(keyFile)
 	if err != nil {
 		return Certificate{}, err
 	}
@@ -208,9 +217,9 @@ func (cfg Config) makeCertificateWithOCSP(ctx context.Context, certPEMBlock, key
 	if err != nil {
 		return cert, err
 	}
-	_, err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
+	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
 	if err != nil && cfg.Logger != nil {
-		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
+		cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
 	}
 	return cert, nil
 }
@@ -249,11 +258,15 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 	// the leaf cert should be the one for the site; we must set
 	// the tls.Certificate.Leaf field so that TLS handshakes are
 	// more efficient
-	leaf, err := x509.ParseCertificate(tlsCert.Certificate[0])
-	if err != nil {
-		return err
+	leaf := cert.Certificate.Leaf
+	if leaf == nil {
+		var err error
+		leaf, err = x509.ParseCertificate(tlsCert.Certificate[0])
+		if err != nil {
+			return err
+		}
+		cert.Certificate.Leaf = leaf
 	}
-	cert.Certificate.Leaf = leaf
 
 	// for convenience, we do want to assemble all the
 	// subjects on the certificate into one list
@@ -311,17 +324,17 @@ func (cfg *Config) managedCertInStorageExpiresSoon(ctx context.Context, cert Cer
 // on oldCert into the cache, from storage. This also replaces the old certificate
 // with the new one, so that all configurations that used the old cert now point
 // to the new cert. It assumes that the new certificate for oldCert.Names[0] is
-// already in storage.
-func (cfg *Config) reloadManagedCertificate(ctx context.Context, oldCert Certificate) error {
+// already in storage. It returns the newly-loaded certificate if successful.
+func (cfg *Config) reloadManagedCertificate(ctx context.Context, oldCert Certificate) (Certificate, error) {
 	if cfg.Logger != nil {
 		cfg.Logger.Info("reloading managed certificate", zap.Strings("identifiers", oldCert.Names))
 	}
 	newCert, err := cfg.loadManagedCertificate(ctx, oldCert.Names[0])
 	if err != nil {
-		return fmt.Errorf("loading managed certificate for %v from storage: %v", oldCert.Names, err)
+		return Certificate{}, fmt.Errorf("loading managed certificate for %v from storage: %v", oldCert.Names, err)
 	}
 	cfg.certCache.replaceCertificate(oldCert, newCert)
-	return nil
+	return newCert, nil
 }
 
 // SubjectQualifiesForCert returns true if subj is a name which,
@@ -391,9 +404,10 @@ func SubjectIsInternal(subj string) bool {
 // states that IP addresses must match exactly, but this function
 // does not attempt to distinguish IP addresses from internal or
 // external DNS names that happen to look like IP addresses.
-// It uses DNS wildcard matching logic.
+// It uses DNS wildcard matching logic and is case-insensitive.
 // https://tools.ietf.org/html/rfc2818#section-3.1
 func MatchWildcard(subject, wildcard string) bool {
+	subject, wildcard = strings.ToLower(subject), strings.ToLower(wildcard)
 	if subject == wildcard {
 		return true
 	}

@@ -191,7 +191,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 		cfg := configs[oldCert.Names[0]]
 
 		// crucially, this happens OUTSIDE a lock on the certCache
-		err := cfg.reloadManagedCertificate(ctx, oldCert)
+		_, err := cfg.reloadManagedCertificate(ctx, oldCert)
 		if err != nil {
 			if log != nil {
 				log.Error("loading renewed certificate",
@@ -264,7 +264,7 @@ func (certCache *Cache) queueRenewalTask(ctx context.Context, oldCert Certificat
 
 		// successful renewal, so update in-memory cache by loading
 		// renewed certificate so it will be used with handshakes
-		err = cfg.reloadManagedCertificate(ctx, oldCert)
+		_, err = cfg.reloadManagedCertificate(ctx, oldCert)
 		if err != nil {
 			return ErrNoRetry{fmt.Errorf("%v %v", oldCert.Names, err)}
 		}
@@ -293,15 +293,15 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		cert           Certificate
 		certHash       string
 		lastNextUpdate time.Time
+		cfg            *Config
 	}
 	type renewQueueEntry struct {
-		oldCert  Certificate
-		ocspResp *ocsp.Response
+		oldCert Certificate
+		cfg     *Config
 	}
 	updated := make(map[string]ocspUpdate)
 	var updateQueue []updateQueueEntry // certs that need a refreshed staple
 	var renewQueue []renewQueueEntry   // certs that need to be renewed (due to revocation)
-	configs := make(map[string]*Config)
 
 	// obtain brief read lock during our scan to see which staples need updating
 	certCache.mu.RLock()
@@ -310,14 +310,33 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		if cert.Leaf == nil || cert.Expired() {
 			continue
 		}
+		cfg, err := certCache.getConfig(cert)
+		if err != nil {
+			if logger != nil {
+				logger.Error("unable to get automation config for certificate; maintenance for this certificate will likely fail",
+					zap.Strings("identifiers", cert.Names),
+					zap.Error(err))
+			}
+			continue
+		}
+		// always try to replace revoked certificates, even if OCSP response is still fresh
+		if certShouldBeForceRenewed(cert) {
+			renewQueue = append(renewQueue, renewQueueEntry{
+				oldCert: cert,
+				cfg:     cfg,
+			})
+			continue
+		}
+		// if the status is not fresh, get a new one
 		var lastNextUpdate time.Time
 		if cert.ocsp != nil {
 			lastNextUpdate = cert.ocsp.NextUpdate
-			if freshOCSP(cert.ocsp) {
-				continue // no need to update staple if ours is still fresh
+			if cert.ocsp.Status != ocsp.Unknown && freshOCSP(cert.ocsp) {
+				// no need to update our staple if still fresh and not Unknown
+				continue
 			}
 		}
-		updateQueue = append(updateQueue, updateQueueEntry{cert, certHash, lastNextUpdate})
+		updateQueue = append(updateQueue, updateQueueEntry{cert, certHash, lastNextUpdate, cfg})
 	}
 	certCache.mu.RUnlock()
 
@@ -327,16 +346,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 		certHash := qe.certHash
 		lastNextUpdate := qe.lastNextUpdate
 
-		cfg, err := certCache.getConfig(cert)
-		if err != nil {
-			if logger != nil {
-				logger.Error("unable to refresh OCSP staple because getting automation config for certificate failed",
-					zap.Strings("identifiers", cert.Names),
-					zap.Error(err))
-			}
-			continue
-		}
-		if cfg == nil {
+		if qe.cfg == nil {
 			// this is bad if this happens, probably a programmer error (oops)
 			if logger != nil {
 				logger.Error("no configuration associated with certificate; unable to manage OCSP staples",
@@ -345,8 +355,8 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 			continue
 		}
 
-		ocspResp, err := stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
-		if err != nil || ocspResp == nil {
+		err := stapleOCSP(ctx, qe.cfg.OCSP, qe.cfg.Storage, &cert, nil)
+		if err != nil {
 			if cert.ocsp != nil {
 				// if there was no staple before, that's fine; otherwise we should log the error
 				if logger != nil {
@@ -360,8 +370,9 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 
 		// By this point, we've obtained the latest OCSP response.
 		// If there was no staple before, or if the response is updated, make
-		// sure we apply the update to all names on the certificate.
-		if cert.ocsp != nil && (lastNextUpdate.IsZero() || lastNextUpdate != cert.ocsp.NextUpdate) {
+		// sure we apply the update to all names on the certificate if
+		// the status is still Good.
+		if cert.ocsp != nil && cert.ocsp.Status == ocsp.Good && (lastNextUpdate.IsZero() || lastNextUpdate != cert.ocsp.NextUpdate) {
 			if logger != nil {
 				logger.Info("advancing OCSP staple",
 					zap.Strings("identifiers", cert.Names),
@@ -371,13 +382,12 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 			updated[certHash] = ocspUpdate{rawBytes: cert.Certificate.OCSPStaple, parsed: cert.ocsp}
 		}
 
-		// If a managed certificate was revoked, we should attempt to replace it with a new one.
-		if cert.managed && ocspResp.Status == ocsp.Revoked && len(cert.Names) > 0 {
+		// If the updated staple shows that the certificate was revoked, we should immediately renew it
+		if certShouldBeForceRenewed(cert) {
 			renewQueue = append(renewQueue, renewQueueEntry{
-				oldCert:  cert,
-				ocspResp: ocspResp,
+				oldCert: cert,
+				cfg:     qe.cfg,
 			})
-			configs[cert.Names[0]] = cfg
 		}
 	}
 
@@ -394,63 +404,11 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	// We attempt to replace any certificates that were revoked.
 	// Crucially, this happens OUTSIDE a lock on the certCache.
 	for _, renew := range renewQueue {
-		if logger != nil {
-			logger.Warn("OCSP status for managed certificate is REVOKED; attempting to replace with new certificate",
+		_, err := renew.cfg.forceRenew(ctx, logger, renew.oldCert)
+		if err != nil && logger != nil {
+			logger.Info("forcefully renewing certificate due to REVOKED status",
 				zap.Strings("identifiers", renew.oldCert.Names),
-				zap.Time("expiration", renew.oldCert.Leaf.NotAfter))
-		}
-
-		renewName := renew.oldCert.Names[0]
-		cfg := configs[renewName]
-
-		// if revoked for key compromise, we can't be sure whether the storage of
-		// the key is still safe; however, we KNOW the old key is not safe, and we
-		// can only hope by the time of revocation that storage has been secured;
-		// key management is not something we want to get into, but in this case
-		// it seems prudent to replace the key - and since renewal requires reuse
-		// of a prior key, we can't do a "renew" to replace the cert if we need a
-		// new key, so we'll have to do an obtain instead
-		var obtainInsteadOfRenew bool
-		if renew.ocspResp.RevocationReason == acme.ReasonKeyCompromise {
-			err := cfg.moveCompromisedPrivateKey(ctx, renew.oldCert, logger)
-			if err != nil && logger != nil {
-				logger.Error("could not remove compromised private key from use",
-					zap.Strings("identifiers", renew.oldCert.Names),
-					zap.String("issuer", renew.oldCert.issuerKey),
-					zap.Error(err))
-			}
-			obtainInsteadOfRenew = true
-		}
-
-		var err error
-		if obtainInsteadOfRenew {
-			err = cfg.ObtainCertAsync(ctx, renewName)
-		} else {
-			// notice that we force renewal; otherwise, it might see that the
-			// certificate isn't close to expiring and return, but we really
-			// need a replacement certificate! see issue #4191
-			err = cfg.RenewCertAsync(ctx, renewName, true)
-		}
-		if err != nil {
-			// probably better to not serve a revoked certificate at all
-			if logger != nil {
-				logger.Error("unable to obtain new to certificate after OCSP status of REVOKED; removing from cache",
-					zap.Strings("identifiers", renew.oldCert.Names),
-					zap.Error(err))
-			}
-			certCache.mu.Lock()
-			certCache.removeCertificate(renew.oldCert)
-			certCache.mu.Unlock()
-			continue
-		}
-		err = cfg.reloadManagedCertificate(ctx, renew.oldCert)
-		if err != nil {
-			if logger != nil {
-				logger.Error("after obtaining new certificate due to OCSP status of REVOKED",
-					zap.Strings("identifiers", renew.oldCert.Names),
-					zap.Error(err))
-			}
-			continue
+				zap.Error(err))
 		}
 	}
 }
@@ -599,6 +557,69 @@ func deleteExpiredCerts(ctx context.Context, storage Storage, gracePeriod time.D
 	return nil
 }
 
+// forceRenew forcefully renews cert and replaces it in the cache, and returns the new certificate. It is intended
+// for use primarily in the case of cert revocation. This MUST NOT be called within a lock on cfg.certCacheMu.
+func (cfg *Config) forceRenew(ctx context.Context, logger *zap.Logger, cert Certificate) (Certificate, error) {
+	if logger != nil {
+		if cert.ocsp != nil && cert.ocsp.Status == ocsp.Revoked {
+			logger.Warn("OCSP status for managed certificate is REVOKED; attempting to replace with new certificate",
+				zap.Strings("identifiers", cert.Names),
+				zap.Time("expiration", cert.Leaf.NotAfter))
+		} else {
+			logger.Warn("forcefully renewing certificate",
+				zap.Strings("identifiers", cert.Names),
+				zap.Time("expiration", cert.Leaf.NotAfter))
+		}
+	}
+
+	renewName := cert.Names[0]
+
+	// if revoked for key compromise, we can't be sure whether the storage of
+	// the key is still safe; however, we KNOW the old key is not safe, and we
+	// can only hope by the time of revocation that storage has been secured;
+	// key management is not something we want to get into, but in this case
+	// it seems prudent to replace the key - and since renewal requires reuse
+	// of a prior key, we can't do a "renew" to replace the cert if we need a
+	// new key, so we'll have to do an obtain instead
+	var obtainInsteadOfRenew bool
+	if cert.ocsp != nil && cert.ocsp.RevocationReason == acme.ReasonKeyCompromise {
+		err := cfg.moveCompromisedPrivateKey(ctx, cert, logger)
+		if err != nil && logger != nil {
+			logger.Error("could not remove compromised private key from use",
+				zap.Strings("identifiers", cert.Names),
+				zap.String("issuer", cert.issuerKey),
+				zap.Error(err))
+		}
+		obtainInsteadOfRenew = true
+	}
+
+	var err error
+	if obtainInsteadOfRenew {
+		err = cfg.ObtainCertAsync(ctx, renewName)
+	} else {
+		// notice that we force renewal; otherwise, it might see that the
+		// certificate isn't close to expiring and return, but we really
+		// need a replacement certificate! see issue #4191
+		err = cfg.RenewCertAsync(ctx, renewName, true)
+	}
+	if err != nil {
+		if cert.ocsp != nil && cert.ocsp.Status == ocsp.Revoked {
+			// probably better to not serve a revoked certificate at all
+			if logger != nil {
+				logger.Error("unable to obtain new to certificate after OCSP status of REVOKED; removing from cache",
+					zap.Strings("identifiers", cert.Names),
+					zap.Error(err))
+			}
+			cfg.certCache.mu.Lock()
+			cfg.certCache.removeCertificate(cert)
+			cfg.certCache.mu.Unlock()
+		}
+		return cert, fmt.Errorf("unable to forcefully get new certificate for %v: %w", cert.Names, err)
+	}
+
+	return cfg.reloadManagedCertificate(ctx, cert)
+}
+
 // moveCompromisedPrivateKey moves the private key for cert to a ".compromised" file
 // by copying the data to the new file, then deleting the old one.
 func (cfg *Config) moveCompromisedPrivateKey(ctx context.Context, cert Certificate, logger *zap.Logger) error {
@@ -628,6 +649,15 @@ func (cfg *Config) moveCompromisedPrivateKey(ctx context.Context, cert Certifica
 		zap.String("issuer", cert.issuerKey))
 
 	return nil
+}
+
+// certShouldBeForceRenewed returns true if cert should be forcefully renewed
+// (like if it is revoked according to its OCSP response).
+func certShouldBeForceRenewed(cert Certificate) bool {
+	return cert.managed &&
+		len(cert.Names) > 0 &&
+		cert.ocsp != nil &&
+		cert.ocsp.Status == ocsp.Revoked
 }
 
 const (

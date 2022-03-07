@@ -27,8 +27,10 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"io/fs"
 	"sort"
 	"strings"
 
@@ -37,8 +39,10 @@ import (
 	"golang.org/x/net/idna"
 )
 
-// encodePrivateKey marshals a EC or RSA private key into a PEM-encoded array of bytes.
-func encodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
+// PEMEncodePrivateKey marshals a private key into a PEM-encoded block.
+// The private key must be one of *ecdsa.PrivateKey, *rsa.PrivateKey, or
+// *ed25519.PrivateKey.
+func PEMEncodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
 	var pemType string
 	var keyBytes []byte
 	switch key := key.(type) {
@@ -66,11 +70,13 @@ func encodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
 	return pem.EncodeToMemory(&pemKey), nil
 }
 
-// decodePrivateKey loads a PEM-encoded ECC/RSA private key from an array of bytes.
+// PEMDecodePrivateKey loads a PEM-encoded ECC/RSA private key from an array of bytes.
 // Borrowed from Go standard library, to handle various private key and PEM block types.
-// https://github.com/golang/go/blob/693748e9fa385f1e2c3b91ca9acbb6c0ad2d133d/src/crypto/tls/tls.go#L291-L308
-// https://github.com/golang/go/blob/693748e9fa385f1e2c3b91ca9acbb6c0ad2d133d/src/crypto/tls/tls.go#L238)
-func decodePrivateKey(keyPEMBytes []byte) (crypto.Signer, error) {
+func PEMDecodePrivateKey(keyPEMBytes []byte) (crypto.Signer, error) {
+	// Modified from original:
+	// https://github.com/golang/go/blob/693748e9fa385f1e2c3b91ca9acbb6c0ad2d133d/src/crypto/tls/tls.go#L291-L308
+	// https://github.com/golang/go/blob/693748e9fa385f1e2c3b91ca9acbb6c0ad2d133d/src/crypto/tls/tls.go#L238
+
 	keyBlockDER, _ := pem.Decode(keyPEMBytes)
 
 	if keyBlockDER == nil {
@@ -189,7 +195,7 @@ func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey s
 	for _, issuer := range cfg.Issuers {
 		certRes, err := cfg.loadCertResource(ctx, issuer, certNamesKey)
 		if err != nil {
-			if _, ok := err.(ErrNotExist); ok {
+			if errors.Is(err, fs.ErrNotExist) {
 				// not a problem, but we need to remember the error
 				// in case we end up not finding any cert resources
 				// since we'll need an error to return in that case
@@ -241,16 +247,16 @@ func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certName
 		return CertificateResource{}, fmt.Errorf("converting '%s' to ASCII: %v", certNamesKey, err)
 	}
 
-	certBytes, err := cfg.Storage.Load(ctx, StorageKeys.SiteCert(certRes.issuerKey, normalizedName))
-	if err != nil {
-		return CertificateResource{}, err
-	}
-	certRes.CertificatePEM = certBytes
 	keyBytes, err := cfg.Storage.Load(ctx, StorageKeys.SitePrivateKey(certRes.issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err
 	}
 	certRes.PrivateKeyPEM = keyBytes
+	certBytes, err := cfg.Storage.Load(ctx, StorageKeys.SiteCert(certRes.issuerKey, normalizedName))
+	if err != nil {
+		return CertificateResource{}, err
+	}
+	certRes.CertificatePEM = certBytes
 	metaBytes, err := cfg.Storage.Load(ctx, StorageKeys.SiteMeta(certRes.issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err

@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	weakrand "math/rand"
 	"net"
 	"net/url"
@@ -35,6 +36,7 @@ import (
 	"github.com/mholt/acmez"
 	"github.com/mholt/acmez/acme"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ocsp"
 	"golang.org/x/net/idna"
 )
 
@@ -71,11 +73,20 @@ type Config struct {
 	// Adds the must staple TLS extension to the CSR.
 	MustStaple bool
 
-	// The source for getting new certificates; the
-	// default Issuer is ACMEManager. If multiple
+	// Sources for getting new, managed certificates;
+	// the default Issuer is ACMEManager. If multiple
 	// issuers are specified, they will be tried in
 	// turn until one succeeds.
 	Issuers []Issuer
+
+	// Sources for getting new, unmanaged certificates.
+	// They will be invoked only during TLS handshakes
+	// before on-demand certificate management occurs,
+	// for certificates that are not already loaded into
+	// the in-memory cache.
+	//
+	// TODO: EXPERIMENTAL: subject to change and/or removal.
+	Managers []CertificateManager
 
 	// The source of new private keys for certificates;
 	// the default KeySource is StandardKeyGenerator.
@@ -319,7 +330,7 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 	// first try loading existing certificate from storage
 	cert, err := cfg.CacheManagedCertificate(ctx, domainName)
 	if err != nil {
-		if _, ok := err.(ErrNotExist); !ok {
+		if !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("%s: caching certificate: %v", domainName, err)
 		}
 		// if we don't have one in storage, obtain one
@@ -358,33 +369,41 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 		return obtain()
 	}
 
-	// for an existing certificate, make sure it is renewed
+	// for an existing certificate, make sure it is renewed; or if it is revoked,
+	// force a renewal even if it's not expiring
 	renew := func() error {
-		var err error
-		if async {
-			err = cfg.RenewCertAsync(ctx, domainName, false)
-		} else {
-			err = cfg.RenewCertSync(ctx, domainName, false)
+		// first, ensure status is not revoked (it was just refreshed in CacheManagedCertificate above)
+		if !cert.Expired() && cert.ocsp != nil && cert.ocsp.Status == ocsp.Revoked {
+			_, err = cfg.forceRenew(ctx, cfg.Logger, cert)
+			return err
 		}
-		if err != nil {
-			return fmt.Errorf("%s: renewing certificate: %w", domainName, err)
+
+		// otherwise, simply renew the certificate if needed
+		if cert.NeedsRenewal(cfg) {
+			var err error
+			if async {
+				err = cfg.RenewCertAsync(ctx, domainName, false)
+			} else {
+				err = cfg.RenewCertSync(ctx, domainName, false)
+			}
+			if err != nil {
+				return fmt.Errorf("%s: renewing certificate: %w", domainName, err)
+			}
+			// successful renewal, so update in-memory cache
+			_, err = cfg.reloadManagedCertificate(ctx, cert)
+			if err != nil {
+				return fmt.Errorf("%s: reloading renewed certificate into memory: %v", domainName, err)
+			}
 		}
-		// successful renewal, so update in-memory cache
-		err = cfg.reloadManagedCertificate(ctx, cert)
-		if err != nil {
-			return fmt.Errorf("%s: reloading renewed certificate into memory: %v", domainName, err)
-		}
+
 		return nil
 	}
-	if cert.NeedsRenewal(cfg) {
-		if async {
-			jm.Submit(cfg.Logger, "renew_"+domainName, renew)
-			return nil
-		}
-		return renew()
-	}
 
-	return nil
+	if async {
+		jm.Submit(cfg.Logger, "renew_"+domainName, renew)
+		return nil
+	}
+	return renew()
 }
 
 // Unmanage causes the certificates for domainNames to stop being managed.
@@ -490,7 +509,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			if err != nil {
 				return err
 			}
-			privKeyPEM, err = encodePrivateKey(privKey)
+			privKeyPEM, err = PEMEncodePrivateKey(privKey)
 			if err != nil {
 				return err
 			}
@@ -587,7 +606,7 @@ func (cfg *Config) reusePrivateKey(ctx context.Context, domain string) (privKey 
 		// see if this issuer location in storage has a private key for the domain
 		privateKeyStorageKey := StorageKeys.SitePrivateKey(issuer.IssuerKey(), domain)
 		privKeyPEM, err = cfg.Storage.Load(ctx, privateKeyStorageKey)
-		if _, ok := err.(ErrNotExist); ok {
+		if errors.Is(err, fs.ErrNotExist) {
 			err = nil // obviously, it's OK to not have a private key; so don't prevent obtaining a cert
 			continue
 		}
@@ -596,7 +615,7 @@ func (cfg *Config) reusePrivateKey(ctx context.Context, domain string) (privKey 
 		}
 
 		// we loaded a private key; try decoding it so we can use it
-		privKey, err = decodePrivateKey(privKeyPEM)
+		privKey, err = PEMDecodePrivateKey(privKeyPEM)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -713,7 +732,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 				zap.Duration("remaining", timeLeft))
 		}
 
-		privateKey, err := decodePrivateKey(certRes.PrivateKeyPEM)
+		privateKey, err := PEMDecodePrivateKey(certRes.PrivateKeyPEM)
 		if err != nil {
 			return err
 		}
@@ -928,7 +947,7 @@ func (cfg *Config) getChallengeInfo(ctx context.Context, identifier string) (Cha
 		if err == nil {
 			break
 		}
-		if _, ok := err.(ErrNotExist); ok {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		return Challenge{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)
