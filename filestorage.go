@@ -110,6 +110,9 @@ func (s *FileStorage) List(ctx context.Context, prefix string, recursive bool) (
 		if fpath == walkPrefix {
 			return nil
 		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 
 		suffix, err := filepath.Rel(walkPrefix, fpath)
 		if err != nil {
