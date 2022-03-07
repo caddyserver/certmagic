@@ -289,8 +289,6 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 	loadDynamically := cfg.OnDemand != nil || cacheAlmostFull
 
 	if loadDynamically && loadIfNecessary {
-		ctx := hello.Context()
-
 		// Then check to see if we have one on disk
 		// TODO: As suggested here, https://caddy.community/t/error-tls-alert-internal-error-592-again/13272/30?u=matt,
 		// it might be a good idea to check with the DecisionFunc or allowlist first before even loading the certificate

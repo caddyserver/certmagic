@@ -37,7 +37,8 @@ import (
 // The Load, Delete, List, and Stat methods should return
 // fs.ErrNotExist if the key does not exist.
 //
-// Implementations of Storage must be safe for concurrent use.
+// Implementations of Storage must be safe for concurrent use
+// and honor context cancellations.
 type Storage interface {
 	// Locker provides atomic synchronization
 	// operations, making Storage safe to share.

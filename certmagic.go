@@ -51,10 +51,7 @@ import (
 
 // HTTPS serves mux for all domainNames using the HTTP
 // and HTTPS ports, redirecting all HTTP requests to HTTPS.
-// It uses the Default config.
-//
-// A default background context is used. See HTTPSWithContext
-// to provide your own context.
+// It uses the Default config and a background context.
 //
 // This high-level convenience function is opinionated and
 // applies sane defaults for production use, including
@@ -69,28 +66,8 @@ import (
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
 func HTTPS(domainNames []string, mux http.Handler) error {
-	return HTTPSWithContext(context.Background(), domainNames, mux)
-}
+	ctx := context.Background()
 
-// HTTPSWithContext serves mux for all domainNames using the HTTP
-// and HTTPS ports, redirecting all HTTP requests to HTTPS.
-// It uses the Default config.
-//
-// The given context is propagated into the HTTP servers.
-//
-// This high-level convenience function is opinionated and
-// applies sane defaults for production use, including
-// timeouts for HTTP requests and responses. To allow very
-// long-lived connections, you should make your own
-// http.Server values and use this package's Listen(), TLS(),
-// or Config.TLSConfig() functions to customize to your needs.
-// For example, servers which need to support large uploads or
-// downloads with slow clients may need to use longer timeouts,
-// thus this function is not suitable.
-//
-// Calling this function signifies your acceptance to
-// the CA's Subscriber Agreement and/or Terms of Service.
-func HTTPSWithContext(ctx context.Context, domainNames []string, mux http.Handler) error {
 	if mux == nil {
 		mux = http.DefaultServeMux
 	}
