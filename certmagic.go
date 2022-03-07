@@ -51,7 +51,7 @@ import (
 
 // HTTPS serves mux for all domainNames using the HTTP
 // and HTTPS ports, redirecting all HTTP requests to HTTPS.
-// It uses the Default config.
+// It uses the Default config and a background context.
 //
 // This high-level convenience function is opinionated and
 // applies sane defaults for production use, including
@@ -66,6 +66,8 @@ import (
 // Calling this function signifies your acceptance to
 // the CA's Subscriber Agreement and/or Terms of Service.
 func HTTPS(domainNames []string, mux http.Handler) error {
+	ctx := context.Background()
+
 	if mux == nil {
 		mux = http.DefaultServeMux
 	}
@@ -73,7 +75,7 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 	DefaultACME.Agreed = true
 	cfg := NewDefault()
 
-	err := cfg.ManageSync(context.Background(), domainNames)
+	err := cfg.ManageSync(ctx, domainNames)
 	if err != nil {
 		return err
 	}
@@ -124,6 +126,7 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      5 * time.Second,
 		IdleTimeout:       5 * time.Second,
+		BaseContext:       func(listener net.Listener) context.Context { return ctx },
 	}
 	if len(cfg.Issuers) > 0 {
 		if am, ok := cfg.Issuers[0].(*ACMEManager); ok {
@@ -136,6 +139,7 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 		WriteTimeout:      2 * time.Minute,
 		IdleTimeout:       5 * time.Minute,
 		Handler:           mux,
+		BaseContext:       func(listener net.Listener) context.Context { return ctx },
 	}
 
 	log.Printf("%v Serving HTTP->HTTPS on %s and %s",

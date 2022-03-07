@@ -70,13 +70,13 @@ type FileStorage struct {
 }
 
 // Exists returns true if key exists in s.
-func (s *FileStorage) Exists(key string) bool {
+func (s *FileStorage) Exists(_ context.Context, key string) bool {
 	_, err := os.Stat(s.Filename(key))
 	return !errors.Is(err, fs.ErrNotExist)
 }
 
 // Store saves value at key.
-func (s *FileStorage) Store(key string, value []byte) error {
+func (s *FileStorage) Store(_ context.Context, key string, value []byte) error {
 	filename := s.Filename(key)
 	err := os.MkdirAll(filepath.Dir(filename), 0700)
 	if err != nil {
@@ -86,17 +86,17 @@ func (s *FileStorage) Store(key string, value []byte) error {
 }
 
 // Load retrieves the value at key.
-func (s *FileStorage) Load(key string) ([]byte, error) {
+func (s *FileStorage) Load(_ context.Context, key string) ([]byte, error) {
 	return os.ReadFile(s.Filename(key))
 }
 
 // Delete deletes the value at key.
-func (s *FileStorage) Delete(key string) error {
+func (s *FileStorage) Delete(_ context.Context, key string) error {
 	return os.Remove(s.Filename(key))
 }
 
 // List returns all keys that match prefix.
-func (s *FileStorage) List(prefix string, recursive bool) ([]string, error) {
+func (s *FileStorage) List(ctx context.Context, prefix string, recursive bool) ([]string, error) {
 	var keys []string
 	walkPrefix := s.Filename(prefix)
 
@@ -109,6 +109,9 @@ func (s *FileStorage) List(prefix string, recursive bool) ([]string, error) {
 		}
 		if fpath == walkPrefix {
 			return nil
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
 		}
 
 		suffix, err := filepath.Rel(walkPrefix, fpath)
@@ -127,7 +130,7 @@ func (s *FileStorage) List(prefix string, recursive bool) ([]string, error) {
 }
 
 // Stat returns information about key.
-func (s *FileStorage) Stat(key string) (KeyInfo, error) {
+func (s *FileStorage) Stat(_ context.Context, key string) (KeyInfo, error) {
 	fi, err := os.Stat(s.Filename(key))
 	if err != nil {
 		return KeyInfo{}, err
@@ -212,7 +215,7 @@ func (s *FileStorage) Lock(ctx context.Context, key string) error {
 }
 
 // Unlock releases the lock for name.
-func (s *FileStorage) Unlock(key string) error {
+func (s *FileStorage) Unlock(_ context.Context, key string) error {
 	return os.Remove(s.lockFilename(key))
 }
 

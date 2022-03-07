@@ -294,12 +294,12 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 		// it might be a good idea to check with the DecisionFunc or allowlist first before even loading the certificate
 		// from storage, since if we can't renew it, why should we even try serving it (it will just get evicted after
 		// we get a return value of false anyway)?
-		loadedCert, err := cfg.CacheManagedCertificate(name)
+		loadedCert, err := cfg.CacheManagedCertificate(ctx, name)
 		if errors.Is(err, fs.ErrNotExist) {
 			// If no exact match, try a wildcard variant, which is something we can still use
 			labels := strings.Split(name, ".")
 			labels[0] = "*"
-			loadedCert, err = cfg.CacheManagedCertificate(strings.Join(labels, "."))
+			loadedCert, err = cfg.CacheManagedCertificate(ctx, strings.Join(labels, "."))
 		}
 		if err == nil {
 			if log != nil {
@@ -497,7 +497,7 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 				zap.Time("next_update", cert.ocsp.NextUpdate))
 		}
 
-		err := stapleOCSP(cfg.OCSP, cfg.Storage, &cert, nil)
+		err := stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
 		if err != nil {
 			// An error with OCSP stapling is not the end of the world, and in fact, is
 			// quite common considering not all certs have issuer URLs that support it.
@@ -654,7 +654,7 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 				// even though the recursive nature of the dynamic cert loading
 				// would just call this function anyway, we do it here to
 				// make the replacement as atomic as possible.
-				newCert, err = cfg.CacheManagedCertificate(name)
+				newCert, err = cfg.CacheManagedCertificate(ctx, name)
 				if err != nil {
 					if log != nil {
 						log.Error("loading renewed certificate", zap.String("server_name", name), zap.Error(err))
@@ -752,7 +752,7 @@ func (cfg *Config) getCertFromAnyCertManager(ctx context.Context, hello *tls.Cli
 // solving). True is returned if the challenge is being solved distributed (there
 // is no semantic difference with distributed solving; it is mainly for logging).
 func (cfg *Config) getTLSALPNChallengeCert(clientHello *tls.ClientHelloInfo) (*tls.Certificate, bool, error) {
-	chalData, distributed, err := cfg.getChallengeInfo(clientHello.ServerName)
+	chalData, distributed, err := cfg.getChallengeInfo(clientHello.Context(), clientHello.ServerName)
 	if err != nil {
 		return nil, distributed, err
 	}
