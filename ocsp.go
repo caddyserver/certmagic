@@ -20,7 +20,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"time"
@@ -174,7 +173,7 @@ func getOCSPForCert(ocspConfig OCSPConfig, bundle []byte) ([]byte, *ocsp.Respons
 		}
 		defer resp.Body.Close()
 
-		issuerBytes, err := ioutil.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+		issuerBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 		if err != nil {
 			return nil, nil, fmt.Errorf("reading issuer certificate: %v", err)
 		}
@@ -203,7 +202,7 @@ func getOCSPForCert(ocspConfig OCSPConfig, bundle []byte) ([]byte, *ocsp.Respons
 	}
 	defer req.Body.Close()
 
-	ocspResBytes, err := ioutil.ReadAll(io.LimitReader(req.Body, 1024*1024))
+	ocspResBytes, err := io.ReadAll(io.LimitReader(req.Body, 1024*1024))
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading OCSP response: %v", err)
 	}

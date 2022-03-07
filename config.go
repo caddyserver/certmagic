@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	weakrand "math/rand"
 	"net"
 	"net/url"
@@ -329,7 +330,7 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 	// first try loading existing certificate from storage
 	cert, err := cfg.CacheManagedCertificate(domainName)
 	if err != nil {
-		if _, ok := err.(ErrNotExist); !ok {
+		if !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("%s: caching certificate: %v", domainName, err)
 		}
 		// if we don't have one in storage, obtain one
@@ -605,7 +606,7 @@ func (cfg *Config) reusePrivateKey(domain string) (privKey crypto.PrivateKey, pr
 		// see if this issuer location in storage has a private key for the domain
 		privateKeyStorageKey := StorageKeys.SitePrivateKey(issuer.IssuerKey(), domain)
 		privKeyPEM, err = cfg.Storage.Load(privateKeyStorageKey)
-		if _, ok := err.(ErrNotExist); ok {
+		if errors.Is(err, fs.ErrNotExist) {
 			err = nil // obviously, it's OK to not have a private key; so don't prevent obtaining a cert
 			continue
 		}
@@ -946,7 +947,7 @@ func (cfg *Config) getChallengeInfo(identifier string) (Challenge, bool, error) 
 		if err == nil {
 			break
 		}
-		if _, ok := err.(ErrNotExist); ok {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		return Challenge{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)

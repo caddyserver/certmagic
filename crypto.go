@@ -26,8 +26,10 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"io/fs"
 	"sort"
 	"strings"
 
@@ -192,7 +194,7 @@ func (cfg *Config) loadCertResourceAnyIssuer(certNamesKey string) (CertificateRe
 	for _, issuer := range cfg.Issuers {
 		certRes, err := cfg.loadCertResource(issuer, certNamesKey)
 		if err != nil {
-			if _, ok := err.(ErrNotExist); ok {
+			if errors.Is(err, fs.ErrNotExist) {
 				// not a problem, but we need to remember the error
 				// in case we end up not finding any cert resources
 				// since we'll need an error to return in that case
