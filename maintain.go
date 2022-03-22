@@ -394,8 +394,7 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	// These write locks should be brief since we have all the info we need now.
 	for certKey, update := range updated {
 		certCache.mu.Lock()
-		cert, found := certCache.cache[certKey]
-		if found {
+		if cert, ok := certCache.cache[certKey]; ok {
 			cert.ocsp = update.parsed
 			cert.Certificate.OCSPStaple = update.rawBytes
 			certCache.cache[certKey] = cert
