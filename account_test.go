@@ -26,7 +26,7 @@ import (
 )
 
 func TestNewAccount(t *testing.T) {
-	am := &ACMEManager{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
@@ -53,7 +53,7 @@ func TestNewAccount(t *testing.T) {
 func TestSaveAccount(t *testing.T) {
 	ctx := context.Background()
 
-	am := &ACMEManager{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata1_tmp"},
@@ -88,7 +88,7 @@ func TestSaveAccount(t *testing.T) {
 func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
 	ctx := context.Background()
 
-	am := &ACMEManager{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
@@ -109,7 +109,7 @@ func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
 func TestGetAccountAlreadyExists(t *testing.T) {
 	ctx := context.Background()
 
-	am := &ACMEManager{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata2_tmp"},
@@ -163,7 +163,7 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 		discoveredEmail = ""
 	}()
 
-	am := &ACMEManager{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata2_tmp"},
@@ -184,7 +184,7 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 func TestGetEmailFromUserInput(t *testing.T) {
 	ctx := context.Background()
 
-	am := &ACMEManager{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata3_tmp"},
@@ -218,7 +218,7 @@ func TestGetEmailFromUserInput(t *testing.T) {
 func TestGetEmailFromRecent(t *testing.T) {
 	ctx := context.Background()
 
-	am := &ACMEManager{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata4_tmp"},

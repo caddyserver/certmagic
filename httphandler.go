@@ -28,7 +28,7 @@ import (
 // the challenge state is stored between initiation and solution.
 //
 // If a request is not an ACME HTTP challenge, h will be invoked.
-func (am *ACMEManager) HTTPChallengeHandler(h http.Handler) http.Handler {
+func (am *ACMEIssuer) HTTPChallengeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if am.HandleHTTPChallenge(w, r) {
 			return
@@ -49,7 +49,7 @@ func (am *ACMEManager) HTTPChallengeHandler(h http.Handler) http.Handler {
 // It returns true if it handled the request; if so, the response has
 // already been written. If false is returned, this call was a no-op and
 // the request has not been handled.
-func (am *ACMEManager) HandleHTTPChallenge(w http.ResponseWriter, r *http.Request) bool {
+func (am *ACMEIssuer) HandleHTTPChallenge(w http.ResponseWriter, r *http.Request) bool {
 	if am == nil {
 		return false
 	}
@@ -66,7 +66,7 @@ func (am *ACMEManager) HandleHTTPChallenge(w http.ResponseWriter, r *http.Reques
 // request was initiated by this or another instance which uses the
 // same storage as am does, and attempts to complete the challenge for
 // it. It returns true if the request was handled; false otherwise.
-func (am *ACMEManager) distributedHTTPChallengeSolver(w http.ResponseWriter, r *http.Request) bool {
+func (am *ACMEIssuer) distributedHTTPChallengeSolver(w http.ResponseWriter, r *http.Request) bool {
 	if am == nil {
 		return false
 	}

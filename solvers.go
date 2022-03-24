@@ -46,9 +46,9 @@ import (
 // can access the keyAuth material is by loading it
 // from storage, which is done by distributedSolver.
 type httpSolver struct {
-	closed      int32 // accessed atomically
-	acmeManager *ACMEManager
-	address     string
+	closed     int32 // accessed atomically
+	acmeIssuer *ACMEIssuer
+	address    string
 }
 
 // Present starts an HTTP server if none is already listening on s.address.
@@ -88,7 +88,7 @@ func (s *httpSolver) serve(ctx context.Context, si *solverInfo) {
 	}()
 	defer close(si.done)
 	httpServer := &http.Server{
-		Handler:     s.acmeManager.HTTPChallengeHandler(http.NewServeMux()),
+		Handler:     s.acmeIssuer.HTTPChallengeHandler(http.NewServeMux()),
 		BaseContext: func(listener net.Listener) context.Context { return ctx },
 	}
 	httpServer.SetKeepAlivesEnabled(false)
@@ -476,7 +476,7 @@ type distributedSolver struct {
 
 // Present invokes the underlying solver's Present method
 // and also stores domain, token, and keyAuth to the storage
-// backing the certificate cache of dhs.acmeManager.
+// backing the certificate cache of dhs.acmeIssuer.
 func (dhs distributedSolver) Present(ctx context.Context, chal acme.Challenge) error {
 	infoBytes, err := json.Marshal(chal)
 	if err != nil {

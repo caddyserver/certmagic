@@ -129,7 +129,7 @@ func HTTPS(domainNames []string, mux http.Handler) error {
 		BaseContext:       func(listener net.Listener) context.Context { return ctx },
 	}
 	if len(cfg.Issuers) > 0 {
-		if am, ok := cfg.Issuers[0].(*ACMEManager); ok {
+		if am, ok := cfg.Issuers[0].(*ACMEIssuer); ok {
 			httpServer.Handler = am.HTTPChallengeHandler(http.HandlerFunc(httpRedirectHandler))
 		}
 	}
@@ -378,12 +378,12 @@ type Revoker interface {
 	Revoke(ctx context.Context, cert CertificateResource, reason int) error
 }
 
-// CertificateManager is a type that manages certificates (keeps them renewed)
-// such that we can get certificates during TLS handshakes to immediately serve
+// Manager is a type that manages certificates (keeps them renewed) such
+// that we can get certificates during TLS handshakes to immediately serve
 // to clients.
 //
 // TODO: This is an EXPERIMENTAL API. It is subject to change/removal.
-type CertificateManager interface {
+type Manager interface {
 	// GetCertificate returns the certificate to use to complete the handshake.
 	// Since this is called during every TLS handshake, it must be very fast and not block.
 	// Returning (nil, nil) is valid and is simply treated as a no-op.

@@ -26,7 +26,7 @@ import (
 func TestSaveCertResource(t *testing.T) {
 	ctx := context.Background()
 
-	am := &ACMEManager{CA: "https://example.com/acme/directory"}
+	am := &ACMEIssuer{CA: "https://example.com/acme/directory"}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},

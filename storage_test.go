@@ -20,7 +20,7 @@ import (
 )
 
 func TestPrefixAndKeyBuilders(t *testing.T) {
-	am := &ACMEManager{CA: "https://example.com/acme-ca/directory"}
+	am := &ACMEIssuer{CA: "https://example.com/acme-ca/directory"}
 
 	base := path.Join("certificates", "example.com-acme-ca-directory")
 

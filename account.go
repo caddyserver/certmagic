@@ -37,7 +37,7 @@ import (
 
 // getAccount either loads or creates a new account, depending on if
 // an account can be found in storage for the given CA + email combo.
-func (am *ACMEManager) getAccount(ctx context.Context, ca, email string) (acme.Account, error) {
+func (am *ACMEIssuer) getAccount(ctx context.Context, ca, email string) (acme.Account, error) {
 	acct, err := am.loadAccount(ctx, ca, email)
 	if errors.Is(err, fs.ErrNotExist) {
 		return am.newAccount(email)
@@ -46,7 +46,7 @@ func (am *ACMEManager) getAccount(ctx context.Context, ca, email string) (acme.A
 }
 
 // loadAccount loads an account from storage, but does not create a new one.
-func (am *ACMEManager) loadAccount(ctx context.Context, ca, email string) (acme.Account, error) {
+func (am *ACMEIssuer) loadAccount(ctx context.Context, ca, email string) (acme.Account, error) {
 	regBytes, err := am.config.Storage.Load(ctx, am.storageKeyUserReg(ca, email))
 	if err != nil {
 		return acme.Account{}, err
@@ -71,7 +71,7 @@ func (am *ACMEManager) loadAccount(ctx context.Context, ca, email string) (acme.
 
 // newAccount generates a new private key for a new ACME account, but
 // it does not register or save the account.
-func (*ACMEManager) newAccount(email string) (acme.Account, error) {
+func (*ACMEIssuer) newAccount(email string) (acme.Account, error) {
 	var acct acme.Account
 	if email != "" {
 		acct.Contact = []string{"mailto:" + email} // TODO: should we abstract the contact scheme?
@@ -87,7 +87,7 @@ func (*ACMEManager) newAccount(email string) (acme.Account, error) {
 // GetAccount first tries loading the account with the associated private key from storage.
 // If it does not exist in storage, it will be retrieved from the ACME server and added to storage.
 // The account must already exist; it does not create a new account.
-func (am *ACMEManager) GetAccount(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
+func (am *ACMEIssuer) GetAccount(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
 	account, err := am.loadAccountByKey(ctx, privateKeyPEM)
 	if errors.Is(err, fs.ErrNotExist) {
 		account, err = am.lookUpAccount(ctx, privateKeyPEM)
@@ -98,7 +98,7 @@ func (am *ACMEManager) GetAccount(ctx context.Context, privateKeyPEM []byte) (ac
 // loadAccountByKey loads the account with the given private key from storage, if it exists.
 // If it does not exist, an error of type fs.ErrNotExist is returned. This is not very efficient
 // for lots of accounts.
-func (am *ACMEManager) loadAccountByKey(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
+func (am *ACMEIssuer) loadAccountByKey(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
 	accountList, err := am.config.Storage.List(ctx, am.storageKeyUsersPrefix(am.CA), false)
 	if err != nil {
 		return acme.Account{}, err
@@ -118,7 +118,7 @@ func (am *ACMEManager) loadAccountByKey(ctx context.Context, privateKeyPEM []byt
 
 // lookUpAccount looks up the account associated with privateKeyPEM from the ACME server.
 // If the account is found by the server, it will be saved to storage and returned.
-func (am *ACMEManager) lookUpAccount(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
+func (am *ACMEIssuer) lookUpAccount(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
 	client, err := am.newACMEClient(false)
 	if err != nil {
 		return acme.Account{}, fmt.Errorf("creating ACME client: %v", err)
@@ -147,7 +147,7 @@ func (am *ACMEManager) lookUpAccount(ctx context.Context, privateKeyPEM []byte) 
 
 // saveAccount persists an ACME account's info and private key to storage.
 // It does NOT register the account via ACME or prompt the user.
-func (am *ACMEManager) saveAccount(ctx context.Context, ca string, account acme.Account) error {
+func (am *ACMEIssuer) saveAccount(ctx context.Context, ca string, account acme.Account) error {
 	regBytes, err := json.MarshalIndent(account, "", "\t")
 	if err != nil {
 		return err
@@ -178,7 +178,7 @@ func (am *ACMEManager) saveAccount(ctx context.Context, ca string, account acme.
 // the consequences of an empty email.) This function MAY prompt
 // the user for input. If allowPrompts is false, the user
 // will NOT be prompted and an empty email may be returned.
-func (am *ACMEManager) getEmail(ctx context.Context, allowPrompts bool) error {
+func (am *ACMEIssuer) getEmail(ctx context.Context, allowPrompts bool) error {
 	leEmail := am.Email
 
 	// First try package default email, or a discovered email address
@@ -227,7 +227,7 @@ func (am *ACMEManager) getEmail(ctx context.Context, allowPrompts bool) error {
 // be the empty string). If no error is returned, then Agreed
 // will also be set to true, since continuing through the
 // prompt signifies agreement.
-func (am *ACMEManager) promptUserForEmail() (string, error) {
+func (am *ACMEIssuer) promptUserForEmail() (string, error) {
 	// prompt the user for an email address and terms agreement
 	reader := bufio.NewReader(stdin)
 	am.promptUserAgreement("")
@@ -246,7 +246,7 @@ func (am *ACMEManager) promptUserForEmail() (string, error) {
 // promptUserAgreement simply outputs the standard user
 // agreement prompt with the given agreement URL.
 // It outputs a newline after the message.
-func (am *ACMEManager) promptUserAgreement(agreementURL string) {
+func (am *ACMEIssuer) promptUserAgreement(agreementURL string) {
 	userAgreementPrompt := `Your sites will be served over HTTPS automatically using an automated CA.
 By continuing, you agree to the CA's terms of service`
 	if agreementURL == "" {
@@ -259,7 +259,7 @@ By continuing, you agree to the CA's terms of service`
 // askUserAgreement prompts the user to agree to the agreement
 // at the given agreement URL via stdin. It returns whether the
 // user agreed or not.
-func (am *ACMEManager) askUserAgreement(agreementURL string) bool {
+func (am *ACMEIssuer) askUserAgreement(agreementURL string) bool {
 	am.promptUserAgreement(agreementURL)
 	fmt.Print("Do you agree to the terms? (y/n): ")
 
@@ -277,32 +277,32 @@ func storageKeyACMECAPrefix(issuerKey string) string {
 	return path.Join(prefixACME, StorageKeys.Safe(issuerKey))
 }
 
-func (am *ACMEManager) storageKeyCAPrefix(caURL string) string {
+func (am *ACMEIssuer) storageKeyCAPrefix(caURL string) string {
 	return storageKeyACMECAPrefix(am.issuerKey(caURL))
 }
 
-func (am *ACMEManager) storageKeyUsersPrefix(caURL string) string {
+func (am *ACMEIssuer) storageKeyUsersPrefix(caURL string) string {
 	return path.Join(am.storageKeyCAPrefix(caURL), "users")
 }
 
-func (am *ACMEManager) storageKeyUserPrefix(caURL, email string) string {
+func (am *ACMEIssuer) storageKeyUserPrefix(caURL, email string) string {
 	if email == "" {
 		email = emptyEmail
 	}
 	return path.Join(am.storageKeyUsersPrefix(caURL), StorageKeys.Safe(email))
 }
 
-func (am *ACMEManager) storageKeyUserReg(caURL, email string) string {
+func (am *ACMEIssuer) storageKeyUserReg(caURL, email string) string {
 	return am.storageSafeUserKey(caURL, email, "registration", ".json")
 }
 
-func (am *ACMEManager) storageKeyUserPrivateKey(caURL, email string) string {
+func (am *ACMEIssuer) storageKeyUserPrivateKey(caURL, email string) string {
 	return am.storageSafeUserKey(caURL, email, "private", ".key")
 }
 
 // storageSafeUserKey returns a key for the given email, with the default
 // filename, and the filename ending in the given extension.
-func (am *ACMEManager) storageSafeUserKey(ca, email, defaultFilename, extension string) string {
+func (am *ACMEIssuer) storageSafeUserKey(ca, email, defaultFilename, extension string) string {
 	if email == "" {
 		email = emptyEmail
 	}
@@ -317,7 +317,7 @@ func (am *ACMEManager) storageSafeUserKey(ca, email, defaultFilename, extension 
 
 // emailUsername returns the username portion of an email address (part before
 // '@') or the original input if it can't find the "@" symbol.
-func (*ACMEManager) emailUsername(email string) string {
+func (*ACMEIssuer) emailUsername(email string) string {
 	at := strings.Index(email, "@")
 	if at == -1 {
 		return email
@@ -331,7 +331,7 @@ func (*ACMEManager) emailUsername(email string) string {
 // in storage. Since this is part of a complex sequence to get a user
 // account, errors here are discarded to simplify code flow in
 // the caller, and errors are not important here anyway.
-func (am *ACMEManager) mostRecentAccountEmail(ctx context.Context, caURL string) (string, bool) {
+func (am *ACMEIssuer) mostRecentAccountEmail(ctx context.Context, caURL string) (string, bool) {
 	accountList, err := am.config.Storage.List(ctx, am.storageKeyUsersPrefix(caURL), false)
 	if err != nil || len(accountList) == 0 {
 		return "", false

@@ -74,7 +74,7 @@ type Config struct {
 	MustStaple bool
 
 	// Sources for getting new, managed certificates;
-	// the default Issuer is ACMEManager. If multiple
+	// the default Issuer is ACMEIssuer. If multiple
 	// issuers are specified, they will be tried in
 	// turn until one succeeds.
 	Issuers []Issuer
@@ -86,7 +86,7 @@ type Config struct {
 	// the in-memory cache.
 	//
 	// TODO: EXPERIMENTAL: subject to change and/or removal.
-	Managers []CertificateManager
+	Managers []Manager
 
 	// The source of new private keys for certificates;
 	// the default KeySource is StandardKeyGenerator.
@@ -218,7 +218,7 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 		cfg.Issuers = Default.Issuers
 		if len(cfg.Issuers) == 0 {
 			// at least one issuer is absolutely required
-			cfg.Issuers = []Issuer{NewACMEManager(&cfg, DefaultACME)}
+			cfg.Issuers = []Issuer{NewACMEIssuer(&cfg, DefaultACME)}
 		}
 	}
 

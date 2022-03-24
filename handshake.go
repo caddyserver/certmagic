@@ -258,7 +258,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 		return cert, nil
 	}
 
-	// If an external CertificateManager is configured, try to get it from them.
+	// If an external Manager is configured, try to get it from them.
 	// Only continue to use our own logic if it returns empty+nil.
 	externalCert, err := cfg.getCertFromAnyCertManager(ctx, hello, log)
 	if err != nil {

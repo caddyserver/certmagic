@@ -16,14 +16,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// ACMEManager gets certificates using ACME. It implements the PreChecker,
+// ACMEIssuer gets certificates using ACME. It implements the PreChecker,
 // Issuer, and Revoker interfaces.
 //
-// It is NOT VALID to use an ACMEManager without calling NewACMEManager().
+// It is NOT VALID to use an ACMEIssuer without calling NewACMEIssuer().
 // It fills in any default values from DefaultACME as well as setting up
 // internal state that is necessary for valid use. Always call
-// NewACMEManager() to get a valid ACMEManager value.
-type ACMEManager struct {
+// NewACMEIssuer() to get a valid ACMEIssuer value.
+type ACMEIssuer struct {
 	// The endpoint of the directory for the ACME
 	// CA we are to use
 	CA string
@@ -99,9 +99,9 @@ type ACMEManager struct {
 	// Callback function that is called before a
 	// new ACME account is registered with the CA;
 	// it allows for last-second config changes
-	// of the ACMEManager and the Account.
+	// of the ACMEIssuer and the Account.
 	// (TODO: this feature is still EXPERIMENTAL and subject to change)
-	NewAccountFunc func(context.Context, *ACMEManager, acme.Account) (acme.Account, error)
+	NewAccountFunc func(context.Context, *ACMEIssuer, acme.Account) (acme.Account, error)
 
 	// Preferences for selecting alternate
 	// certificate chains
@@ -114,17 +114,17 @@ type ACMEManager struct {
 	httpClient *http.Client
 }
 
-// NewACMEManager constructs a valid ACMEManager based on a template
+// NewACMEIssuer constructs a valid ACMEIssuer based on a template
 // configuration; any empty values will be filled in by defaults in
 // DefaultACME, and if any required values are still empty, sensible
 // defaults will be used.
 //
 // Typically, you'll create the Config first with New() or NewDefault(),
-// then call NewACMEManager(), then assign the return value to the Issuers
+// then call NewACMEIssuer(), then assign the return value to the Issuers
 // field of the Config.
-func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
+func NewACMEIssuer(cfg *Config, template ACMEIssuer) *ACMEIssuer {
 	if cfg == nil {
-		panic("cannot make valid ACMEManager without an associated CertMagic config")
+		panic("cannot make valid ACMEIssuer without an associated CertMagic config")
 	}
 	if template.CA == "" {
 		template.CA = DefaultACME.CA
@@ -187,11 +187,11 @@ func NewACMEManager(cfg *Config, template ACMEManager) *ACMEManager {
 
 // IssuerKey returns the unique issuer key for the
 // confgured CA endpoint.
-func (am *ACMEManager) IssuerKey() string {
+func (am *ACMEIssuer) IssuerKey() string {
 	return am.issuerKey(am.CA)
 }
 
-func (*ACMEManager) issuerKey(ca string) string {
+func (*ACMEIssuer) issuerKey(ca string) string {
 	key := ca
 	if caURL, err := url.Parse(key); err == nil {
 		key = caURL.Host
@@ -217,7 +217,7 @@ func (*ACMEManager) issuerKey(ca string) string {
 // renewing a certificate with ACME, and returns whether this
 // batch is eligible for certificates if using Let's Encrypt.
 // It also ensures that an email address is available.
-func (am *ACMEManager) PreCheck(ctx context.Context, names []string, interactive bool) error {
+func (am *ACMEIssuer) PreCheck(ctx context.Context, names []string, interactive bool) error {
 	publicCA := strings.Contains(am.CA, "api.letsencrypt.org") || strings.Contains(am.CA, "acme.zerossl.com")
 	if publicCA {
 		for _, name := range names {
@@ -231,9 +231,9 @@ func (am *ACMEManager) PreCheck(ctx context.Context, names []string, interactive
 
 // Issue implements the Issuer interface. It obtains a certificate for the given csr using
 // the ACME configuration am.
-func (am *ACMEManager) Issue(ctx context.Context, csr *x509.CertificateRequest) (*IssuedCertificate, error) {
+func (am *ACMEIssuer) Issue(ctx context.Context, csr *x509.CertificateRequest) (*IssuedCertificate, error) {
 	if am.config == nil {
-		panic("missing config pointer (must use NewACMEManager)")
+		panic("missing config pointer (must use NewACMEIssuer)")
 	}
 
 	var isRetry bool
@@ -297,7 +297,7 @@ func (am *ACMEManager) Issue(ctx context.Context, csr *x509.CertificateRequest) 
 	return cert, err
 }
 
-func (am *ACMEManager) doIssue(ctx context.Context, csr *x509.CertificateRequest, useTestCA bool) (*IssuedCertificate, bool, error) {
+func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest, useTestCA bool) (*IssuedCertificate, bool, error) {
 	client, err := am.newACMEClientWithAccount(ctx, useTestCA, false)
 	if err != nil {
 		return nil, false, err
@@ -333,7 +333,7 @@ func (am *ACMEManager) doIssue(ctx context.Context, csr *x509.CertificateRequest
 // selectPreferredChain sorts and then filters the certificate chains to find the optimal
 // chain preferred by the client. If there's only one chain, that is returned without any
 // processing. If there are no matches, the first chain is returned.
-func (am *ACMEManager) selectPreferredChain(certChains []acme.Certificate) acme.Certificate {
+func (am *ACMEIssuer) selectPreferredChain(certChains []acme.Certificate) acme.Certificate {
 	if len(certChains) == 1 {
 		if am.Logger != nil && (len(am.PreferredChains.AnyCommonName) > 0 || len(am.PreferredChains.RootCommonName) > 0) {
 			am.Logger.Debug("there is only one chain offered; selecting it regardless of preferences",
@@ -411,7 +411,7 @@ func (am *ACMEManager) selectPreferredChain(certChains []acme.Certificate) acme.
 }
 
 // Revoke implements the Revoker interface. It revokes the given certificate.
-func (am *ACMEManager) Revoke(ctx context.Context, cert CertificateResource, reason int) error {
+func (am *ACMEIssuer) Revoke(ctx context.Context, cert CertificateResource, reason int) error {
 	client, err := am.newACMEClientWithAccount(ctx, false, false)
 	if err != nil {
 		return err
@@ -441,9 +441,9 @@ type ChainPreference struct {
 	AnyCommonName []string
 }
 
-// DefaultACME specifies default settings to use for ACMEManagers.
+// DefaultACME specifies default settings to use for ACMEIssuers.
 // Using this value is optional but can be convenient.
-var DefaultACME = ACMEManager{
+var DefaultACME = ACMEIssuer{
 	CA:     LetsEncryptProductionCA,
 	TestCA: LetsEncryptStagingCA,
 }
@@ -460,7 +460,7 @@ const prefixACME = "acme"
 
 // Interface guards
 var (
-	_ PreChecker = (*ACMEManager)(nil)
-	_ Issuer     = (*ACMEManager)(nil)
-	_ Revoker    = (*ACMEManager)(nil)
+	_ PreChecker = (*ACMEIssuer)(nil)
+	_ Issuer     = (*ACMEIssuer)(nil)
+	_ Revoker    = (*ACMEIssuer)(nil)
 )
