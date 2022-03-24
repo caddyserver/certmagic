@@ -337,11 +337,7 @@ func (s *DNS01Solver) Wait(ctx context.Context, challenge acme.Challenge) error 
 			return ctx.Err()
 		}
 		var ready bool
-		if s.OverrideDomain == "" {
-			ready, err = checkDNSPropagation(dnsName, keyAuth, resolvers)
-		} else {
-			ready, err = checkAuthoritativeNss(dnsName, keyAuth, resolvers)
-		}
+		ready, err = checkDNSPropagation(dnsName, keyAuth, resolvers)
 		if err != nil {
 			return fmt.Errorf("checking DNS propagation of %s: %w", dnsName, err)
 		}
