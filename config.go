@@ -1107,6 +1107,7 @@ type OCSPConfig struct {
 
 // CertificateEventData contains contextual information for
 // an obtained, renewed or revoked certificate.
+// EXPERIMENTAL: subject to change.
 type CertificateEventData struct {
 	// Domain or subject name of the certificate.
 	Name string
