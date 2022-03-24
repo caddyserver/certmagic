@@ -573,7 +573,11 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			return fmt.Errorf("[%s] Obtain: saving assets: %v", name, err)
 		}
 
-		cfg.emit("cert_obtained", name)
+		cfg.emit("cert_obtained", CertificateEventData{
+			Name:       name,
+			IssuerKey:  issuerUsed.IssuerKey(),
+			StorageKey: certRes.NamesKey(),
+		})
 
 		if log != nil {
 			log.Info("certificate obtained successfully", zap.String("identifier", name))
@@ -789,7 +793,11 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			return fmt.Errorf("[%s] Renew: saving assets: %v", name, err)
 		}
 
-		cfg.emit("cert_renewed", name)
+		cfg.emit("cert_renewed", CertificateEventData{
+			Name:       name,
+			IssuerKey:  issuerUsed.IssuerKey(),
+			StorageKey: certRes.NamesKey(),
+		})
 
 		if log != nil {
 			log.Info("certificate renewed successfully", zap.String("identifier", name))
@@ -868,7 +876,11 @@ func (cfg *Config) RevokeCert(ctx context.Context, domain string, reason int, in
 			return fmt.Errorf("issuer %d (%s): %v", i, issuerKey, err)
 		}
 
-		cfg.emit("cert_revoked", domain)
+		cfg.emit("cert_revoked", CertificateEventData{
+			Name:       domain,
+			IssuerKey:  issuerKey,
+			StorageKey: certRes.NamesKey(),
+		})
 
 		err = cfg.deleteSiteAssets(ctx, issuerKey, domain)
 		if err != nil {
@@ -1091,6 +1103,20 @@ type OCSPConfig struct {
 	// embedded in certificates. Mapping to an empty
 	// URL will disable OCSP from that responder.
 	ResponderOverrides map[string]string
+}
+
+// CertificateEventData contains contextual information for
+// an obtained, renewed or revoked certificate.
+// EXPERIMENTAL: subject to change.
+type CertificateEventData struct {
+	// Domain or subject name of the certificate.
+	Name string
+
+	// Storage key for the issuer used for this certificate.
+	IssuerKey string
+
+	// Location in storage at which the certificate could be found.
+	StorageKey string
 }
 
 // certIssueLockOp is the name of the operation used
