@@ -79,7 +79,6 @@ func (certCache *Cache) maintainAssets(panicCount int) {
 		case <-certCache.stopChan:
 			renewalTicker.Stop()
 			ocspTicker.Stop()
-			// TODO: stop any in-progress maintenance operations and clear locks we made (this might be done now with our use of context)
 			if log != nil {
 				log.Info("stopped background certificate maintenance")
 			}

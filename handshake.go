@@ -293,7 +293,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 		// TODO: As suggested here, https://caddy.community/t/error-tls-alert-internal-error-592-again/13272/30?u=matt,
 		// it might be a good idea to check with the DecisionFunc or allowlist first before even loading the certificate
 		// from storage, since if we can't renew it, why should we even try serving it (it will just get evicted after
-		// we get a return value of false anyway)?
+		// we get a return value of false anyway)? See issue #174
 		loadedCert, err := cfg.CacheManagedCertificate(ctx, name)
 		if errors.Is(err, fs.ErrNotExist) {
 			// If no exact match, try a wildcard variant, which is something we can still use
