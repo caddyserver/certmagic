@@ -249,7 +249,13 @@ type DNS01Solver struct {
 	// The TTL for the temporary challenge records.
 	TTL time.Duration
 
-	// Maximum time to wait for temporary record to appear.
+	// How long to wait before starting propagation checks.
+	// Default: 0 (no wait).
+	PropagationDelay time.Duration
+
+	// Maximum time to wait for temporary DNS record to appear.
+	// Set to -1 to disable propagation checks.
+	// Default: 2 minutes.
 	PropagationTimeout time.Duration
 
 	// Preferred DNS resolver(s) to use when doing DNS lookups.
@@ -314,18 +320,36 @@ func (s *DNS01Solver) Present(ctx context.Context, challenge acme.Challenge) err
 // authoritative lookups, i.e. until it has propagated, or until
 // timeout, whichever is first.
 func (s *DNS01Solver) Wait(ctx context.Context, challenge acme.Challenge) error {
+	// if configured to, pause before doing propagation checks
+	// (even if they are disabled, the wait might be desirable on its own)
+	if s.PropagationDelay > 0 {
+		select {
+		case <-time.After(s.PropagationDelay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	// skip propagation checks if configured to do so
+	if s.PropagationTimeout == -1 {
+		return nil
+	}
+
+	// prepare for the checks by determining what to look for
 	dnsName := challenge.DNS01TXTRecordName()
 	if s.OverrideDomain != "" {
 		dnsName = s.OverrideDomain
 	}
 	keyAuth := challenge.DNS01KeyAuthorization()
 
+	// timings
 	timeout := s.PropagationTimeout
 	if timeout == 0 {
 		timeout = 2 * time.Minute
 	}
 	const interval = 2 * time.Second
 
+	// how we'll do the checks
 	resolvers := recursiveNameservers(s.Resolvers)
 
 	var err error
