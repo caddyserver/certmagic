@@ -220,11 +220,6 @@ func checkDNSPropagation(fqdn, value string, resolvers []string) (bool, error) {
 		return false, err
 	}
 
-	// TODO: make this configurable, maybe
-	// if !p.requireCompletePropagation {
-	// 	return true, nil
-	// }
-
 	if r.Rcode == dns.RcodeSuccess {
 		fqdn = updateDomainWithCName(r, fqdn)
 	}
