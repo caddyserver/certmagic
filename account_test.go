@@ -171,7 +171,7 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 	}
 	am.config = testConfig
 
-	err := am.getEmail(ctx, true)
+	err := am.setEmail(ctx, true)
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestGetEmailFromUserInput(t *testing.T) {
 
 	email := "test3@foo.com"
 	stdin = bytes.NewBufferString(email + "\n")
-	err := am.getEmail(ctx, true)
+	err := am.setEmail(ctx, true)
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestGetEmailFromRecent(t *testing.T) {
 			t.Fatalf("Could not change user folder mod time for '%s': %v", eml, err)
 		}
 	}
-	err := am.getEmail(ctx, true)
+	err := am.setEmail(ctx, true)
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}

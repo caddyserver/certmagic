@@ -226,7 +226,7 @@ func (am *ACMEIssuer) PreCheck(ctx context.Context, names []string, interactive 
 			}
 		}
 	}
-	return am.getEmail(ctx, interactive)
+	return am.setEmail(ctx, interactive)
 }
 
 // Issue implements the Issuer interface. It obtains a certificate for the given csr using
