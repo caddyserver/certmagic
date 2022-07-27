@@ -376,7 +376,10 @@ func (s *DNS01Solver) Wait(ctx context.Context, challenge acme.Challenge) error 
 // CleanUp deletes the DNS TXT record created in Present().
 func (s *DNS01Solver) CleanUp(ctx context.Context, challenge acme.Challenge) error {
 	dnsName := challenge.DNS01TXTRecordName()
-
+	if s.OverrideDomain != "" {
+		dnsName = s.OverrideDomain
+	}
+	
 	defer func() {
 		// always forget about it so we don't leak memory
 		s.txtRecordsMu.Lock()
