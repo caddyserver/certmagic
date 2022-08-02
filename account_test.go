@@ -21,12 +21,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 func TestNewAccount(t *testing.T) {
-	am := &ACMEIssuer{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA, mu: new(sync.Mutex)}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
@@ -53,7 +54,7 @@ func TestNewAccount(t *testing.T) {
 func TestSaveAccount(t *testing.T) {
 	ctx := context.Background()
 
-	am := &ACMEIssuer{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA, mu: new(sync.Mutex)}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata1_tmp"},
@@ -88,7 +89,7 @@ func TestSaveAccount(t *testing.T) {
 func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
 	ctx := context.Background()
 
-	am := &ACMEIssuer{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA, mu: new(sync.Mutex)}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
@@ -109,7 +110,7 @@ func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
 func TestGetAccountAlreadyExists(t *testing.T) {
 	ctx := context.Background()
 
-	am := &ACMEIssuer{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA, mu: new(sync.Mutex)}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata2_tmp"},
@@ -163,7 +164,7 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 		discoveredEmail = ""
 	}()
 
-	am := &ACMEIssuer{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA, mu: new(sync.Mutex)}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata2_tmp"},
@@ -176,7 +177,7 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 		t.Fatalf("getEmail error: %v", err)
 	}
 	lowerEmail := strings.ToLower(DefaultACME.Email)
-	if am.Email != lowerEmail {
+	if am.getEmail() != lowerEmail {
 		t.Errorf("Did not get correct email from memory; expected '%s' but got '%s'", lowerEmail, am.Email)
 	}
 }
@@ -184,7 +185,7 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 func TestGetEmailFromUserInput(t *testing.T) {
 	ctx := context.Background()
 
-	am := &ACMEIssuer{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA, mu: new(sync.Mutex)}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata3_tmp"},
@@ -207,18 +208,18 @@ func TestGetEmailFromUserInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}
-	if am.Email != email {
+	if am.email != email {
 		t.Errorf("Did not get correct email from user input prompt; expected '%s' but got '%s'", email, am.Email)
 	}
-	if !am.Agreed {
-		t.Error("Expect Config.Agreed to be true, but got false")
+	if !am.isAgreed() {
+		t.Error("Expect Config.agreed to be true, but got false")
 	}
 }
 
 func TestGetEmailFromRecent(t *testing.T) {
 	ctx := context.Background()
 
-	am := &ACMEIssuer{CA: dummyCA}
+	am := &ACMEIssuer{CA: dummyCA, mu: new(sync.Mutex)}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata4_tmp"},
@@ -267,7 +268,7 @@ func TestGetEmailFromRecent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getEmail error: %v", err)
 	}
-	if am.Email != "test4-3@foo.com" {
+	if am.getEmail() != "test4-3@foo.com" {
 		t.Errorf("Did not get correct email from storage; expected '%s' but got '%s'", "test4-3@foo.com", am.Email)
 	}
 }

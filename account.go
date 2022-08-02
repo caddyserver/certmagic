@@ -206,10 +206,12 @@ func (am *ACMEIssuer) setEmail(ctx context.Context, allowPrompts bool) error {
 		}
 
 		// User might have just signified their agreement
-		am.Agreed = DefaultACME.Agreed
+		am.mu.Lock()
+		am.agreed = DefaultACME.Agreed
+		am.mu.Unlock()
 	}
 
-	// save the email for later and ensure it is consistent
+	// Save the email for later and ensure it is consistent
 	// for repeated use; then update cfg with the email
 	leEmail = strings.TrimSpace(strings.ToLower(leEmail))
 	discoveredEmailMu.Lock()
@@ -217,7 +219,12 @@ func (am *ACMEIssuer) setEmail(ctx context.Context, allowPrompts bool) error {
 		discoveredEmail = leEmail
 	}
 	discoveredEmailMu.Unlock()
-	am.Email = leEmail
+
+	// The unexported email field is the one we use
+	// because we have thread-safe control over it
+	am.mu.Lock()
+	am.email = leEmail
+	am.mu.Unlock()
 
 	return nil
 }
