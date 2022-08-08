@@ -62,8 +62,8 @@ func TestSaveCertResource(t *testing.T) {
 	}
 
 	// the result of our test will be a map, since we have
-	// no choice but to decode it into an interface
-	cert.IssuerData = map[string]interface{}{
+	// no choice but to decode it into an 'any' interface
+	cert.IssuerData = map[string]any{
 		"url": "https://example.com/cert",
 	}
 

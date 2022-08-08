@@ -690,7 +690,7 @@ var (
 // data that can make it easier or more efficient to solve.
 type Challenge struct {
 	acme.Challenge
-	data interface{}
+	data any
 }
 
 // challengeKey returns the map key for a given challenge; it is the identifier
