@@ -272,10 +272,7 @@ type DNS01Solver struct {
 
 	// Override the domain to set the TXT record on. This is
 	// to delegate the challenge to a different domain. Note
-	// that the solver doesn't follow CNAME/NS record. If the
-	// domain isn't prefixed by "_acme_challenge.", it will be
-	// prepended for you. See RFC 8555 Section 8.4:
-	// https://www.rfc-editor.org/rfc/rfc8555.html#section-8.4
+	// that the solver doesn't follow CNAME/NS record.
 	OverrideDomain string
 
 	// Remember DNS records while challenges are active; i.e.
@@ -295,7 +292,10 @@ type DNS01Solver struct {
 
 // Present creates the DNS TXT record for the given ACME challenge.
 func (s *DNS01Solver) Present(ctx context.Context, challenge acme.Challenge) error {
-	dnsName := s.txtRecordName(challenge)
+	dnsName := challenge.DNS01TXTRecordName()
+	if s.OverrideDomain != "" {
+		dnsName = s.OverrideDomain
+	}
 	keyAuth := challenge.DNS01KeyAuthorization()
 
 	zone, err := findZoneByFQDN(dnsName, recursiveNameservers(s.Resolvers))
@@ -348,7 +348,10 @@ func (s *DNS01Solver) Wait(ctx context.Context, challenge acme.Challenge) error 
 	}
 
 	// prepare for the checks by determining what to look for
-	dnsName := s.txtRecordName(challenge)
+	dnsName := challenge.DNS01TXTRecordName()
+	if s.OverrideDomain != "" {
+		dnsName = s.OverrideDomain
+	}
 	keyAuth := challenge.DNS01KeyAuthorization()
 
 	// timings
@@ -384,7 +387,10 @@ func (s *DNS01Solver) Wait(ctx context.Context, challenge acme.Challenge) error 
 
 // CleanUp deletes the DNS TXT record created in Present().
 func (s *DNS01Solver) CleanUp(ctx context.Context, challenge acme.Challenge) error {
-	dnsName := s.txtRecordName(challenge)
+	dnsName := challenge.DNS01TXTRecordName()
+	if s.OverrideDomain != "" {
+		dnsName = s.OverrideDomain
+	}
 	keyAuth := challenge.DNS01KeyAuthorization()
 
 	// always forget about the record so we don't leak memory
@@ -403,22 +409,6 @@ func (s *DNS01Solver) CleanUp(ctx context.Context, challenge acme.Challenge) err
 	}
 
 	return nil
-}
-
-// txtRecordName returns the DNS-01 TXT record name with the
-// optional OverrideDomain setting applied. It ensures the
-// "_acme-challenge" subdomain is always prepended.
-func (s *DNS01Solver) txtRecordName(challenge acme.Challenge) string {
-	dnsName := challenge.DNS01TXTRecordName()
-	if s.OverrideDomain != "" {
-		// RFC 8555 section 8.4
-		const dns01ChallengeDomainPrefix = "_acme-challenge."
-		dnsName = s.OverrideDomain
-		if !strings.HasPrefix(dnsName, dns01ChallengeDomainPrefix) {
-			dnsName = dns01ChallengeDomainPrefix + dnsName
-		}
-	}
-	return dnsName
 }
 
 type dnsPresentMemory struct {
