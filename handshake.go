@@ -214,7 +214,7 @@ func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificat
 			continue
 		}
 		best = choice // at least the client supports it...
-		if now.After(choice.Leaf.NotBefore) && now.Before(choice.Leaf.NotAfter) {
+		if now.After(choice.Leaf.NotBefore) && now.Before(expiresAt(choice.Leaf)) {
 			return choice, nil // ...and unexpired, great! "Certificate, I choose you!"
 		}
 	}
@@ -246,7 +246,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 			log.Debug("matched certificate in cache",
 				zap.Strings("subjects", cert.Names),
 				zap.Bool("managed", cert.managed),
-				zap.Time("expiration", cert.Leaf.NotAfter),
+				zap.Time("expiration", expiresAt(cert.Leaf)),
 				zap.String("hash", cert.hash))
 		}
 		if cert.managed && cfg.OnDemand != nil && obtainIfNecessary {
@@ -306,7 +306,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 				log.Debug("loaded certificate from storage",
 					zap.Strings("subjects", loadedCert.Names),
 					zap.Bool("managed", loadedCert.managed),
-					zap.Time("expiration", loadedCert.Leaf.NotAfter),
+					zap.Time("expiration", expiresAt(loadedCert.Leaf)),
 					zap.String("hash", loadedCert.hash))
 			}
 			loadedCert, err = cfg.handshakeMaintenance(ctx, hello, loadedCert)
@@ -331,7 +331,7 @@ func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNece
 			log.Debug("fell back to default certificate",
 				zap.Strings("subjects", cert.Names),
 				zap.Bool("managed", cert.managed),
-				zap.Time("expiration", cert.Leaf.NotAfter),
+				zap.Time("expiration", expiresAt(cert.Leaf)),
 				zap.String("hash", cert.hash))
 		}
 		return cert, nil
@@ -364,7 +364,7 @@ func (cfg *Config) optionalMaintenance(ctx context.Context, log *zap.Logger, cer
 	if log != nil {
 		log.Error("renewing certificate on-demand failed",
 			zap.Strings("subjects", cert.Names),
-			zap.Time("not_after", cert.Leaf.NotAfter),
+			zap.Time("not_after", expiresAt(cert.Leaf)),
 			zap.Error(err))
 	}
 
@@ -537,7 +537,7 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 	}
 
 	// Check cert expiration
-	if currentlyInRenewalWindow(cert.Leaf.NotBefore, cert.Leaf.NotAfter, cfg.RenewalWindowRatio) {
+	if currentlyInRenewalWindow(cert.Leaf.NotBefore, expiresAt(cert.Leaf), cfg.RenewalWindowRatio) {
 		return cfg.renewDynamicCertificate(ctx, hello, cert)
 	}
 
@@ -559,7 +559,7 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 	log := loggerNamed(cfg.Logger, "on_demand")
 
 	name := cfg.getNameFromClientHello(hello)
-	timeLeft := time.Until(currentCert.Leaf.NotAfter)
+	timeLeft := time.Until(expiresAt(currentCert.Leaf))
 	revoked := currentCert.ocsp != nil && currentCert.ocsp.Status == ocsp.Revoked
 
 	getCertWithoutReobtaining := func() (Certificate, error) {
@@ -592,7 +592,7 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 		if log != nil {
 			log.Debug("certificate has expired, but is already being renewed; waiting for renewal to complete",
 				zap.Strings("subjects", currentCert.Names),
-				zap.Time("expired", currentCert.Leaf.NotAfter),
+				zap.Time("expired", expiresAt(currentCert.Leaf)),
 				zap.Bool("revoked", revoked))
 		}
 
@@ -624,7 +624,7 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 		log.Info("attempting certificate renewal",
 			zap.String("server_name", name),
 			zap.Strings("subjects", currentCert.Names),
-			zap.Time("expiration", currentCert.Leaf.NotAfter),
+			zap.Time("expiration", expiresAt(currentCert.Leaf)),
 			zap.Duration("remaining", timeLeft),
 			zap.Bool("revoked", revoked))
 	}
@@ -739,7 +739,7 @@ func (cfg *Config) getCertFromAnyCertManager(ctx context.Context, hello *tls.Cli
 		log.Debug("using externally-managed certificate",
 			zap.String("sni", hello.ServerName),
 			zap.Strings("names", cert.Names),
-			zap.Time("expiration", cert.Leaf.NotAfter))
+			zap.Time("expiration", expiresAt(cert.Leaf)))
 	}
 
 	return cert, nil
