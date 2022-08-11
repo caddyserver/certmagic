@@ -145,7 +145,8 @@ type CacheOptions struct {
 	// used for managing a certificate, or for accessing
 	// that certificate's asset storage (e.g. for
 	// OCSP staples, etc). The returned Config MUST
-	// be associated with the same Cache as the caller.
+	// be associated with the same Cache as the caller,
+	// use New to obtain a valid Config.
 	//
 	// The reason this is a callback function, dynamically
 	// returning a Config (instead of attaching a static

@@ -238,16 +238,17 @@ if err != nil {
 For more control (particularly, if you need a different way of managing each certificate), you'll make and use a `Cache` and a `Config` like so:
 
 ```go
-cache := certmagic.NewCache(certmagic.CacheOptions{
+// First make a pointer to a Cache as we need to reference the same Cache in
+// GetConfigForCert below.
+var cache *certmagic.Cache
+cache = certmagic.NewCache(certmagic.CacheOptions{
 	GetConfigForCert: func(cert certmagic.Certificate) (*certmagic.Config, error) {
-		// do whatever you need to do to get the right
-		// configuration for this certificate; keep in
-		// mind that this config value is used as a
-		// template, and will be completed with any
-		// defaults that are set in the Default config
-		return &certmagic.Config{
+		// Here we use New to get a valid Config associated with the same cache.
+		// The provided Config is used as a template and will be completed with
+		// any defaults that are set in the Default config.
+		return certmagic.New(cache, &certmagic.config{
 			// ...
-		}, nil
+		}), nil
 	},
 	...
 })
