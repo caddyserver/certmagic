@@ -235,7 +235,7 @@ func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificat
 //
 // This function is safe for concurrent use.
 func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNecessary, obtainIfNecessary bool) (Certificate, error) {
-	log := loggerNamed(cfg.Logger, "handshake")
+	log := logWithRemote(loggerNamed(cfg.Logger, "handshake"), hello)
 
 	ctx := context.TODO() // TODO: get a proper context? from somewhere...
 
@@ -402,7 +402,7 @@ func (cfg *Config) checkIfCertShouldBeObtained(name string) error {
 //
 // This function is safe for use by multiple concurrent goroutines.
 func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.ClientHelloInfo) (Certificate, error) {
-	log := loggerNamed(cfg.Logger, "on_demand")
+	log := logWithRemote(loggerNamed(cfg.Logger, "on_demand"), hello)
 
 	name := cfg.getNameFromClientHello(hello)
 
@@ -783,6 +783,20 @@ func (*Config) getNameFromClientHello(hello *tls.ClientHelloInfo) string {
 		return name
 	}
 	return localIPFromConn(hello.Conn)
+}
+
+// logWithRemote adds the remote host and port to the logger.
+func logWithRemote(l *zap.Logger, hello *tls.ClientHelloInfo) *zap.Logger {
+	if hello.Conn == nil || l == nil {
+		return l
+	}
+	addr := hello.Conn.RemoteAddr().String()
+	ip, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		ip = addr
+		port = ""
+	}
+	return l.With(zap.String("remote_ip", ip), zap.String("remote_port", port))
 }
 
 // localIPFromConn returns the host portion of c's local address
