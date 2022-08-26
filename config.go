@@ -901,12 +901,6 @@ func (cfg *Config) RevokeCert(ctx context.Context, domain string, reason int, in
 			return fmt.Errorf("issuer %d (%s): %v", i, issuerKey, err)
 		}
 
-		cfg.emit(ctx, "cert_revoked", map[string]any{
-			"name":        domain,
-			"issuer":      issuerKey,
-			"storage_key": certRes.NamesKey(),
-		})
-
 		err = cfg.deleteSiteAssets(ctx, issuerKey, domain)
 		if err != nil {
 			return fmt.Errorf("certificate revoked, but unable to fully clean up assets from issuer %s: %v", issuerKey, err)
