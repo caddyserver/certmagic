@@ -129,7 +129,7 @@ func (cfg *Config) CacheManagedCertificate(ctx context.Context, domain string) (
 		return cert, err
 	}
 	cfg.certCache.cacheCertificate(cert)
-	cfg.emit("cached_managed_cert", cert.Names)
+	cfg.emit(ctx, "cached_managed_cert", map[string]any{"sans": cert.Names})
 	return cert, nil
 }
 
@@ -162,7 +162,7 @@ func (cfg *Config) CacheUnmanagedCertificatePEMFile(ctx context.Context, certFil
 	}
 	cert.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
-	cfg.emit("cached_unmanaged_cert", cert.Names)
+	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names})
 	return nil
 }
 
@@ -180,7 +180,7 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls
 	if err != nil && cfg.Logger != nil {
 		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
 	}
-	cfg.emit("cached_unmanaged_cert", cert.Names)
+	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names})
 	cert.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
 	return nil
@@ -197,7 +197,7 @@ func (cfg *Config) CacheUnmanagedCertificatePEMBytes(ctx context.Context, certBy
 	}
 	cert.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
-	cfg.emit("cached_unmanaged_cert", cert.Names)
+	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names})
 	return nil
 }
 

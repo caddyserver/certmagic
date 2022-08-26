@@ -43,7 +43,17 @@ import (
 //
 // This method is safe for use as a tls.Config.GetCertificate callback.
 func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	cfg.emit("tls_handshake_started", clientHello)
+	ctx := context.TODO() // TODO: get a proper context? from somewhere...
+
+	if err := cfg.emit(ctx, "tls_get_certificate", map[string]any{"client_hello": clientHello}); err != nil {
+		if cfg.Logger != nil {
+			cfg.Logger.Error("TLS handshake aborted by event handler",
+				zap.String("server_name", clientHello.ServerName),
+				zap.String("remote", clientHello.Conn.RemoteAddr().String()),
+				zap.Error(err))
+		}
+		return nil, fmt.Errorf("handshake aborted by event handler: %w", err)
+	}
 
 	// special case: serve up the certificate for a TLS-ALPN ACME challenge
 	// (https://tools.ietf.org/html/draft-ietf-acme-tls-alpn-05)
@@ -70,10 +80,8 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 	}
 
 	// get the certificate and serve it up
-	cert, err := cfg.getCertDuringHandshake(clientHello, true, true)
-	if err == nil {
-		cfg.emit("tls_handshake_completed", clientHello)
-	}
+	cert, err := cfg.getCertDuringHandshake(ctx, clientHello, true, true)
+
 	return &cert.Certificate, err
 }
 
@@ -234,10 +242,8 @@ func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificat
 // An error will be returned if and only if no certificate is available.
 //
 // This function is safe for concurrent use.
-func (cfg *Config) getCertDuringHandshake(hello *tls.ClientHelloInfo, loadIfNecessary, obtainIfNecessary bool) (Certificate, error) {
+func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.ClientHelloInfo, loadIfNecessary, obtainIfNecessary bool) (Certificate, error) {
 	log := logWithRemote(loggerNamed(cfg.Logger, "handshake"), hello)
-
-	ctx := context.TODO() // TODO: get a proper context? from somewhere...
 
 	// First check our in-memory cache to see if we've already loaded it
 	cert, matched, defaulted := cfg.getCertificateFromCache(hello)
@@ -408,7 +414,7 @@ func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.Cli
 
 	getCertWithoutReobtaining := func() (Certificate, error) {
 		// very important to set the obtainIfNecessary argument to false, so we don't repeat this infinitely
-		return cfg.getCertDuringHandshake(hello, true, false)
+		return cfg.getCertDuringHandshake(ctx, hello, true, false)
 	}
 
 	// We must protect this process from happening concurrently, so synchronize.
@@ -564,7 +570,7 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 
 	getCertWithoutReobtaining := func() (Certificate, error) {
 		// very important to set the obtainIfNecessary argument to false, so we don't repeat this infinitely
-		return cfg.getCertDuringHandshake(hello, true, false)
+		return cfg.getCertDuringHandshake(ctx, hello, true, false)
 	}
 
 	// see if another goroutine is already working on this certificate
