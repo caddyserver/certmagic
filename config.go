@@ -577,6 +577,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 				"renewal":    false,
 				"identifier": name,
 				"issuer":     issuerUsed.IssuerKey(),
+				"error":      err,
 			})
 
 			// only the error from the last issuer will be returned, but we logged the others
@@ -816,6 +817,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 				"remaining":   timeLeft,
 				"issuer":      issuerUsed.IssuerKey(),
 				"storage_key": certRes.NamesKey(),
+				"error":       err,
 			})
 
 			// only the error from the last issuer will be returned, but we logged the others
