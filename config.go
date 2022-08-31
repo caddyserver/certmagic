@@ -759,7 +759,8 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 				zap.Duration("remaining", timeLeft))
 		}
 
-		if err := cfg.emit(ctx, "cert_renewing", map[string]any{
+		if err := cfg.emit(ctx, "cert_obtaining", map[string]any{
+			"renewal":    true,
 			"identifier": name,
 			"forced":     force,
 			"remaining":  timeLeft,
