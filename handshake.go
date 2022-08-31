@@ -627,28 +627,34 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 	}
 
 	if log != nil {
-		log.Info("attempting certificate renewal",
+		log = log.With(
 			zap.String("server_name", name),
 			zap.Strings("subjects", currentCert.Names),
 			zap.Time("expiration", expiresAt(currentCert.Leaf)),
 			zap.Duration("remaining", timeLeft),
-			zap.Bool("revoked", revoked))
-	}
-
-	// Make sure a certificate for this name should be obtained on-demand
-	err := cfg.checkIfCertShouldBeObtained(name)
-	if err != nil {
-		// if not, remove from cache (it will be deleted from storage later)
-		cfg.certCache.mu.Lock()
-		cfg.certCache.removeCertificate(currentCert)
-		cfg.certCache.mu.Unlock()
-		unblockWaiters()
-		return Certificate{}, err
+			zap.Bool("revoked", revoked),
+		)
 	}
 
 	// Renew and reload the certificate
 	renewAndReload := func(ctx context.Context, cancel context.CancelFunc) (Certificate, error) {
 		defer cancel()
+
+		if log != nil {
+			log.Info("attempting certificate renewal")
+		}
+
+		// Make sure a certificate for this name should be obtained on-demand
+		err := cfg.checkIfCertShouldBeObtained(name)
+		if err != nil {
+			// if not, remove from cache (it will be deleted from storage later)
+			cfg.certCache.mu.Lock()
+			cfg.certCache.removeCertificate(currentCert)
+			cfg.certCache.mu.Unlock()
+			unblockWaiters()
+			log.Error("certificate should not be obtained", zap.Error(err))
+			return Certificate{}, err
+		}
 
 		// otherwise, renew with issuer, etc.
 		var newCert Certificate
@@ -679,10 +685,7 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 
 		if err != nil {
 			if log != nil {
-				log.Error("renewing and reloading certificate",
-					zap.String("server_name", name),
-					zap.Error(err),
-					zap.Bool("forced", revoked))
+				log.Error("renewing and reloading certificate", zap.Error(err))
 			}
 			return newCert, err
 		}
