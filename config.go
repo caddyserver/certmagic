@@ -573,6 +573,12 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			}
 		}
 		if err != nil {
+			cfg.emit(ctx, "cert_failed", map[string]any{
+				"renewal":    false,
+				"identifier": name,
+				"issuer":     issuerUsed.IssuerKey(),
+			})
+
 			// only the error from the last issuer will be returned, but we logged the others
 			return fmt.Errorf("[%s] Obtain: %w", name, err)
 		}
@@ -589,15 +595,16 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			return fmt.Errorf("[%s] Obtain: saving assets: %v", name, err)
 		}
 
-		cfg.emit(ctx, "cert_obtained", map[string]any{
-			"name":        name,
-			"issuer":      issuerUsed.IssuerKey(),
-			"storage_key": certRes.NamesKey(),
-		})
-
 		if log != nil {
 			log.Info("certificate obtained successfully", zap.String("identifier", name))
 		}
+
+		cfg.emit(ctx, "cert_obtained", map[string]any{
+			"renewal":     false,
+			"identifier":  name,
+			"issuer":      issuerUsed.IssuerKey(),
+			"storage_key": certRes.NamesKey(),
+		})
 
 		return nil
 	}
@@ -802,6 +809,14 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			}
 		}
 		if err != nil {
+			cfg.emit(ctx, "cert_failed", map[string]any{
+				"renewal":     true,
+				"identifier":  name,
+				"remaining":   timeLeft,
+				"issuer":      issuerUsed.IssuerKey(),
+				"storage_key": certRes.NamesKey(),
+			})
+
 			// only the error from the last issuer will be returned, but we logged the others
 			return fmt.Errorf("[%s] Renew: %w", name, err)
 		}
@@ -818,15 +833,17 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			return fmt.Errorf("[%s] Renew: saving assets: %v", name, err)
 		}
 
-		cfg.emit(ctx, "cert_renewed", map[string]any{
-			"name":        name,
-			"issuer":      issuerUsed.IssuerKey(),
-			"storage_key": certRes.NamesKey(),
-		})
-
 		if log != nil {
 			log.Info("certificate renewed successfully", zap.String("identifier", name))
 		}
+
+		cfg.emit(ctx, "cert_obtained", map[string]any{
+			"renewal":     true,
+			"remaining":   timeLeft,
+			"identifier":  name,
+			"issuer":      issuerUsed.IssuerKey(),
+			"storage_key": certRes.NamesKey(),
+		})
 
 		return nil
 	}

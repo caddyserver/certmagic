@@ -383,6 +383,13 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 
 		// If the updated staple shows that the certificate was revoked, we should immediately renew it
 		if certShouldBeForceRenewed(cert) {
+			qe.cfg.emit(ctx, "cert_ocsp_revoked", map[string]any{
+				"subjects":    cert.Names,
+				"certificate": cert,
+				"reason":      cert.ocsp.RevocationReason,
+				"revoked_at":  cert.ocsp.RevokedAt,
+			})
+
 			renewQueue = append(renewQueue, renewQueueEntry{
 				oldCert: cert,
 				cfg:     qe.cfg,
