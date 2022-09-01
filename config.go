@@ -539,7 +539,10 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 		// try to obtain from each issuer until we succeed
 		var issuedCert *IssuedCertificate
 		var issuerUsed Issuer
+		var issuerKeys []string
 		for i, issuer := range issuers {
+			issuerKeys = append(issuerKeys, issuer.IssuerKey())
+
 			if log != nil {
 				log.Debug(fmt.Sprintf("trying issuer %d/%d", i+1, len(cfg.Issuers)),
 					zap.String("issuer", issuer.IssuerKey()))
@@ -576,7 +579,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			cfg.emit(ctx, "cert_failed", map[string]any{
 				"renewal":    false,
 				"identifier": name,
-				"issuer":     issuerUsed.IssuerKey(),
+				"issuers":    issuerKeys,
 				"error":      err,
 			})
 
@@ -603,7 +606,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 		cfg.emit(ctx, "cert_obtained", map[string]any{
 			"renewal":     false,
 			"identifier":  name,
-			"issuer":      issuerUsed.IssuerKey(),
+			"issuers":     issuerUsed.IssuerKey(),
 			"storage_key": certRes.NamesKey(),
 		})
 
