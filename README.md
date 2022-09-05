@@ -458,6 +458,42 @@ Most applications will not need to interact with certificate caches directly. Us
 
 Again, if you're needing to do this, you've probably over-complicated your application design.
 
+## Events
+
+(Events are new and still experimental, so they may change.)
+
+CertMagic emits events when possible things of interest happen. Set the [`OnEvent` field of your `Config`](https://pkg.go.dev/github.com/caddyserver/certmagic#Config.OnEvent) to subscribe to events; ignore the ones you aren't interested in. Here are the events currently emitted along with their metadata you can use:
+
+- **`cached_unmanaged_cert`** An unmanaged certificate was cached
+	- `sans`: The subject names on the certificate
+- **`cert_obtaining`** A certificate is about to be obtained
+	- `renewal`: Whether this is a renewal
+	- `identifier`: The name on the certificate
+	- `forced`: Whether renewal is being forced (if renewal)
+	- `remaining`: Time left on the certificate (if renewal)
+	- `issuer`: The previous or current issuer
+- **`cert_obtained`** A certificate was successfully obtained
+	- `renewal`: Whether this is a renewal
+	- `identifier`: The name on the certificate
+	- `remaining`: Time left on the certificate (if renewal)
+	- `issuer`: The previous or current issuer
+	- `storage_key`: The path to the cert resources within storage
+- **`cert_failed`** An attempt to obtain a certificate failed
+	- `renewal`: Whether this is a renewal
+	- `identifier`: The name on the certificate
+	- `remaining`: Time left on the certificate (if renewal)
+	- `issuer`: The previous or current issuer
+	- `storage_key`: The path to the cert resources within storage
+	- `error`: The (final) error message
+- **`tls_get_certificate`** The GetCertificate phase of a TLS handshake is under way
+	- `client_hello`: The tls.ClientHelloInfo struct
+- **`cert_ocsp_revoked`** A certificate's OCSP indicates it has been revoked
+	- `subjects`: The subject names on the certificate
+	- `certificate`: The Certificate struct
+	- `reason`: The OCSP revocation reason
+	- `revoked_at`: When the certificate was revoked
+
+`OnEvent` can return an error. Some events may be aborted by returning an error. For example, returning an error from `cert_obtained` can cancel obtaining the certificate. Only return an error from `OnEvent` if you want to abort program flow.
 
 ## FAQ
 
