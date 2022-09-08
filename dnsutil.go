@@ -243,7 +243,7 @@ func checkAuthoritativeNss(fqdn, value string, nameservers []string) (bool, erro
 		}
 
 		if r.Rcode != dns.RcodeSuccess {
-			if r.Rcode == dns.RcodeNameError {
+			if r.Rcode == dns.RcodeNameError || r.Rcode == dns.RcodeServerFailure {
 				// if Present() succeeded, then it must show up eventually, or else
 				// something is really broken in the DNS provider or their API;
 				// no need for error here, simply have the caller try again
