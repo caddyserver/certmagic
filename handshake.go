@@ -652,7 +652,11 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 			cfg.certCache.removeCertificate(currentCert)
 			cfg.certCache.mu.Unlock()
 			unblockWaiters()
-			log.Error("certificate should not be obtained", zap.Error(err))
+
+			if log != nil {
+				log.Error("certificate should not be obtained", zap.Error(err))
+			}
+
 			return Certificate{}, err
 		}
 
