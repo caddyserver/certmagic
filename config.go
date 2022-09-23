@@ -785,7 +785,9 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		// try to obtain from each issuer until we succeed
 		var issuedCert *IssuedCertificate
 		var issuerUsed Issuer
+		var issuerKeys []string
 		for _, issuer := range cfg.Issuers {
+			issuerKeys = append(issuerKeys, issuer.IssuerKey())
 			if prechecker, ok := issuer.(PreChecker); ok {
 				err = prechecker.PreCheck(ctx, []string{name}, interactive)
 				if err != nil {
@@ -818,7 +820,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 				"renewal":     true,
 				"identifier":  name,
 				"remaining":   timeLeft,
-				"issuer":      issuerUsed.IssuerKey(),
+				"issuers":     issuerKeys,
 				"storage_key": certRes.NamesKey(),
 				"error":       err,
 			})
