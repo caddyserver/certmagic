@@ -22,10 +22,11 @@ import (
 )
 
 func TestHTTPChallengeHandlerNoOp(t *testing.T) {
-	am := &ACMEIssuer{CA: "https://example.com/acme/directory"}
+	am := &ACMEIssuer{CA: "https://example.com/acme/directory", Logger: defaultTestLogger}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
+		Logger:    defaultTestLogger,
 		certCache: new(Cache),
 	}
 	am.config = testConfig

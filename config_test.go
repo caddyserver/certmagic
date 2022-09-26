@@ -30,6 +30,7 @@ func TestSaveCertResource(t *testing.T) {
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
+		Logger:    defaultTestLogger,
 		certCache: new(Cache),
 	}
 	am.config = testConfig

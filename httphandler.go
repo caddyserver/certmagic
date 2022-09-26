@@ -73,11 +73,9 @@ func (am *ACMEIssuer) distributedHTTPChallengeSolver(w http.ResponseWriter, r *h
 	host := hostOnly(r.Host)
 	chalInfo, distributed, err := am.config.getChallengeInfo(r.Context(), host)
 	if err != nil {
-		if am.Logger != nil {
-			am.Logger.Error("looking up info for HTTP challenge",
-				zap.String("host", host),
-				zap.Error(err))
-		}
+		am.Logger.Error("looking up info for HTTP challenge",
+			zap.String("host", host),
+			zap.Error(err))
 		return false
 	}
 	return solveHTTPChallenge(am.Logger, w, r, chalInfo.Challenge, distributed)
@@ -95,13 +93,11 @@ func solveHTTPChallenge(logger *zap.Logger, w http.ResponseWriter, r *http.Reque
 		w.Header().Add("Content-Type", "text/plain")
 		w.Write([]byte(challenge.KeyAuthorization))
 		r.Close = true
-		if logger != nil {
-			logger.Info("served key authentication",
-				zap.String("identifier", challenge.Identifier.Value),
-				zap.String("challenge", "http-01"),
-				zap.String("remote", r.RemoteAddr),
-				zap.Bool("distributed", distributed))
-		}
+		logger.Info("served key authentication",
+			zap.String("identifier", challenge.Identifier.Value),
+			zap.String("challenge", "http-01"),
+			zap.String("remote", r.RemoteAddr),
+			zap.Bool("distributed", distributed))
 		return true
 	}
 	return false

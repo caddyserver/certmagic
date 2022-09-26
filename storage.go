@@ -237,16 +237,14 @@ func CleanUpOwnLocks(ctx context.Context, logger *zap.Logger) {
 	locksMu.Lock()
 	defer locksMu.Unlock()
 	for lockKey, storage := range locks {
-		err := storage.Unlock(ctx, lockKey)
-		if err == nil {
-			delete(locks, lockKey)
-		} else if logger != nil {
+		if err := storage.Unlock(ctx, lockKey); err != nil {
 			logger.Error("unable to clean up lock in storage backend",
 				zap.Any("storage", storage),
 				zap.String("lock_key", lockKey),
-				zap.Error(err),
-			)
+				zap.Error(err))
+			continue
 		}
+		delete(locks, lockKey)
 	}
 }
 

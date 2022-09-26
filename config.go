@@ -119,7 +119,8 @@ type Config struct {
 	// TLS assets. Default is the local file system.
 	Storage Storage
 
-	// Set a logger to enable logging.
+	// Set a logger to enable logging. If not set,
+	// a default logger will be created.
 	Logger *zap.Logger
 
 	// required pointer to the in-memory cert cache
@@ -205,6 +206,16 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	if cfg.OnDemand == nil {
 		cfg.OnDemand = Default.OnDemand
 	}
+	if !cfg.MustStaple {
+		cfg.MustStaple = Default.MustStaple
+	}
+	if len(cfg.Issuers) == 0 {
+		cfg.Issuers = Default.Issuers
+		if len(cfg.Issuers) == 0 {
+			// at least one issuer is absolutely required
+			cfg.Issuers = []Issuer{NewACMEIssuer(&cfg, DefaultACME)}
+		}
+	}
 	if cfg.RenewalWindowRatio == 0 {
 		cfg.RenewalWindowRatio = Default.RenewalWindowRatio
 	}
@@ -217,18 +228,11 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	if cfg.DefaultServerName == "" {
 		cfg.DefaultServerName = Default.DefaultServerName
 	}
-	if !cfg.MustStaple {
-		cfg.MustStaple = Default.MustStaple
-	}
 	if cfg.Storage == nil {
 		cfg.Storage = Default.Storage
 	}
-	if len(cfg.Issuers) == 0 {
-		cfg.Issuers = Default.Issuers
-		if len(cfg.Issuers) == 0 {
-			// at least one issuer is absolutely required
-			cfg.Issuers = []Issuer{NewACMEIssuer(&cfg, DefaultACME)}
-		}
+	if cfg.Logger == nil {
+		cfg.Logger = Default.Logger
 	}
 
 	// absolutely don't allow a nil storage,
@@ -236,6 +240,12 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	// a config can do pointless
 	if cfg.Storage == nil {
 		cfg.Storage = defaultFileStorage
+	}
+
+	// absolutely don't allow a nil logger either,
+	// because that would result in panics
+	if cfg.Logger == nil {
+		cfg.Logger = defaultLogger
 	}
 
 	cfg.certCache = certCache
@@ -469,11 +479,9 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 		return fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
 	}
 
-	log := loggerNamed(cfg.Logger, "obtain")
+	log := cfg.Logger.Named("obtain")
 
-	if log != nil {
-		log.Info("acquiring lock", zap.String("identifier", name))
-	}
+	log.Info("acquiring lock", zap.String("identifier", name))
 
 	// ensure idempotency of the obtain operation for this name
 	lockKey := cfg.lockKey(certIssueLockOp, name)
@@ -482,34 +490,24 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 		return fmt.Errorf("unable to acquire lock '%s': %v", lockKey, err)
 	}
 	defer func() {
-		if log != nil {
-			log.Info("releasing lock", zap.String("identifier", name))
-		}
+		log.Info("releasing lock", zap.String("identifier", name))
 		if err := releaseLock(ctx, cfg.Storage, lockKey); err != nil {
-			if log != nil {
-				log.Error("unable to unlock",
-					zap.String("identifier", name),
-					zap.String("lock_key", lockKey),
-					zap.Error(err))
-			}
+			log.Error("unable to unlock",
+				zap.String("identifier", name),
+				zap.String("lock_key", lockKey),
+				zap.Error(err))
 		}
 	}()
-	if log != nil {
-		log.Info("lock acquired", zap.String("identifier", name))
-	}
+	log.Info("lock acquired", zap.String("identifier", name))
 
 	f := func(ctx context.Context) error {
 		// check if obtain is still needed -- might have been obtained during lock
 		if cfg.storageHasCertResourcesAnyIssuer(ctx, name) {
-			if log != nil {
-				log.Info("certificate already exists in storage", zap.String("identifier", name))
-			}
+			log.Info("certificate already exists in storage", zap.String("identifier", name))
 			return nil
 		}
 
-		if log != nil {
-			log.Info("obtaining certificate", zap.String("identifier", name))
-		}
+		log.Info("obtaining certificate", zap.String("identifier", name))
 
 		if err := cfg.emit(ctx, "cert_obtaining", map[string]any{"identifier": name}); err != nil {
 			return fmt.Errorf("obtaining certificate aborted by event handler: %w", err)
@@ -543,10 +541,8 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 		for i, issuer := range issuers {
 			issuerKeys = append(issuerKeys, issuer.IssuerKey())
 
-			if log != nil {
-				log.Debug(fmt.Sprintf("trying issuer %d/%d", i+1, len(cfg.Issuers)),
-					zap.String("issuer", issuer.IssuerKey()))
-			}
+			log.Debug(fmt.Sprintf("trying issuer %d/%d", i+1, len(cfg.Issuers)),
+				zap.String("issuer", issuer.IssuerKey()))
 
 			if prechecker, ok := issuer.(PreChecker); ok {
 				err = prechecker.PreCheck(ctx, []string{name}, interactive)
@@ -568,12 +564,10 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			if errors.As(err, &problem) {
 				errToLog = problem
 			}
-			if log != nil {
-				log.Error("could not get certificate from issuer",
-					zap.String("identifier", name),
-					zap.String("issuer", issuer.IssuerKey()),
-					zap.Error(errToLog))
-			}
+			log.Error("could not get certificate from issuer",
+				zap.String("identifier", name),
+				zap.String("issuer", issuer.IssuerKey()),
+				zap.Error(errToLog))
 		}
 		if err != nil {
 			cfg.emit(ctx, "cert_failed", map[string]any{
@@ -599,9 +593,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			return fmt.Errorf("[%s] Obtain: saving assets: %v", name, err)
 		}
 
-		if log != nil {
-			log.Info("certificate obtained successfully", zap.String("identifier", name))
-		}
+		log.Info("certificate obtained successfully", zap.String("identifier", name))
 
 		cfg.emit(ctx, "cert_obtained", map[string]any{
 			"renewal":     false,
@@ -702,11 +694,9 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		return fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
 	}
 
-	log := loggerNamed(cfg.Logger, "renew")
+	log := cfg.Logger.Named("renew")
 
-	if log != nil {
-		log.Info("acquiring lock", zap.String("identifier", name))
-	}
+	log.Info("acquiring lock", zap.String("identifier", name))
 
 	// ensure idempotency of the renew operation for this name
 	lockKey := cfg.lockKey(certIssueLockOp, name)
@@ -715,21 +705,16 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		return fmt.Errorf("unable to acquire lock '%s': %v", lockKey, err)
 	}
 	defer func() {
-		if log != nil {
-			log.Info("releasing lock", zap.String("identifier", name))
-		}
+		log.Info("releasing lock", zap.String("identifier", name))
+
 		if err := releaseLock(ctx, cfg.Storage, lockKey); err != nil {
-			if log != nil {
-				log.Error("unable to unlock",
-					zap.String("identifier", name),
-					zap.String("lock_key", lockKey),
-					zap.Error(err))
-			}
+			log.Error("unable to unlock",
+				zap.String("identifier", name),
+				zap.String("lock_key", lockKey),
+				zap.Error(err))
 		}
 	}()
-	if log != nil {
-		log.Info("lock acquired", zap.String("identifier", name))
-	}
+	log.Info("lock acquired", zap.String("identifier", name))
 
 	f := func(ctx context.Context) error {
 		// prepare for renewal (load PEM cert, key, and meta)
@@ -742,26 +727,20 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		timeLeft, needsRenew := cfg.managedCertNeedsRenewal(certRes)
 		if !needsRenew {
 			if force {
-				if log != nil {
-					log.Info("certificate does not need to be renewed, but renewal is being forced",
-						zap.String("identifier", name),
-						zap.Duration("remaining", timeLeft))
-				}
+				log.Info("certificate does not need to be renewed, but renewal is being forced",
+					zap.String("identifier", name),
+					zap.Duration("remaining", timeLeft))
 			} else {
-				if log != nil {
-					log.Info("certificate appears to have been renewed already",
-						zap.String("identifier", name),
-						zap.Duration("remaining", timeLeft))
-				}
+				log.Info("certificate appears to have been renewed already",
+					zap.String("identifier", name),
+					zap.Duration("remaining", timeLeft))
 				return nil
 			}
 		}
 
-		if log != nil {
-			log.Info("renewing certificate",
-				zap.String("identifier", name),
-				zap.Duration("remaining", timeLeft))
-		}
+		log.Info("renewing certificate",
+			zap.String("identifier", name),
+			zap.Duration("remaining", timeLeft))
 
 		if err := cfg.emit(ctx, "cert_obtaining", map[string]any{
 			"renewal":    true,
@@ -808,12 +787,10 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			if errors.As(err, &problem) {
 				errToLog = problem
 			}
-			if log != nil {
-				log.Error("could not get certificate from issuer",
-					zap.String("identifier", name),
-					zap.String("issuer", issuer.IssuerKey()),
-					zap.Error(errToLog))
-			}
+			log.Error("could not get certificate from issuer",
+				zap.String("identifier", name),
+				zap.String("issuer", issuer.IssuerKey()),
+				zap.Error(errToLog))
 		}
 		if err != nil {
 			cfg.emit(ctx, "cert_failed", map[string]any{
@@ -841,9 +818,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			return fmt.Errorf("[%s] Renew: saving assets: %v", name, err)
 		}
 
-		if log != nil {
-			log.Info("certificate renewed successfully", zap.String("identifier", name))
-		}
+		log.Info("certificate renewed successfully", zap.String("identifier", name))
 
 		cfg.emit(ctx, "cert_obtained", map[string]any{
 			"renewal":     true,
@@ -1038,10 +1013,8 @@ func (cfg *Config) checkStorage(ctx context.Context) error {
 	defer func() {
 		deleteErr := cfg.Storage.Delete(ctx, key)
 		if deleteErr != nil {
-			if cfg.Logger != nil {
-				cfg.Logger.Error("deleting test key from storage",
-					zap.String("key", key), zap.Error(err))
-			}
+			cfg.Logger.Error("deleting test key from storage",
+				zap.String("key", key), zap.Error(err))
 		}
 		// if there was no other error, make sure
 		// to return any error returned from Delete
@@ -1119,13 +1092,6 @@ func (cfg *Config) emit(ctx context.Context, eventName string, data map[string]a
 		return nil
 	}
 	return cfg.OnEvent(ctx, eventName, data)
-}
-
-func loggerNamed(l *zap.Logger, name string) *zap.Logger {
-	if l == nil {
-		return nil
-	}
-	return l.Named(name)
 }
 
 // CertificateSelector is a type which can select a certificate to use given multiple choices.

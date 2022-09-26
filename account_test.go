@@ -31,6 +31,7 @@ func TestNewAccount(t *testing.T) {
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
+		Logger:    defaultTestLogger,
 		certCache: new(Cache),
 	}
 	am.config = testConfig
@@ -58,6 +59,7 @@ func TestSaveAccount(t *testing.T) {
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata1_tmp"},
+		Logger:    defaultTestLogger,
 		certCache: new(Cache),
 	}
 	am.config = testConfig
@@ -93,6 +95,7 @@ func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata_tmp"},
+		Logger:    defaultTestLogger,
 		certCache: new(Cache),
 	}
 	am.config = testConfig
@@ -114,6 +117,7 @@ func TestGetAccountAlreadyExists(t *testing.T) {
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata2_tmp"},
+		Logger:    defaultTestLogger,
 		certCache: new(Cache),
 	}
 	am.config = testConfig
@@ -168,6 +172,7 @@ func TestGetEmailFromPackageDefault(t *testing.T) {
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata2_tmp"},
+		Logger:    defaultTestLogger,
 		certCache: new(Cache),
 	}
 	am.config = testConfig
@@ -189,6 +194,7 @@ func TestGetEmailFromUserInput(t *testing.T) {
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata3_tmp"},
+		Logger:    defaultTestLogger,
 		certCache: new(Cache),
 	}
 	am.config = testConfig
@@ -223,6 +229,7 @@ func TestGetEmailFromRecent(t *testing.T) {
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
 		Storage:   &FileStorage{Path: "./_testdata4_tmp"},
+		Logger:    defaultTestLogger,
 		certCache: new(Cache),
 	}
 	am.config = testConfig

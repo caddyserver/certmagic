@@ -177,7 +177,7 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls
 		return err
 	}
 	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
-	if err != nil && cfg.Logger != nil {
+	if err != nil {
 		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
 	}
 	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names})
@@ -225,7 +225,7 @@ func (cfg Config) makeCertificateWithOCSP(ctx context.Context, certPEMBlock, key
 		return cert, err
 	}
 	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
-	if err != nil && cfg.Logger != nil {
+	if err != nil {
 		cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
 	}
 	return cert, nil
@@ -333,9 +333,7 @@ func (cfg *Config) managedCertInStorageExpiresSoon(ctx context.Context, cert Cer
 // to the new cert. It assumes that the new certificate for oldCert.Names[0] is
 // already in storage. It returns the newly-loaded certificate if successful.
 func (cfg *Config) reloadManagedCertificate(ctx context.Context, oldCert Certificate) (Certificate, error) {
-	if cfg.Logger != nil {
-		cfg.Logger.Info("reloading managed certificate", zap.Strings("identifiers", oldCert.Names))
-	}
+	cfg.Logger.Info("reloading managed certificate", zap.Strings("identifiers", oldCert.Names))
 	newCert, err := cfg.loadManagedCertificate(ctx, oldCert.Names[0])
 	if err != nil {
 		return Certificate{}, fmt.Errorf("loading managed certificate for %v from storage: %v", oldCert.Names, err)
