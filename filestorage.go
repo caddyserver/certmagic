@@ -172,7 +172,13 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 		if err == nil {
 			err2 := json.NewDecoder(f).Decode(&meta)
 			f.Close()
-			if err2 != nil {
+			if errors.Is(err2, io.EOF) {
+				// lockfile is empty or truncated; I *think* we can assume the previous
+				// acquirer either crashed or had some sort of failure that caused them
+				// to be unable to fully acquire or retain the lock, therefore we should
+				// treat it as if the lockfile did not exist
+				log.Printf("[INFO][%s] %s: Empty lockfile (%v) - likely previous process crashed or storage medium failure; treating as stale", s, filename, err2)
+			} else if err2 != nil {
 				return fmt.Errorf("decoding lockfile contents: %w", err2)
 			}
 		}
@@ -196,7 +202,7 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 				s, name, meta.Created, meta.Updated, filename)
 			if err = os.Remove(filename); err != nil { // hopefully we can replace the lock file quickly!
 				if !errors.Is(err, fs.ErrNotExist) {
-					return fmt.Errorf("unable to delete stale lock; deadlocked: %w", err)
+					return fmt.Errorf("unable to delete stale lockfile; deadlocked: %w", err)
 				}
 			}
 			continue
