@@ -3,11 +3,11 @@ module github.com/caddyserver/certmagic
 go 1.18
 
 require (
-	github.com/klauspost/cpuid/v2 v2.1.0
+	github.com/klauspost/cpuid/v2 v2.1.1
 	github.com/libdns/libdns v0.2.1
 	github.com/mholt/acmez v1.0.4
 	github.com/miekg/dns v1.1.50
-	go.uber.org/zap v1.21.0
+	go.uber.org/zap v1.23.0
 	golang.org/x/crypto v0.0.0-20220722155217-630584e8d5aa
 	golang.org/x/net v0.0.0-20220805013720-a33c5aa5df48
 )
