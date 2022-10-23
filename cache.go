@@ -328,7 +328,11 @@ func (certCache *Cache) getConfig(cert Certificate) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.certCache != nil && cfg.certCache != certCache {
+	if cfg.certCache == nil {
+		return nil, fmt.Errorf("config returned for certificate %v has nil cache; expected %p (this one)",
+			cert.Names, certCache)
+	}
+	if cfg.certCache != certCache {
 		return nil, fmt.Errorf("config returned for certificate %v is not nil and points to different cache; got %p, expected %p (this one)",
 			cert.Names, cfg.certCache, certCache)
 	}
