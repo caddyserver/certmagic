@@ -197,14 +197,29 @@ func (certCache *Cache) cacheCertificate(cert Certificate) {
 // This function is NOT safe for concurrent use. Callers MUST acquire
 // a write lock on certCache.mu first.
 func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
-	// no-op if this certificate already exists in the cache
-	if _, ok := certCache.cache[cert.hash]; ok {
+	// if this certificate already exists in the cache, this is basically
+	// a no-op so we reuse existing cert (prevent duplication), but we do
+	// modify the cert to add tags it may be missing (see issue #211)
+	if existingCert, ok := certCache.cache[cert.hash]; ok {
+		logMsg := "certificate already cached"
+
+		if len(cert.Tags) > 0 {
+			for _, tag := range cert.Tags {
+				if !existingCert.HasTag(tag) {
+					existingCert.Tags = append(existingCert.Tags, tag)
+				}
+			}
+			certCache.cache[cert.hash] = existingCert
+			logMsg += "; appended any missing tags to cert"
+		}
+
 		certCache.logger.Debug("certificate already cached",
 			zap.Strings("subjects", cert.Names),
 			zap.Time("expiration", expiresAt(cert.Leaf)),
 			zap.Bool("managed", cert.managed),
 			zap.String("issuer_key", cert.issuerKey),
-			zap.String("hash", cert.hash))
+			zap.String("hash", cert.hash),
+			zap.Strings("tags", cert.Tags))
 		return
 	}
 
