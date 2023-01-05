@@ -75,6 +75,8 @@ func (am *ACMEIssuer) distributedHTTPChallengeSolver(w http.ResponseWriter, r *h
 	if err != nil {
 		am.Logger.Error("looking up info for HTTP challenge",
 			zap.String("host", host),
+			zap.String("remote_addr", r.RemoteAddr),
+			zap.String("user_agent", r.Header.Get("User-Agent")),
 			zap.Error(err))
 		return false
 	}

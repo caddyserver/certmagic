@@ -335,6 +335,7 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 			continue
 		}
 
+		// TODO: consider doing this in a goroutine if async, to utilize multiple cores while loading certs
 		// otherwise, begin management immediately
 		err := cfg.manageOne(ctx, domainName, async)
 		if err != nil {

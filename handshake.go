@@ -60,6 +60,7 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 			challengeCert, distributed, err := cfg.getTLSALPNChallengeCert(clientHello)
 			if err != nil {
 				cfg.Logger.Error("tls-alpn challenge",
+					zap.String("remote_addr", clientHello.Conn.RemoteAddr().String()),
 					zap.String("server_name", clientHello.ServerName),
 					zap.Error(err))
 				return nil, err
