@@ -162,6 +162,7 @@ func NewDefault() *Config {
 			GetConfigForCert: func(Certificate) (*Config, error) {
 				return NewDefault(), nil
 			},
+			Logger: Default.Logger,
 		})
 	}
 	certCache := defaultCache
