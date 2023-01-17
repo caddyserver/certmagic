@@ -35,6 +35,7 @@ func TestLookupNameserversOK(t *testing.T) {
 
 	for i, test := range testCases {
 		test := test
+		i := i
 		t.Run(test.fqdn, func(t *testing.T) {
 			t.Parallel()
 
@@ -68,6 +69,7 @@ func TestLookupNameserversErr(t *testing.T) {
 
 	for i, test := range testCases {
 		test := test
+		i := i
 		t.Run(test.desc, func(t *testing.T) {
 			t.Parallel()
 

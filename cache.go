@@ -213,7 +213,7 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 			logMsg += "; appended any missing tags to cert"
 		}
 
-		certCache.logger.Debug("certificate already cached",
+		certCache.logger.Debug(logMsg,
 			zap.Strings("subjects", cert.Names),
 			zap.Time("expiration", expiresAt(cert.Leaf)),
 			zap.Bool("managed", cert.managed),

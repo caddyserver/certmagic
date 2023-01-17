@@ -235,6 +235,38 @@ func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificat
 // This function is safe for concurrent use.
 func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.ClientHelloInfo, loadIfNecessary, obtainIfNecessary bool) (Certificate, error) {
 	log := logWithRemote(cfg.Logger.Named("handshake"), hello)
+	name := cfg.getNameFromClientHello(hello)
+
+	// if a swarm of requests comes in for the same domain, avoid pounding storage thousands of times simultaneously
+	// (we do a similar sync strategy for obtaining certificate during handshake)
+	certLoadWaitChansMu.Lock()
+	wait, ok := certLoadWaitChans[name]
+	if ok {
+		// another goroutine is already loading the cert; just wait and we'll get it from the in-memory cache
+		certLoadWaitChansMu.Unlock()
+
+		// TODO: see if we can get a proper context in here, for true cancellation
+		timeout := time.NewTimer(2 * time.Minute)
+		select {
+		case <-timeout.C:
+			return Certificate{}, fmt.Errorf("timed out waiting to load certificate for %s", name)
+		case <-wait:
+			timeout.Stop()
+		}
+	} else {
+		// no other goroutine is currently trying to load this cert
+		wait = make(chan struct{})
+		certLoadWaitChans[name] = wait
+		certLoadWaitChansMu.Unlock()
+
+		// unblock others and clean up when we're done
+		defer func() {
+			certLoadWaitChansMu.Lock()
+			close(wait)
+			delete(certLoadWaitChans, name)
+			certLoadWaitChansMu.Unlock()
+		}()
+	}
 
 	// First check our in-memory cache to see if we've already loaded it
 	cert, matched, defaulted := cfg.getCertificateFromCache(hello)
@@ -262,8 +294,6 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	if !externalCert.Empty() {
 		return externalCert, nil
 	}
-
-	name := cfg.getNameFromClientHello(hello)
 
 	// We might be able to load or obtain a needed certificate. Load from
 	// storage if OnDemand is enabled, or if there is the possibility that
@@ -793,5 +823,11 @@ func normalizedName(serverName string) string {
 }
 
 // obtainCertWaitChans is used to coordinate obtaining certs for each hostname.
-var obtainCertWaitChans = make(map[string]chan struct{})
-var obtainCertWaitChansMu sync.Mutex
+var (
+	obtainCertWaitChans   = make(map[string]chan struct{})
+	obtainCertWaitChansMu sync.Mutex
+)
+var (
+	certLoadWaitChans   = make(map[string]chan struct{})
+	certLoadWaitChansMu sync.Mutex
+)
