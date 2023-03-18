@@ -500,6 +500,14 @@ func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.Cli
 func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHelloInfo, cert Certificate) (Certificate, error) {
 	log := cfg.Logger.Named("on_demand")
 
+	// Check if the certificate still exists on disk. If not, we need to obtain a new one.
+	if !cfg.storageHasCertResourcesAnyIssuer(ctx, cert.Names[0]) {
+		log.Debug("certificate not found on disk; obtaining new certificate",
+			zap.Strings("identifiers", cert.Names))
+
+		return cfg.obtainOnDemandCertificate(ctx, hello)
+	}
+
 	// Check OCSP staple validity
 	if cert.ocsp != nil && !freshOCSP(cert.ocsp) {
 		log.Debug("OCSP response needs refreshing",
