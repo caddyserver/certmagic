@@ -543,6 +543,16 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 
 	// Check cert expiration
 	if currentlyInRenewalWindow(cert.Leaf.NotBefore, expiresAt(cert.Leaf), cfg.RenewalWindowRatio) {
+		// Check if the certificate still exists on disk. If not, we need to obtain a new one.
+		// This can happen if the certificate was cleaned up by the storage cleaner, but still
+		// remains in the in-memory cache.
+		if !cfg.storageHasCertResourcesAnyIssuer(ctx, cert.Names[0]) {
+			log.Debug("certificate not found on disk; obtaining new certificate",
+				zap.Strings("identifiers", cert.Names))
+
+			return cfg.obtainOnDemandCertificate(ctx, hello)
+		}
+		// Otherwise, renew the certificate.
 		return cfg.renewDynamicCertificate(ctx, hello, cert)
 	}
 
