@@ -237,7 +237,7 @@ func checkDNSPropagation(fqdn, value string, resolvers []string) (bool, error) {
 // checkAuthoritativeNss queries each of the given nameservers for the expected TXT record.
 func checkAuthoritativeNss(fqdn, value string, nameservers []string) (bool, error) {
 	for _, ns := range nameservers {
-		r, err := dnsQuery(fqdn, dns.TypeTXT, []string{net.JoinHostPort(ns, "53")}, false)
+		r, err := dnsQuery(fqdn, dns.TypeTXT, []string{net.JoinHostPort(ns, "53")}, true)
 		if err != nil {
 			return false, err
 		}
