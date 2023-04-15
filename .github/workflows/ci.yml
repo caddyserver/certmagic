@@ -47,3 +47,4 @@ jobs:
     - name: Run tests
       run: |
         go test -v -coverprofile="cover-profile.out" -short -race ./...
+#
