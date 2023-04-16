@@ -26,7 +26,6 @@ jobs:
       uses: actions/setup-go@v4
       with:
         go-version-file: 'go.mod' # Install go version consistent with project
-        cache-dependency-path: 'go.sum' # Cache dependencies
 
     - name: Print Go version and environment
       id: vars
