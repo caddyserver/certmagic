@@ -25,7 +25,7 @@ jobs:
     - name: Install Go
       uses: actions/setup-go@v4
       with:
-        go-version-file: 'go.mod' # Install go version consistent with project setup
+        go-version-file: 'go.mod' # Install go version consistent with project
         cache-dependency-path: 'go.sum' # Cache dependencies
 
     - name: Print Go version and environment
@@ -40,9 +40,8 @@ jobs:
         # Calculate the short SHA1 hash of the git commit
         echo "::set-output name=short_sha::$(git rev-parse --short HEAD)"
  
-    - name: Get dependencies
-      run: |
-        go get -v -t -d ./...
+    - name: Install dependencies
+      run: go mod download
  
     - name: Run tests
       run: |
