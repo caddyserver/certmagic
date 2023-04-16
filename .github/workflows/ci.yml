@@ -50,5 +50,5 @@ jobs:
     - name: Archive code coverage results
       uses: actions/upload-artifact@v3
       with:
-        name: code-coverage-report
+        name: ${{ runner.os }}-code-coverage-report
         path: "cover-profile.out"
