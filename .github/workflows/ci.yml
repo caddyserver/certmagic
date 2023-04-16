@@ -15,6 +15,7 @@ jobs:
     strategy:
       matrix:
         os: [ ubuntu-latest, macos-latest, windows-latest ]
+        go: [ '1.18' ]
 
     runs-on: ${{ matrix.os }}
 
@@ -25,7 +26,7 @@ jobs:
     - name: Install Go
       uses: actions/setup-go@v4
       with:
-        go-version-file: 'go.mod' # Install go version consistent with project
+        go-version: ${{ matrix.go }}
 
     - name: Print Go version and environment
       id: vars
@@ -36,18 +37,10 @@ jobs:
         go env
         printf "\n\nSystem environment:\n\n"
         env
-        # Calculate the short SHA1 hash of the git commit
-        echo "{short_sha}={ $(git rev-parse --short HEAD) }" >> $GITHUB_OUTPUT
  
     - name: Install dependencies
       run: go mod download
  
     - name: Run tests
       run: |
-        go test -v -coverprofile="cover-profile.out" -short -race ./...
-        
-    - name: Archive code coverage results
-      uses: actions/upload-artifact@v3
-      with:
-        name: ${{ runner.os }}-code-coverage-report
-        path: "cover-profile.out"
+        go test -v -short -race ./...
