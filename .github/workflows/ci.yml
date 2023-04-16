@@ -38,7 +38,7 @@ jobs:
         printf "\n\nSystem environment:\n\n"
         env
         # Calculate the short SHA1 hash of the git commit
-        echo "::set-output name=short_sha::$(git rev-parse --short HEAD)"
+        echo "{short_sha}={ $(git rev-parse --short HEAD) }" >> $GITHUB_OUTPUT
  
     - name: Install dependencies
       run: go mod download
