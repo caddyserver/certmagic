@@ -9,6 +9,7 @@ package certmagic
 import (
 	"net"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -91,6 +92,7 @@ var findXByFqdnTestCases = []struct {
 	primaryNs     string
 	nameservers   []string
 	expectedError string
+	skipTest      bool
 }{
 	{
 		desc:        "domain is a CNAME",
@@ -133,6 +135,9 @@ var findXByFqdnTestCases = []struct {
 		zone:        "google.com.",
 		primaryNs:   "ns1.google.com.",
 		nameservers: []string{":7053", ":8053", "1.1.1.1:53"},
+		// Windows takes a super long time to timeout and this negatively impacts CI.
+		// Essentially, we know this works, but Windows is just slow to give up.
+		skipTest: runtime.GOOS == "windows",
 	},
 	{
 		desc:          "only non existent nameservers",
@@ -140,6 +145,9 @@ var findXByFqdnTestCases = []struct {
 		zone:          "google.com.",
 		nameservers:   []string{":7053", ":8053", ":9053"},
 		expectedError: "could not find the start of authority for scholar.google.com.:",
+		// Windows takes a super long time to timeout and this negatively impacts CI.
+		// Essentially, we know this works, but Windows is just slow to give up.
+		skipTest: runtime.GOOS == "windows",
 	},
 	{
 		desc:          "no nameservers",
@@ -153,6 +161,9 @@ var findXByFqdnTestCases = []struct {
 func TestFindZoneByFqdn(t *testing.T) {
 	for i, test := range findXByFqdnTestCases {
 		t.Run(test.desc, func(t *testing.T) {
+			if test.skipTest {
+				t.Skip("skipping test")
+			}
 			clearFqdnCache()
 
 			zone, err := findZoneByFQDN(test.fqdn, test.nameservers)
