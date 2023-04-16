@@ -46,3 +46,9 @@ jobs:
     - name: Run tests
       run: |
         go test -v -coverprofile="cover-profile.out" -short -race ./...
+        
+    - name: Archive code coverage results
+      uses: actions/upload-artifact@v3
+      with:
+        name: code-coverage-report
+        path: "cover-profile.out"
