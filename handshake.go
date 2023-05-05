@@ -42,9 +42,15 @@ import (
 // 5. Issuers (if on-demand is enabled)
 //
 // This method is safe for use as a tls.Config.GetCertificate callback.
+//
+// GetCertificate will run in a new context, use GetCertificateWithContext to provide
+// a context.
 func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	ctx := context.TODO() // TODO: get a proper context? from somewhere...
+	return cfg.GetCertificateWithContext(ctx, clientHello)
+}
 
+func (cfg *Config) GetCertificateWithContext(ctx context.Context, clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	if err := cfg.emit(ctx, "tls_get_certificate", map[string]any{"client_hello": clientHello}); err != nil {
 		cfg.Logger.Error("TLS handshake aborted by event handler",
 			zap.String("server_name", clientHello.ServerName),
