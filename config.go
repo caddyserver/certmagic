@@ -119,6 +119,16 @@ type Config struct {
 	// TLS assets. Default is the local file system.
 	Storage Storage
 
+	// CertMagic will verify the storage configuration
+	// is acceptable before obtaining a certificate
+	// to avoid information loss after an expensive
+	// operation. If you are absolutely 100% sure your
+	// storage is properly configured and has sufficient
+	// space, you can disable this check to reduce I/O
+	// if that is expensive for you.
+	// EXPERIMENTAL: Option subject to change or removal.
+	DisableStorageCheck bool
+
 	// Set a logger to enable logging. If not set,
 	// a default logger will be created.
 	Logger *zap.Logger
@@ -1010,6 +1020,9 @@ func (cfg *Config) getChallengeInfo(ctx context.Context, identifier string) (Cha
 // comparing the loaded value. If this fails, the provided
 // cfg.Storage mechanism should not be used.
 func (cfg *Config) checkStorage(ctx context.Context) error {
+	if cfg.DisableStorageCheck {
+		return nil
+	}
 	key := fmt.Sprintf("rw_test_%d", weakrand.Int())
 	contents := make([]byte, 1024*10) // size sufficient for one or two ACME resources
 	_, err := weakrand.Read(contents)
