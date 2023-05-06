@@ -210,12 +210,15 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	if !cfg.MustStaple {
 		cfg.MustStaple = Default.MustStaple
 	}
-	if len(cfg.Issuers) == 0 {
+	if cfg.Issuers == nil {
 		cfg.Issuers = Default.Issuers
-		if len(cfg.Issuers) == 0 {
-			// at least one issuer is absolutely required
+		if cfg.Issuers == nil {
+			// at least one issuer is absolutely required if not nil
 			cfg.Issuers = []Issuer{NewACMEIssuer(&cfg, DefaultACME)}
 		}
+	}
+	if cfg.Managers == nil {
+		cfg.Managers = Default.Managers
 	}
 	if cfg.RenewalWindowRatio == 0 {
 		cfg.RenewalWindowRatio = Default.RenewalWindowRatio
@@ -333,6 +336,9 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 			if !cfg.OnDemand.whitelistContains(domainName) {
 				cfg.OnDemand.hostWhitelist = append(cfg.OnDemand.hostWhitelist, domainName)
 			}
+			continue
+		}
+		if len(cfg.Managers) > 0 {
 			continue
 		}
 
@@ -589,6 +595,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			CertificatePEM: issuedCert.Certificate,
 			PrivateKeyPEM:  privKeyPEM,
 			IssuerData:     issuedCert.Metadata,
+			issuerKey:      issuerUsed.IssuerKey(),
 		}
 		err = cfg.saveCertResource(ctx, issuerUsed, certRes)
 		if err != nil {
@@ -814,6 +821,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			CertificatePEM: issuedCert.Certificate,
 			PrivateKeyPEM:  certRes.PrivateKeyPEM,
 			IssuerData:     issuedCert.Metadata,
+			issuerKey:      issuerUsed.IssuerKey(),
 		}
 		err = cfg.saveCertResource(ctx, issuerUsed, newCertRes)
 		if err != nil {

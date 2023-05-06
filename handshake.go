@@ -243,37 +243,6 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	log := logWithRemote(cfg.Logger.Named("handshake"), hello)
 	name := cfg.getNameFromClientHello(hello)
 
-	// if a swarm of requests comes in for the same domain, avoid pounding storage thousands of times simultaneously
-	// (we do a similar sync strategy for obtaining certificate during handshake)
-	certLoadWaitChansMu.Lock()
-	wait, ok := certLoadWaitChans[name]
-	if ok {
-		// another goroutine is already loading the cert; just wait and we'll get it from the in-memory cache
-		certLoadWaitChansMu.Unlock()
-
-		// TODO: see if we can get a proper context in here, for true cancellation
-		timeout := time.NewTimer(2 * time.Minute)
-		select {
-		case <-timeout.C:
-			return Certificate{}, fmt.Errorf("timed out waiting to load certificate for %s", name)
-		case <-wait:
-			timeout.Stop()
-		}
-	} else {
-		// no other goroutine is currently trying to load this cert
-		wait = make(chan struct{})
-		certLoadWaitChans[name] = wait
-		certLoadWaitChansMu.Unlock()
-
-		// unblock others and clean up when we're done
-		defer func() {
-			certLoadWaitChansMu.Lock()
-			close(wait)
-			delete(certLoadWaitChans, name)
-			certLoadWaitChansMu.Unlock()
-		}()
-	}
-
 	// First check our in-memory cache to see if we've already loaded it
 	cert, matched, defaulted := cfg.getCertificateFromCache(hello)
 	if matched {
@@ -289,6 +258,49 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 			return cfg.optionalMaintenance(ctx, cfg.Logger.Named("on_demand"), cert, hello)
 		}
 		return cert, nil
+	}
+
+	// By this point, we need to load or obtain a certificate. If a swarm of requests comes in for the same
+	// domain, avoid pounding manager or storage thousands of times simultaneously. We do a similar sync
+	// strategy for obtaining certificate during handshake.
+	certLoadWaitChansMu.Lock()
+	wait, ok := certLoadWaitChans[name]
+	if ok {
+		// another goroutine is already loading the cert; just wait and we'll get it from the in-memory cache
+		certLoadWaitChansMu.Unlock()
+
+		timeout := time.NewTimer(2 * time.Minute) // TODO: have Caddy use the context param to establish a timeout
+		select {
+		case <-timeout.C:
+			return Certificate{}, fmt.Errorf("timed out waiting to load certificate for %s", name)
+		case <-ctx.Done():
+			timeout.Stop()
+			return Certificate{}, ctx.Err()
+		case <-wait:
+			timeout.Stop()
+		}
+
+		return cfg.getCertDuringHandshake(ctx, hello, false, false)
+	} else {
+		// no other goroutine is currently trying to load this cert
+		wait = make(chan struct{})
+		certLoadWaitChans[name] = wait
+		certLoadWaitChansMu.Unlock()
+
+		// unblock others and clean up when we're done
+		defer func() {
+			certLoadWaitChansMu.Lock()
+			close(wait)
+			delete(certLoadWaitChans, name)
+			certLoadWaitChansMu.Unlock()
+		}()
+	}
+
+	// Make sure a certificate is allowed for the given name. If not, it doesn't
+	// make sense to try loading one from storage (issue #185), getting it from a
+	// certificate manager, or obtaining one from an issuer.
+	if err := cfg.checkIfCertShouldBeObtained(name, false); err != nil {
+		return Certificate{}, fmt.Errorf("certificate is not allowed for server name %s: %v", name, err)
 	}
 
 	// If an external Manager is configured, try to get it from them.
@@ -320,11 +332,7 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	loadDynamically := cfg.OnDemand != nil || cacheAlmostFull
 
 	if loadDynamically && loadIfNecessary {
-		// Then check to see if we have one on disk
-		// TODO: As suggested here, https://caddy.community/t/error-tls-alert-internal-error-592-again/13272/30?u=matt,
-		// it might be a good idea to check with the DecisionFunc or allowlist first before even loading the certificate
-		// from storage, since if we can't renew it, why should we even try serving it (it will just get evicted after
-		// we get a return value of false anyway)? See issue #174
+		// Check to see if we have one on disk
 		loadedCert, err := cfg.CacheManagedCertificate(ctx, name)
 		if errors.Is(err, fs.ErrNotExist) {
 			// If no exact match, try a wildcard variant, which is something we can still use
@@ -400,19 +408,20 @@ func (cfg *Config) optionalMaintenance(ctx context.Context, log *zap.Logger, cer
 // checkIfCertShouldBeObtained checks to see if an on-demand TLS certificate
 // should be obtained for a given domain based upon the config settings. If
 // a non-nil error is returned, do not issue a new certificate for name.
-func (cfg *Config) checkIfCertShouldBeObtained(name string) error {
-	if cfg.OnDemand == nil {
+func (cfg *Config) checkIfCertShouldBeObtained(name string, requireOnDemand bool) error {
+	if requireOnDemand && cfg.OnDemand == nil {
 		return fmt.Errorf("not configured for on-demand certificate issuance")
 	}
 	if !SubjectQualifiesForCert(name) {
 		return fmt.Errorf("subject name does not qualify for certificate: %s", name)
 	}
-	if cfg.OnDemand.DecisionFunc != nil {
-		return cfg.OnDemand.DecisionFunc(name)
-	}
-	if len(cfg.OnDemand.hostWhitelist) > 0 &&
-		!cfg.OnDemand.whitelistContains(name) {
-		return fmt.Errorf("certificate for '%s' is not managed", name)
+	if cfg.OnDemand != nil {
+		if cfg.OnDemand.DecisionFunc != nil {
+			return fmt.Errorf("decision func: %w", cfg.OnDemand.DecisionFunc(name))
+		}
+		if len(cfg.OnDemand.hostWhitelist) > 0 && !cfg.OnDemand.whitelistContains(name) {
+			return fmt.Errorf("certificate for '%s' is not managed", name)
+		}
 	}
 	return nil
 }
@@ -465,13 +474,6 @@ func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.Cli
 		obtainCertWaitChansMu.Unlock()
 	}
 
-	// Make sure the certificate should be obtained based on config
-	err := cfg.checkIfCertShouldBeObtained(name)
-	if err != nil {
-		unblockWaiters()
-		return Certificate{}, err
-	}
-
 	log.Info("obtaining new certificate", zap.String("server_name", name))
 
 	// TODO: we are only adding a timeout because we don't know if the context passed in is actually cancelable...
@@ -481,7 +483,7 @@ func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.Cli
 	defer cancel()
 
 	// Obtain the certificate
-	err = cfg.ObtainCertAsync(ctx, name)
+	err := cfg.ObtainCertAsync(ctx, name)
 
 	// immediately unblock anyone waiting for it; doing this in
 	// a defer would risk deadlock because of the recursive call
@@ -649,10 +651,8 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 	renewAndReload := func(ctx context.Context, cancel context.CancelFunc) (Certificate, error) {
 		defer cancel()
 
-		log.Info("attempting certificate renewal")
-
-		// Make sure a certificate for this name should be obtained on-demand
-		err := cfg.checkIfCertShouldBeObtained(name)
+		// Make sure a certificate for this name should be renewed on-demand
+		err := cfg.checkIfCertShouldBeObtained(name, true)
 		if err != nil {
 			// if not, remove from cache (it will be deleted from storage later)
 			cfg.certCache.mu.Lock()
@@ -666,6 +666,8 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 
 			return Certificate{}, err
 		}
+
+		log.Info("attempting certificate renewal")
 
 		// otherwise, renew with issuer, etc.
 		var newCert Certificate

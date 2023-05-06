@@ -433,7 +433,7 @@ type CertificateResource struct {
 
 	// The unique string identifying the issuer of the
 	// certificate; internally useful for storage access.
-	issuerKey string `json:"-"`
+	issuerKey string
 }
 
 // NamesKey returns the list of SANs as a single string,
