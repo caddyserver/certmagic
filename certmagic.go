@@ -270,7 +270,7 @@ type OnDemandConfig struct {
 	// request will be denied.
 	DecisionFunc func(name string) error
 
-	// List of whitelisted hostnames (SNI values) for
+	// List of allowed hostnames (SNI values) for
 	// deferred (on-demand) obtaining of certificates.
 	// Used only by higher-level functions in this
 	// package to persist the list of hostnames that
@@ -282,15 +282,15 @@ type OnDemandConfig struct {
 	// for higher-level convenience functions to be
 	// able to retain their convenience (alternative
 	// is: the user manually creates a DecisionFunc
-	// that whitelists the same names it already
-	// passed into Manage) and without letting clients
-	// have their run of any domain names they want.
+	// that allows the same names it already passed
+	// into Manage) and without letting clients have
+	// their run of any domain names they want.
 	// Only enforced if len > 0.
-	hostWhitelist []string
+	hostAllowlist []string
 }
 
-func (o *OnDemandConfig) whitelistContains(name string) bool {
-	for _, n := range o.hostWhitelist {
+func (o *OnDemandConfig) allowlistContains(name string) bool {
+	for _, n := range o.hostAllowlist {
 		if strings.EqualFold(n, name) {
 			return true
 		}

@@ -343,8 +343,8 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 	for _, domainName := range domainNames {
 		// if on-demand is configured, defer obtain and renew operations
 		if cfg.OnDemand != nil {
-			if !cfg.OnDemand.whitelistContains(domainName) {
-				cfg.OnDemand.hostWhitelist = append(cfg.OnDemand.hostWhitelist, domainName)
+			if !cfg.OnDemand.allowlistContains(domainName) {
+				cfg.OnDemand.hostAllowlist = append(cfg.OnDemand.hostAllowlist, domainName)
 			}
 			continue
 		}

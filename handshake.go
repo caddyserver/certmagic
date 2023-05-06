@@ -417,9 +417,12 @@ func (cfg *Config) checkIfCertShouldBeObtained(name string, requireOnDemand bool
 	}
 	if cfg.OnDemand != nil {
 		if cfg.OnDemand.DecisionFunc != nil {
-			return fmt.Errorf("decision func: %w", cfg.OnDemand.DecisionFunc(name))
+			if err := cfg.OnDemand.DecisionFunc(name); err != nil {
+				return fmt.Errorf("decision func: %w", err)
+			}
+			return nil
 		}
-		if len(cfg.OnDemand.hostWhitelist) > 0 && !cfg.OnDemand.whitelistContains(name) {
+		if len(cfg.OnDemand.hostAllowlist) > 0 && !cfg.OnDemand.allowlistContains(name) {
 			return fmt.Errorf("certificate for '%s' is not managed", name)
 		}
 	}
