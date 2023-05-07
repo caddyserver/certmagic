@@ -383,6 +383,32 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	return Certificate{}, fmt.Errorf("no certificate available for '%s'", name)
 }
 
+func (cfg *Config) loadCertFromStorage(ctx context.Context, log *zap.Logger, hello *tls.ClientHelloInfo) (Certificate, error) {
+	name := normalizedName(hello.ServerName)
+	loadedCert, err := cfg.CacheManagedCertificate(ctx, name)
+	if errors.Is(err, fs.ErrNotExist) {
+		// If no exact match, try a wildcard variant, which is something we can still use
+		labels := strings.Split(name, ".")
+		labels[0] = "*"
+		loadedCert, err = cfg.CacheManagedCertificate(ctx, strings.Join(labels, "."))
+	}
+	if err != nil {
+		return Certificate{}, fmt.Errorf("no matching certificate to load for %s: %w", name, err)
+	}
+	log.Debug("loaded certificate from storage",
+		zap.Strings("subjects", loadedCert.Names),
+		zap.Bool("managed", loadedCert.managed),
+		zap.Time("expiration", expiresAt(loadedCert.Leaf)),
+		zap.String("hash", loadedCert.hash))
+	loadedCert, err = cfg.handshakeMaintenance(ctx, hello, loadedCert)
+	if err != nil {
+		log.Error("maintaining newly-loaded certificate",
+			zap.String("server_name", name),
+			zap.Error(err))
+	}
+	return loadedCert, nil
+}
+
 // optionalMaintenance will perform maintenance on the certificate (if necessary) and
 // will return the resulting certificate. This should only be done if the certificate
 // is managed, OnDemand is enabled, and the scope is allowed to obtain certificates.
@@ -440,8 +466,7 @@ func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.Cli
 	name := cfg.getNameFromClientHello(hello)
 
 	getCertWithoutReobtaining := func() (Certificate, error) {
-		// very important to set the obtainIfNecessary argument to false, so we don't repeat this infinitely
-		return cfg.getCertDuringHandshake(ctx, hello, true, false)
+		return cfg.loadCertFromStorage(ctx, log, hello)
 	}
 
 	// We must protect this process from happening concurrently, so synchronize.
@@ -589,8 +614,7 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 	revoked := currentCert.ocsp != nil && currentCert.ocsp.Status == ocsp.Revoked
 
 	getCertWithoutReobtaining := func() (Certificate, error) {
-		// very important to set the obtainIfNecessary argument to false, so we don't repeat this infinitely
-		return cfg.getCertDuringHandshake(ctx, hello, true, false)
+		return cfg.loadCertFromStorage(ctx, log, hello)
 	}
 
 	// see if another goroutine is already working on this certificate
