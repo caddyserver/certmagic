@@ -88,15 +88,6 @@ type Config struct {
 	// turn until one succeeds.
 	Issuers []Issuer
 
-	// Sources for getting new, unmanaged certificates.
-	// They will be invoked only during TLS handshakes
-	// before on-demand certificate management occurs,
-	// for certificates that are not already loaded into
-	// the in-memory cache.
-	//
-	// TODO: EXPERIMENTAL: subject to change and/or removal.
-	Managers []Manager
-
 	// The source of new private keys for certificates;
 	// the default KeySource is StandardKeyGenerator.
 	KeySource KeyGenerator
@@ -227,9 +218,6 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 			cfg.Issuers = []Issuer{NewACMEIssuer(&cfg, DefaultACME)}
 		}
 	}
-	if cfg.Managers == nil {
-		cfg.Managers = Default.Managers
-	}
 	if cfg.RenewalWindowRatio == 0 {
 		cfg.RenewalWindowRatio = Default.RenewalWindowRatio
 	}
@@ -346,9 +334,6 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 			if !cfg.OnDemand.allowlistContains(domainName) {
 				cfg.OnDemand.hostAllowlist = append(cfg.OnDemand.hostAllowlist, domainName)
 			}
-			continue
-		}
-		if len(cfg.Managers) > 0 {
 			continue
 		}
 

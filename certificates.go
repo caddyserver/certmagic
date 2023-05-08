@@ -113,6 +113,9 @@ func (cert Certificate) HasTag(tag string) bool {
 // resolution of ASN.1 UTCTime/GeneralizedTime by including the extra fraction
 // of a second of certificate validity beyond the NotAfter value.
 func expiresAt(cert *x509.Certificate) time.Time {
+	if cert == nil {
+		return time.Time{}
+	}
 	return cert.NotAfter.Truncate(time.Second).Add(1 * time.Second)
 }
 
