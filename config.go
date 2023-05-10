@@ -358,9 +358,6 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 			}
 			continue
 		}
-		if len(cfg.Managers) > 0 {
-			continue
-		}
 
 		// TODO: consider doing this in a goroutine if async, to utilize multiple cores while loading certs
 		// otherwise, begin management immediately
