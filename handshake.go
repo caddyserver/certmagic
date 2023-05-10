@@ -143,6 +143,20 @@ func (cfg *Config) getCertificateFromCache(hello *tls.ClientHelloInfo) (cert Cer
 		}
 	}
 
+	// a fallback server name can be tried in the very niche
+	// case where a client sends one SNI value but expects or
+	// accepts a different one in return (this is sometimes
+	// the case with CDNs like Cloudflare that send the
+	// downstream ServerName in the handshake but accept
+	// the backend origin's true hostname in a cert).
+	if cfg.FallbackServerName != "" {
+		normFallback := normalizedName(cfg.FallbackServerName)
+		cert, defaulted = cfg.selectCert(hello, normFallback)
+		if defaulted {
+			return
+		}
+	}
+
 	// otherwise, we're bingo on ammo; see issues
 	// caddyserver/caddy#2035 and caddyserver/caddy#1303 (any
 	// change to certificate matching behavior must
@@ -333,36 +347,22 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 
 	if loadDynamically && loadIfNecessary {
 		// Check to see if we have one on disk
-		loadedCert, err := cfg.CacheManagedCertificate(ctx, name)
-		if errors.Is(err, fs.ErrNotExist) {
-			// If no exact match, try a wildcard variant, which is something we can still use
-			labels := strings.Split(name, ".")
-			labels[0] = "*"
-			loadedCert, err = cfg.CacheManagedCertificate(ctx, strings.Join(labels, "."))
-		}
+		loadedCert, err := cfg.loadCertFromStorage(ctx, log, hello)
 		if err == nil {
-			log.Debug("loaded certificate from storage",
-				zap.Strings("subjects", loadedCert.Names),
-				zap.Bool("managed", loadedCert.managed),
-				zap.Time("expiration", expiresAt(loadedCert.Leaf)),
-				zap.String("hash", loadedCert.hash))
-			loadedCert, err = cfg.handshakeMaintenance(ctx, hello, loadedCert)
-			if err != nil {
-				log.Error("maintaining newly-loaded certificate",
-					zap.String("server_name", name),
-					zap.Error(err))
-			}
 			return loadedCert, nil
 		}
-		if cfg.OnDemand != nil && obtainIfNecessary {
+		log.Debug("did not load cert from storage",
+			zap.String("server_name", hello.ServerName),
+			zap.Error(err))
+		if cfg.OnDemand != nil {
 			// By this point, we need to ask the CA for a certificate
 			return cfg.obtainOnDemandCertificate(ctx, hello)
 		}
 	}
 
-	// Fall back to the default certificate if there is one
+	// Fall back to another certificate if there is one (either DefaultServerName or FallbackServerName)
 	if defaulted {
-		log.Debug("fell back to default certificate",
+		log.Debug("fell back to other certificate",
 			zap.Strings("subjects", cert.Names),
 			zap.Bool("managed", cert.managed),
 			zap.Time("expiration", expiresAt(cert.Leaf)),

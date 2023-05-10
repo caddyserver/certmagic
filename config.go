@@ -72,6 +72,13 @@ type Config struct {
 	// ClientHello's ServerName field is empty.
 	DefaultServerName string
 
+	// FallbackServerName specifies a server name
+	// to use when choosing a certificate if the
+	// ClientHello's ServerName field doesn't match
+	// any available certificate.
+	// EXPERIMENTAL: Subject to change or removal.
+	FallbackServerName string
+
 	// The state needed to operate on-demand TLS;
 	// if non-nil, on-demand TLS is enabled and
 	// certificate operations are deferred to
@@ -241,6 +248,9 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	}
 	if cfg.DefaultServerName == "" {
 		cfg.DefaultServerName = Default.DefaultServerName
+	}
+	if cfg.FallbackServerName == "" {
+		cfg.FallbackServerName = Default.FallbackServerName
 	}
 	if cfg.Storage == nil {
 		cfg.Storage = Default.Storage
