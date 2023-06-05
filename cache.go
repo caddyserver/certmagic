@@ -145,7 +145,8 @@ type CacheOptions struct {
 	// used for managing a certificate, or for accessing
 	// that certificate's asset storage (e.g. for
 	// OCSP staples, etc). The returned Config MUST
-	// be associated with the same Cache as the caller.
+	// be associated with the same Cache as the caller,
+	// use New to obtain a valid Config.
 	//
 	// The reason this is a callback function, dynamically
 	// returning a Config (instead of attaching a static
@@ -342,7 +343,11 @@ func (certCache *Cache) getConfig(cert Certificate) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.certCache != nil && cfg.certCache != certCache {
+	if cfg.certCache == nil {
+		return nil, fmt.Errorf("config returned for certificate %v has nil cache; expected %p (this one)",
+			cert.Names, certCache)
+	}
+	if cfg.certCache != certCache {
 		return nil, fmt.Errorf("config returned for certificate %v is not nil and points to different cache; got %p, expected %p (this one)",
 			cert.Names, cfg.certCache, certCache)
 	}
