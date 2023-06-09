@@ -593,6 +593,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			// only the error from the last issuer will be returned, but we logged the others
 			return fmt.Errorf("[%s] Obtain: %w", name, err)
 		}
+		issuerKey := issuerUsed.IssuerKey()
 
 		// success - immediately save the certificate resource
 		certRes := CertificateResource{
@@ -609,11 +610,16 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 
 		log.Info("certificate obtained successfully", zap.String("identifier", name))
 
+		certKey := certRes.NamesKey()
+
 		cfg.emit(ctx, "cert_obtained", map[string]any{
-			"renewal":     false,
-			"identifier":  name,
-			"issuers":     issuerUsed.IssuerKey(),
-			"storage_key": certRes.NamesKey(),
+			"renewal":          false,
+			"identifier":       name,
+			"issuer":           issuerUsed.IssuerKey(),
+			"storage_path":     StorageKeys.CertsSitePrefix(issuerKey, certKey),
+			"private_key_path": StorageKeys.SitePrivateKey(issuerKey, certKey),
+			"certificate_path": StorageKeys.SiteCert(issuerKey, certKey),
+			"metadata_path":    StorageKeys.SiteMeta(issuerKey, certKey),
 		})
 
 		return nil
@@ -819,6 +825,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			// only the error from the last issuer will be returned, but we logged the others
 			return fmt.Errorf("[%s] Renew: %w", name, err)
 		}
+		issuerKey := issuerUsed.IssuerKey()
 
 		// success - immediately save the renewed certificate resource
 		newCertRes := CertificateResource{
@@ -826,7 +833,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			CertificatePEM: issuedCert.Certificate,
 			PrivateKeyPEM:  certRes.PrivateKeyPEM,
 			IssuerData:     issuedCert.Metadata,
-			issuerKey:      issuerUsed.IssuerKey(),
+			issuerKey:      issuerKey,
 		}
 		err = cfg.saveCertResource(ctx, issuerUsed, newCertRes)
 		if err != nil {
@@ -835,12 +842,17 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 
 		log.Info("certificate renewed successfully", zap.String("identifier", name))
 
+		certKey := newCertRes.NamesKey()
+
 		cfg.emit(ctx, "cert_obtained", map[string]any{
-			"renewal":     true,
-			"remaining":   timeLeft,
-			"identifier":  name,
-			"issuer":      issuerUsed.IssuerKey(),
-			"storage_key": certRes.NamesKey(),
+			"renewal":          true,
+			"remaining":        timeLeft,
+			"identifier":       name,
+			"issuer":           issuerKey,
+			"storage_path":     StorageKeys.CertsSitePrefix(issuerKey, certKey),
+			"private_key_path": StorageKeys.SitePrivateKey(issuerKey, certKey),
+			"certificate_path": StorageKeys.SiteCert(issuerKey, certKey),
+			"metadata_path":    StorageKeys.SiteMeta(issuerKey, certKey),
 		})
 
 		return nil
