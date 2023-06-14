@@ -478,13 +478,15 @@ CertMagic emits events when possible things of interest happen. Set the [`OnEven
 	- `identifier`: The name on the certificate
 	- `remaining`: Time left on the certificate (if renewal)
 	- `issuer`: The previous or current issuer
-	- `storage_key`: The path to the cert resources within storage
+	- `storage_path`: The path to the folder containing the cert resources within storage
+	- `private_key_path`: The path to the private key file in storage
+	- `certificate_path`: The path to the public key file in storage
+	- `metadata_path`: The path to the metadata file in storage
 - **`cert_failed`** An attempt to obtain a certificate failed
 	- `renewal`: Whether this is a renewal
 	- `identifier`: The name on the certificate
 	- `remaining`: Time left on the certificate (if renewal)
-	- `issuer`: The previous or current issuer
-	- `storage_key`: The path to the cert resources within storage
+	- `issuers`: The issuer(s) tried
 	- `error`: The (final) error message
 - **`tls_get_certificate`** The GetCertificate phase of a TLS handshake is under way
 	- `client_hello`: The tls.ClientHelloInfo struct
