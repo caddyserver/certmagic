@@ -411,6 +411,23 @@ type KeyGenerator interface {
 	GenerateKey() (crypto.PrivateKey, error)
 }
 
+// IssuerPolicy is a type that enumerates how to
+// choose which issuer to use. EXPERIMENTAL and
+// subject to change.
+type IssuerPolicy string
+
+// Supported issuer policies. These are subject to change.
+const (
+	// UseFirstIssuer uses the first issuer that
+	// successfully returns a certificate.
+	UseFirstIssuer = "first"
+
+	// UseFirstRandomIssuer shuffles the list of
+	// configured issuers, then uses the first one
+	// that successfully returns a certificate.
+	UseFirstRandomIssuer = "first_random"
+)
+
 // IssuedCertificate represents a certificate that was just issued.
 type IssuedCertificate struct {
 	// The PEM-encoding of DER-encoded ASN.1 data.

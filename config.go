@@ -95,6 +95,10 @@ type Config struct {
 	// turn until one succeeds.
 	Issuers []Issuer
 
+	// How to select which issuer to use.
+	// Default: UseFirstIssuer (subject to change).
+	IssuerPolicy IssuerPolicy
+
 	// If true, private keys already existing in storage
 	// will be reused. Otherwise, a new key will be
 	// created for every new certificate to mitigate
@@ -533,7 +537,9 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			return fmt.Errorf("obtaining certificate aborted by event handler: %w", err)
 		}
 
-		// if storage has a private key already, use it; otherwise we'll generate our own
+		// If storage has a private key already, use it; otherwise we'll generate our own.
+		// Also create the slice of issuers we will try using according to any issuer
+		// selection policy (it must be a copy of the slice so we don't mutate original).
 		var privKey crypto.PrivateKey
 		var privKeyPEM []byte
 		var issuers []Issuer
@@ -542,6 +548,14 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			if err != nil {
 				return err
 			}
+		} else {
+			issuers = make([]Issuer, len(cfg.Issuers))
+			copy(issuers, cfg.Issuers)
+		}
+		if cfg.IssuerPolicy == UseFirstRandomIssuer {
+			weakrand.Shuffle(len(issuers), func(i, j int) {
+				issuers[i], issuers[j] = issuers[j], issuers[i]
+			})
 		}
 		if privKey == nil {
 			privKey, err = cfg.KeySource.GenerateKey()
