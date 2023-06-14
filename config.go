@@ -95,6 +95,13 @@ type Config struct {
 	// turn until one succeeds.
 	Issuers []Issuer
 
+	// If true, private keys already existing in storage
+	// will be reused. Otherwise, a new key will be
+	// created for every new certificate to mitigate
+	// pinning and reduce the scope of key compromise.
+	// Default: false (do not reuse keys).
+	ReusePrivateKeys bool
+
 	// The source of new private keys for certificates;
 	// the default KeySource is StandardKeyGenerator.
 	KeySource KeyGenerator
@@ -527,9 +534,14 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 		}
 
 		// if storage has a private key already, use it; otherwise we'll generate our own
-		privKey, privKeyPEM, issuers, err := cfg.reusePrivateKey(ctx, name)
-		if err != nil {
-			return err
+		var privKey crypto.PrivateKey
+		var privKeyPEM []byte
+		var issuers []Issuer
+		if cfg.ReusePrivateKeys {
+			privKey, privKeyPEM, issuers, err = cfg.reusePrivateKey(ctx, name)
+			if err != nil {
+				return err
+			}
 		}
 		if privKey == nil {
 			privKey, err = cfg.KeySource.GenerateKey()
@@ -772,10 +784,17 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			return fmt.Errorf("renewing certificate aborted by event handler: %w", err)
 		}
 
-		privateKey, err := PEMDecodePrivateKey(certRes.PrivateKeyPEM)
+		// reuse or generate new private key for CSR
+		var privateKey crypto.PrivateKey
+		if cfg.ReusePrivateKeys {
+			privateKey, err = PEMDecodePrivateKey(certRes.PrivateKeyPEM)
+		} else {
+			privateKey, err = cfg.KeySource.GenerateKey()
+		}
 		if err != nil {
 			return err
 		}
+
 		csr, err := cfg.generateCSR(privateKey, []string{name})
 		if err != nil {
 			return err
@@ -814,12 +833,11 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		}
 		if err != nil {
 			cfg.emit(ctx, "cert_failed", map[string]any{
-				"renewal":     true,
-				"identifier":  name,
-				"remaining":   timeLeft,
-				"issuers":     issuerKeys,
-				"storage_key": certRes.NamesKey(),
-				"error":       err,
+				"renewal":    true,
+				"identifier": name,
+				"remaining":  timeLeft,
+				"issuers":    issuerKeys,
+				"error":      err,
 			})
 
 			// only the error from the last issuer will be returned, but we logged the others
