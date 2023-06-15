@@ -154,6 +154,10 @@ func (s *FileStorage) Filename(key string) string {
 func (s *FileStorage) Lock(ctx context.Context, name string) error {
 	filename := s.lockFilename(name)
 
+	// sometimes the lockfiles read as empty (size 0) - this is either a stale lock or it
+	// is currently being written; we can retry a couple times in this case, I guess
+	var emptyCount int
+
 	for {
 		err := createLockfile(filename)
 		if err == nil {
@@ -173,11 +177,23 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 			err2 := json.NewDecoder(f).Decode(&meta)
 			f.Close()
 			if errors.Is(err2, io.EOF) {
-				// lockfile is empty or truncated; I *think* we can assume the previous
-				// acquirer either crashed or had some sort of failure that caused them
-				// to be unable to fully acquire or retain the lock, therefore we should
-				// treat it as if the lockfile did not exist
-				log.Printf("[INFO][%s] %s: Empty lockfile (%v) - likely previous process crashed or storage medium failure; treating as stale", s, filename, err2)
+				emptyCount++
+				if emptyCount < 2 {
+					// wait for brief time and retry; could be that the file is in the process
+					// of being written or updated (which involves truncating)
+					select {
+					case <-time.After(100 * time.Millisecond):
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+					continue
+				} else {
+					// lockfile is empty or truncated multiple times; I *think* we can assume
+					// the previous acquirer either crashed or had some sort of failure that
+					// caused them to be unable to fully acquire or retain the lock, therefore
+					// we should treat it as if the lockfile did not exist
+					log.Printf("[INFO][%s] %s: Empty lockfile (%v) - likely previous process crashed or storage medium failure; treating as stale", s, filename, err2)
+				}
 			} else if err2 != nil {
 				return fmt.Errorf("decoding lockfile contents: %w", err2)
 			}
