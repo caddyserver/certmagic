@@ -155,7 +155,8 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 	filename := s.lockFilename(name)
 
 	// sometimes the lockfiles read as empty (size 0) - this is either a stale lock or it
-	// is currently being written; we can retry a couple times in this case, I guess
+	// is currently being written; we can retry a few times in this case, as it has been
+	// shown to help (issue #232)
 	var emptyCount int
 
 	for {
@@ -178,11 +179,11 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 			f.Close()
 			if errors.Is(err2, io.EOF) {
 				emptyCount++
-				if emptyCount < 2 {
+				if emptyCount < 8 {
 					// wait for brief time and retry; could be that the file is in the process
-					// of being written or updated (which involves truncating)
+					// of being written or updated (which involves truncating) - see issue #232
 					select {
-					case <-time.After(100 * time.Millisecond):
+					case <-time.After(250 * time.Millisecond):
 					case <-ctx.Done():
 						return ctx.Err()
 					}
@@ -327,6 +328,8 @@ func updateLockfileFreshness(filename string) (bool, error) {
 	}
 	var meta lockMeta
 	if err := json.Unmarshal(metaBytes, &meta); err != nil {
+		// see issue #232: this can error if the file is empty,
+		// which happens sometimes when the disk is REALLY slow
 		return true, err
 	}
 
