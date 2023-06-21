@@ -715,9 +715,6 @@ func (cfg *Config) storageHasCertResourcesAnyIssuer(ctx context.Context, name st
 // and its assets in storage if successful. It DOES NOT update the in-memory
 // cache with the new certificate. The certificate will not be renewed if it
 // is not close to expiring unless force is true.
-//
-// Renewing a certificate is the same as obtaining a certificate, except that
-// the existing private key already in storage is reused.
 func (cfg *Config) RenewCertSync(ctx context.Context, name string, force bool) error {
 	return cfg.renewCert(ctx, name, force, true)
 }
@@ -807,6 +804,14 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		}
 		if err != nil {
 			return err
+		}
+
+		// if we generated a new key, make sure to replace its PEM encoding too!
+		if !cfg.ReusePrivateKeys {
+			certRes.PrivateKeyPEM, err = PEMEncodePrivateKey(privateKey)
+			if err != nil {
+				return err
+			}
 		}
 
 		csr, err := cfg.generateCSR(privateKey, []string{name})
