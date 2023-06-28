@@ -249,7 +249,7 @@ cache = certmagic.NewCache(certmagic.CacheOptions{
 		// Here we use New to get a valid Config associated with the same cache.
 		// The provided Config is used as a template and will be completed with
 		// any defaults that are set in the Default config.
-		return certmagic.New(cache, &certmagic.config{
+		return certmagic.New(cache, certmagic.Config{
 			// ...
 		}), nil
 	},
@@ -267,7 +267,7 @@ myACME := certmagic.NewACMEIssuer(magic, certmagic.ACMEIssuer{
 	// plus any other customizations you need
 })
 
-magic.Issuer = myACME
+magic.Issuers = []certmagic.Issuer{myACME}
 
 // this obtains certificates or renews them if necessary
 err := magic.ManageSync(context.TODO(), []string{"example.com", "sub.example.com"})
