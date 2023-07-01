@@ -448,8 +448,10 @@ func (cfg *Config) checkIfCertShouldBeObtained(name string, requireOnDemand bool
 			}
 			return nil
 		}
-		if len(cfg.OnDemand.hostAllowlist) > 0 && !cfg.OnDemand.allowlistContains(name) {
-			return fmt.Errorf("certificate for '%s' is not managed", name)
+		if len(cfg.OnDemand.hostAllowlist) > 0 {
+			if _, ok := cfg.OnDemand.hostAllowlist[name]; !ok {
+				return fmt.Errorf("certificate for '%s' is not managed", name)
+			}
 		}
 	}
 	return nil

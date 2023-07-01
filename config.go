@@ -348,13 +348,14 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if cfg.OnDemand != nil && cfg.OnDemand.hostAllowlist == nil {
+		cfg.OnDemand.hostAllowlist = make(map[string]struct{})
+	}
 
 	for _, domainName := range domainNames {
 		// if on-demand is configured, defer obtain and renew operations
 		if cfg.OnDemand != nil {
-			if !cfg.OnDemand.allowlistContains(domainName) {
-				cfg.OnDemand.hostAllowlist = append(cfg.OnDemand.hostAllowlist, domainName)
-			}
+			cfg.OnDemand.hostAllowlist[normalizedName(domainName)] = struct{}{}
 			continue
 		}
 

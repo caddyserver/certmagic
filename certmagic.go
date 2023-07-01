@@ -294,17 +294,12 @@ type OnDemandConfig struct {
 	// that allows the same names it already passed
 	// into Manage) and without letting clients have
 	// their run of any domain names they want.
-	// Only enforced if len > 0.
-	hostAllowlist []string
-}
-
-func (o *OnDemandConfig) allowlistContains(name string) bool {
-	for _, n := range o.hostAllowlist {
-		if strings.EqualFold(n, name) {
-			return true
-		}
-	}
-	return false
+	// Only enforced if len > 0. (This is a map to
+	// avoid O(n^2) performance; when it was a slice,
+	// we saw a 30s CPU profile for a config managing
+	// 110K names where 29s was spent checking for
+	// duplicates. Order is not important here.)
+	hostAllowlist map[string]struct{}
 }
 
 // isLoopback returns true if the hostname of addr looks
