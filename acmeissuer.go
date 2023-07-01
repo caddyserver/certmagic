@@ -299,7 +299,7 @@ func (iss *ACMEIssuer) isAgreed() bool {
 // batch is eligible for certificates if using Let's Encrypt.
 // It also ensures that an email address is available.
 func (am *ACMEIssuer) PreCheck(ctx context.Context, names []string, interactive bool) error {
-	publicCA := strings.Contains(am.CA, "api.letsencrypt.org") || strings.Contains(am.CA, "acme.zerossl.com")
+	publicCA := strings.Contains(am.CA, "api.letsencrypt.org") || strings.Contains(am.CA, "acme.zerossl.com") || strings.Contains(am.CA, "api.pki.goog")
 	if publicCA {
 		for _, name := range names {
 			if !SubjectQualifiesForPublicCert(name) {
