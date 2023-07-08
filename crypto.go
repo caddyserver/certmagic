@@ -22,7 +22,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -35,6 +34,7 @@ import (
 	"strings"
 
 	"github.com/klauspost/cpuid/v2"
+	"github.com/zeebo/blake3"
 	"go.uber.org/zap"
 	"golang.org/x/net/idna"
 )
@@ -271,7 +271,7 @@ func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certName
 // which is the chain of DER-encoded bytes. It returns the
 // hex encoding of the hash.
 func hashCertificateChain(certChain [][]byte) string {
-	h := sha256.New()
+	h := blake3.New()
 	for _, certInChain := range certChain {
 		h.Write(certInChain)
 	}

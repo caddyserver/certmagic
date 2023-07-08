@@ -7,6 +7,7 @@ require (
 	github.com/libdns/libdns v0.2.1
 	github.com/mholt/acmez v1.2.0
 	github.com/miekg/dns v1.1.55
+	github.com/zeebo/blake3 v0.2.3
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.10.0
 	golang.org/x/net v0.11.0

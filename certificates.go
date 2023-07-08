@@ -155,29 +155,32 @@ func (cfg *Config) loadManagedCertificate(ctx context.Context, domain string) (C
 
 // CacheUnmanagedCertificatePEMFile loads a certificate for host using certFile
 // and keyFile, which must be in PEM format. It stores the certificate in
-// the in-memory cache.
+// the in-memory cache and returns the hash, useful for removing from the cache.
 //
 // This method is safe for concurrent use.
-func (cfg *Config) CacheUnmanagedCertificatePEMFile(ctx context.Context, certFile, keyFile string, tags []string) error {
+func (cfg *Config) CacheUnmanagedCertificatePEMFile(ctx context.Context, certFile, keyFile string, tags []string) (string, error) {
 	cert, err := cfg.makeCertificateFromDiskWithOCSP(ctx, cfg.Storage, certFile, keyFile)
 	if err != nil {
-		return err
+		return "", err
 	}
 	cert.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
 	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names})
-	return nil
+	return cert.hash, nil
 }
 
-// CacheUnmanagedTLSCertificate adds tlsCert to the certificate cache.
+// CacheUnmanagedTLSCertificate adds tlsCert to the certificate cache
+//
+//	and returns the hash, useful for removing from the cache.
+//
 // It staples OCSP if possible.
 //
 // This method is safe for concurrent use.
-func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls.Certificate, tags []string) error {
+func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls.Certificate, tags []string) (string, error) {
 	var cert Certificate
 	err := fillCertFromLeaf(&cert, tlsCert)
 	if err != nil {
-		return err
+		return "", err
 	}
 	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
 	if err != nil {
@@ -186,22 +189,23 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls
 	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names})
 	cert.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
-	return nil
+	return cert.hash, nil
 }
 
 // CacheUnmanagedCertificatePEMBytes makes a certificate out of the PEM bytes
-// of the certificate and key, then caches it in memory.
+// of the certificate and key, then caches it in memory,  and returns the hash,
+// which is useful for removing from the cache.
 //
 // This method is safe for concurrent use.
-func (cfg *Config) CacheUnmanagedCertificatePEMBytes(ctx context.Context, certBytes, keyBytes []byte, tags []string) error {
+func (cfg *Config) CacheUnmanagedCertificatePEMBytes(ctx context.Context, certBytes, keyBytes []byte, tags []string) (string, error) {
 	cert, err := cfg.makeCertificateWithOCSP(ctx, certBytes, keyBytes)
 	if err != nil {
-		return err
+		return "", err
 	}
 	cert.Tags = tags
 	cfg.certCache.cacheCertificate(cert)
 	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names})
-	return nil
+	return cert.hash, nil
 }
 
 // makeCertificateFromDiskWithOCSP makes a Certificate by loading the

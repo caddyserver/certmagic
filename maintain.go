@@ -53,8 +53,10 @@ func (certCache *Cache) maintainAssets(panicCount int) {
 		}
 	}()
 
+	certCache.optionsMu.RLock()
 	renewalTicker := time.NewTicker(certCache.options.RenewCheckInterval)
 	ocspTicker := time.NewTicker(certCache.options.OCSPCheckInterval)
+	certCache.optionsMu.RUnlock()
 
 	log.Info("started background certificate maintenance")
 

@@ -48,7 +48,8 @@ import (
 // differently.
 type Cache struct {
 	// User configuration of the cache
-	options CacheOptions
+	options   CacheOptions
+	optionsMu sync.RWMutex
 
 	// The cache is keyed by certificate hash
 	cache map[string]Certificate
@@ -56,7 +57,7 @@ type Cache struct {
 	// cacheIndex is a map of SAN to cache key (cert hash)
 	cacheIndex map[string][]string
 
-	// Protects the cache and index maps
+	// Protects the cache and cacheIndex maps
 	mu sync.RWMutex
 
 	// Close this channel to cancel asset maintenance
@@ -126,6 +127,12 @@ func NewCache(opts CacheOptions) *Cache {
 	go c.maintainAssets(0)
 
 	return c
+}
+
+func (certCache *Cache) SetOptions(opts CacheOptions) {
+	certCache.optionsMu.Lock()
+	certCache.options = opts
+	certCache.optionsMu.Unlock()
 }
 
 // Stop stops the maintenance goroutine for
@@ -226,7 +233,11 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 
 	// if the cache is at capacity, make room for new cert
 	cacheSize := len(certCache.cache)
-	if certCache.options.Capacity > 0 && cacheSize >= certCache.options.Capacity {
+	certCache.optionsMu.RLock()
+	atCapacity := certCache.options.Capacity > 0 && cacheSize >= certCache.options.Capacity
+	certCache.optionsMu.RUnlock()
+
+	if atCapacity {
 		// Go maps are "nondeterministic" but not actually random,
 		// so although we could just chop off the "front" of the
 		// map with less code, that is a heavily skewed eviction
@@ -256,6 +267,7 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 		certCache.cacheIndex[name] = append(certCache.cacheIndex[name], cert.hash)
 	}
 
+	certCache.optionsMu.RLock()
 	certCache.logger.Debug("added certificate to cache",
 		zap.Strings("subjects", cert.Names),
 		zap.Time("expiration", expiresAt(cert.Leaf)),
@@ -264,6 +276,7 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 		zap.String("hash", cert.hash),
 		zap.Int("cache_size", len(certCache.cache)),
 		zap.Int("cache_capacity", certCache.options.Capacity))
+	certCache.optionsMu.RUnlock()
 }
 
 // removeCertificate removes cert from the cache.
@@ -290,6 +303,7 @@ func (certCache *Cache) removeCertificate(cert Certificate) {
 	// delete the actual cert from the cache
 	delete(certCache.cache, cert.hash)
 
+	certCache.optionsMu.RLock()
 	certCache.logger.Debug("removed certificate from cache",
 		zap.Strings("subjects", cert.Names),
 		zap.Time("expiration", expiresAt(cert.Leaf)),
@@ -298,6 +312,7 @@ func (certCache *Cache) removeCertificate(cert Certificate) {
 		zap.String("hash", cert.hash),
 		zap.Int("cache_size", len(certCache.cache)),
 		zap.Int("cache_capacity", certCache.options.Capacity))
+	certCache.optionsMu.RUnlock()
 }
 
 // replaceCertificate atomically replaces oldCert with newCert in
@@ -314,11 +329,13 @@ func (certCache *Cache) replaceCertificate(oldCert, newCert Certificate) {
 		zap.Time("new_expiration", expiresAt(newCert.Leaf)))
 }
 
-func (certCache *Cache) getAllMatchingCerts(name string) []Certificate {
+// getAllMatchingCerts returns all certificates with exactly this subject
+// (wildcards are NOT expanded).
+func (certCache *Cache) getAllMatchingCerts(subject string) []Certificate {
 	certCache.mu.RLock()
 	defer certCache.mu.RUnlock()
 
-	allCertKeys := certCache.cacheIndex[name]
+	allCertKeys := certCache.cacheIndex[subject]
 
 	certs := make([]Certificate, len(allCertKeys))
 	for i := range allCertKeys {
@@ -339,7 +356,11 @@ func (certCache *Cache) getAllCerts() []Certificate {
 }
 
 func (certCache *Cache) getConfig(cert Certificate) (*Config, error) {
-	cfg, err := certCache.options.GetConfigForCert(cert)
+	certCache.optionsMu.RLock()
+	getCert := certCache.options.GetConfigForCert
+	certCache.optionsMu.RUnlock()
+
+	cfg, err := getCert(cert)
 	if err != nil {
 		return nil, err
 	}
@@ -371,6 +392,33 @@ func (certCache *Cache) AllMatchingCertificates(name string) []Certificate {
 	}
 
 	return certs
+}
+
+// RemoveManaged removes managed certificates for the given subjects from the cache.
+// This effectively stops maintenance of those certificates.
+func (certCache *Cache) RemoveManaged(subjects []string) {
+	deleteQueue := make([]string, 0, len(subjects))
+	for _, subject := range subjects {
+		certs := certCache.getAllMatchingCerts(subject) // does NOT expand wildcards; exact matches only
+		for _, cert := range certs {
+			if !cert.managed {
+				continue
+			}
+			deleteQueue = append(deleteQueue, cert.hash)
+		}
+	}
+	certCache.Remove(deleteQueue)
+}
+
+// Remove removes certificates with the given hashes from the cache.
+// This is effectively used to unload manually-loaded certificates.
+func (certCache *Cache) Remove(hashes []string) {
+	certCache.mu.Lock()
+	for _, h := range hashes {
+		cert := certCache.cache[h]
+		certCache.removeCertificate(cert)
+	}
+	certCache.mu.Unlock()
 }
 
 var (

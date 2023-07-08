@@ -209,7 +209,10 @@ func New(certCache *Cache, cfg Config) *Config {
 	if certCache == nil {
 		panic("a certificate cache is required")
 	}
-	if certCache.options.GetConfigForCert == nil {
+	certCache.optionsMu.RLock()
+	getConfigForCert := certCache.options.GetConfigForCert
+	defer certCache.optionsMu.RUnlock()
+	if getConfigForCert == nil {
 		panic("cache must have GetConfigForCert set in its options")
 	}
 	return newWithCache(certCache, cfg)
@@ -448,28 +451,6 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 		return nil
 	}
 	return renew()
-}
-
-// Unmanage causes the certificates for domainNames to stop being managed.
-// If there are certificates for the supplied domain names in the cache, they
-// are evicted from the cache.
-func (cfg *Config) Unmanage(domainNames []string) {
-	var deleteQueue []Certificate
-	for _, domainName := range domainNames {
-		certs := cfg.certCache.AllMatchingCertificates(domainName)
-		for _, cert := range certs {
-			if !cert.managed {
-				continue
-			}
-			deleteQueue = append(deleteQueue, cert)
-		}
-	}
-
-	cfg.certCache.mu.Lock()
-	for _, cert := range deleteQueue {
-		cfg.certCache.removeCertificate(cert)
-	}
-	cfg.certCache.mu.Unlock()
 }
 
 // ObtainCertSync generates a new private key and obtains a certificate for

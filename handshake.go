@@ -341,7 +341,9 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	// perfectly full while still being able to load needed certs from storage.
 	// See https://caddy.community/t/error-tls-alert-internal-error-592-again/13272
 	// and caddyserver/caddy#4320.
+	cfg.certCache.optionsMu.RLock()
 	cacheCapacity := float64(cfg.certCache.options.Capacity)
+	cfg.certCache.optionsMu.RUnlock()
 	cacheAlmostFull := cacheCapacity > 0 && float64(cacheSize) >= cacheCapacity*.9
 	loadDynamically := cfg.OnDemand != nil || cacheAlmostFull
 

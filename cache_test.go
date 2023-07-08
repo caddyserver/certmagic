@@ -21,6 +21,9 @@ func TestNewCache(t *testing.T) {
 	c := NewCache(CacheOptions{GetConfigForCert: noop})
 	defer c.Stop()
 
+	c.optionsMu.RLock()
+	defer c.optionsMu.RUnlock()
+
 	if c.options.RenewCheckInterval != DefaultRenewCheckInterval {
 		t.Errorf("Expected RenewCheckInterval to be set to default value, but it wasn't: %s", c.options.RenewCheckInterval)
 	}
