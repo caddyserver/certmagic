@@ -281,17 +281,20 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 
 // ManageSync causes the certificates for domainNames to be managed
 // according to cfg. If cfg.OnDemand is not nil, then this simply
-// whitelists the domain names and defers the certificate operations
+// allowlists the domain names and defers the certificate operations
 // to when they are needed. Otherwise, the certificates for each
-// name are loaded from storage or obtained from the CA. If loaded
-// from storage, they are renewed if they are expiring or expired.
-// It then caches the certificate in memory and is prepared to serve
-// them up during TLS handshakes.
+// name are loaded from storage or obtained from the CA if not already
+// in the cache associated with the Config. If loaded from storage,
+// they are renewed if they are expiring or expired. It then caches
+// the certificate in memory and is prepared to serve them up during
+// TLS handshakes. To change how an already-loaded certificate is
+// managed, update the cache options relating to getting a config for
+// a cert.
 //
-// Note that name whitelisting for on-demand management only takes
+// Note that name allowlisting for on-demand management only takes
 // effect if cfg.OnDemand.DecisionFunc is not set (is nil); it will
 // not overwrite an existing DecisionFunc, nor will it overwrite
-// its decision; i.e. the implicit whitelist is only used if no
+// its decision; i.e. the implicit allowlist is only used if no
 // DecisionFunc is set.
 //
 // This method is synchronous, meaning that certificates for all
@@ -374,6 +377,14 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 }
 
 func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool) error {
+	// if certificate is already being managed, nothing to do; maintenance will continue
+	certs := cfg.certCache.getAllMatchingCerts(domainName)
+	for _, cert := range certs {
+		if cert.managed {
+			return nil
+		}
+	}
+
 	// first try loading existing certificate from storage
 	cert, err := cfg.CacheManagedCertificate(ctx, domainName)
 	if err != nil {
