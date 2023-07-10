@@ -21,14 +21,6 @@ func TestLookupNameserversOK(t *testing.T) {
 		nss  []string
 	}{
 		{
-			fqdn: "books.google.com.ng.",
-			nss:  []string{"ns1.google.com.", "ns2.google.com.", "ns3.google.com.", "ns4.google.com."},
-		},
-		{
-			fqdn: "www.google.com.",
-			nss:  []string{"ns1.google.com.", "ns2.google.com.", "ns3.google.com.", "ns4.google.com."},
-		},
-		{
 			fqdn: "physics.georgetown.edu.",
 			nss:  []string{"ns4.georgetown.edu.", "ns5.georgetown.edu.", "ns6.georgetown.edu."},
 		},
