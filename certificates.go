@@ -48,7 +48,7 @@ type Certificate struct {
 	// most recent OCSP response we have for this certificate.
 	ocsp *ocsp.Response
 
-	// The hex-encoded hash of this cert's chain's bytes.
+	// The hex-encoded hash of this cert's chain's DER bytes.
 	hash string
 
 	// Whether this certificate is under our management.
@@ -63,6 +63,9 @@ type Certificate struct {
 func (cert Certificate) Empty() bool {
 	return len(cert.Certificate.Certificate) == 0
 }
+
+// Hash returns a checksum of the certificate chain's DER-encoded bytes.
+func (cert Certificate) Hash() string { return cert.hash }
 
 // NeedsRenewal returns true if the certificate is
 // expiring soon (according to cfg) or has expired.
