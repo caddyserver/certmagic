@@ -68,7 +68,10 @@ func (iss *ACMEIssuer) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 	// register account if it is new
 	if account.Status == "" {
 		if iss.NewAccountFunc != nil {
+			// obtain lock here, since NewAccountFunc calls happen concurrently and they typically read and change the issuer
+			iss.mu.Lock()
 			account, err = iss.NewAccountFunc(ctx, iss, account)
+			iss.mu.Unlock()
 			if err != nil {
 				return nil, fmt.Errorf("account pre-registration callback: %v", err)
 			}

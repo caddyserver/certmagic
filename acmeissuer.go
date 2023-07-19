@@ -132,7 +132,7 @@ type ACMEIssuer struct {
 	// synchronize properly.
 	email  string
 	agreed bool
-	mu     *sync.Mutex // protects the above grouped fields
+	mu     *sync.Mutex // protects the above grouped fields, as well as entire struct during NewAccountFunc calls
 }
 
 // NewACMEIssuer constructs a valid ACMEIssuer based on a template
