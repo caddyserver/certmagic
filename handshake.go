@@ -46,8 +46,7 @@ import (
 // GetCertificate will run in a new context, use GetCertificateWithContext to provide
 // a context.
 func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	ctx := context.TODO() // TODO: get a proper context? from somewhere...
-	return cfg.GetCertificateWithContext(ctx, clientHello)
+	return cfg.GetCertificateWithContext(clientHello.Context(), clientHello)
 }
 
 func (cfg *Config) GetCertificateWithContext(ctx context.Context, clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
