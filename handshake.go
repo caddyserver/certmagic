@@ -254,7 +254,6 @@ func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificat
 // This function is safe for concurrent use.
 func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.ClientHelloInfo, loadOrObtainIfNecessary bool) (Certificate, error) {
 	logger := logWithRemote(cfg.Logger.Named("handshake"), hello)
-	name := cfg.getNameFromClientHello(hello)
 
 	// First check our in-memory cache to see if we've already loaded it
 	cert, matched, defaulted := cfg.getCertificateFromCache(hello)
@@ -272,6 +271,8 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 		}
 		return cert, nil
 	}
+
+	name := cfg.getNameFromClientHello(hello)
 
 	// By this point, we need to load or obtain a certificate. If a swarm of requests comes in for the same
 	// domain, avoid pounding manager or storage thousands of times simultaneously. We use a similar sync
@@ -384,8 +385,10 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	return Certificate{}, fmt.Errorf("no certificate available for '%s'", name)
 }
 
+// loadCertFromStorage loads the certificate for name from storage and maintains it
+// (as this is only called with on-demand TLS enabled).
 func (cfg *Config) loadCertFromStorage(ctx context.Context, logger *zap.Logger, hello *tls.ClientHelloInfo) (Certificate, error) {
-	name := normalizedName(hello.ServerName)
+	name := cfg.getNameFromClientHello(hello)
 	loadedCert, err := cfg.CacheManagedCertificate(ctx, name)
 	if errors.Is(err, fs.ErrNotExist) {
 		// If no exact match, try a wildcard variant, which is something we can still use
@@ -554,6 +557,7 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 			// quite common considering not all certs have issuer URLs that support it.
 			log.Warn("stapling OCSP",
 				zap.String("server_name", hello.ServerName),
+				zap.Strings("sans", cert.Names),
 				zap.Error(err))
 		} else {
 			log.Debug("successfully stapled new OCSP response",
