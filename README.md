@@ -233,6 +233,9 @@ tlsConfig, err := certmagic.TLS([]string{"example.com"})
 if err != nil {
 	return err
 }
+// be sure to customize NextProtos if serving a specific
+// application protocol after the TLS handshake, for example:
+tlsConfig.NextProtos = append([]string{"h2", "http/1.1"}, tlsConfig.NextProtos...)
 ```
 
 
