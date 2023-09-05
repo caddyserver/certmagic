@@ -410,7 +410,8 @@ func SubjectIsIP(subj string) bool {
 func SubjectIsInternal(subj string) bool {
 	return subj == "localhost" ||
 		strings.HasSuffix(subj, ".localhost") ||
-		strings.HasSuffix(subj, ".local")
+		strings.HasSuffix(subj, ".local") ||
+		strings.HasSuffix(subj, ".home.arpa")
 }
 
 // MatchWildcard returns true if subject (a candidate DNS name)
