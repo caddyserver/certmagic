@@ -629,21 +629,23 @@ func robustTryListen(addr string) (net.Listener, error) {
 			return nil, nil
 		}
 
-		// hmm, we couldn't connect to the socket, so something else must
-		// be wrong, right? wrong!! we've had reports across multiple OSes
-		// now that sometimes connections fail even though the OS told us
-		// that the address was already in use; either the listener is
-		// fluctuating between open and closed very, very quickly, or the
-		// OS is inconsistent and contradicting itself; I have been unable
-		// to reproduce this, so I'm now resorting to hard-coding substring
-		// matching in error messages as a really hacky and unreliable
-		// safeguard against this, until we can idenify exactly what was
-		// happening; see the following threads for more info:
+		// Hmm, we couldn't connect to the socket, so something else must
+		// be wrong, right? wrong!! Apparently if a port is bound by another
+		// listener with a specific host, i.e. 'x:1234', we cannot bind to
+		// ':1234' -- it is considered a conflict, but 'y:1234' is not.
+		// I guess we need to assume the conflicting listener is properly
+		// configured and continue. But we should tell the user to specify
+		// the correct ListenHost to avoid conflict or at least so we can
+		// know that the user is intentional about that port and hopefully
+		// has an ACME solver on it.
+		//
+		// History:
 		// https://caddy.community/t/caddy-retry-error/7317
 		// https://caddy.community/t/v2-upgrade-to-caddy2-failing-with-errors/7423
+		// https://github.com/caddyserver/certmagic/issues/250
 		if strings.Contains(listenErr.Error(), "address already in use") ||
 			strings.Contains(listenErr.Error(), "one usage of each socket address") {
-			log.Printf("[WARNING] OS reports a contradiction: %v - but we cannot connect to it, with this error: %v; continuing anyway 🤞 (I don't know what causes this... if you do, please help?)", listenErr, connectErr)
+			log.Printf("[WARNING] %v - be sure to set the ACMEIssuer.ListenHost field; assuming conflicting listener is correctly configured and continuing", listenErr)
 			return nil, nil
 		}
 	}
