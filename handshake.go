@@ -446,14 +446,8 @@ func (cfg *Config) checkIfCertShouldBeObtained(ctx context.Context, name string,
 		return fmt.Errorf("subject name does not qualify for certificate: %s", name)
 	}
 	if cfg.OnDemand != nil {
-		if cfg.OnDemand.DecisionContextFunc != nil {
-			if err := cfg.OnDemand.DecisionContextFunc(ctx, name); err != nil {
-				return fmt.Errorf("decision func: %w", err)
-			}
-			return nil
-		}
 		if cfg.OnDemand.DecisionFunc != nil {
-			if err := cfg.OnDemand.DecisionFunc(name); err != nil {
+			if err := cfg.OnDemand.DecisionFunc(ctx, name); err != nil {
 				return fmt.Errorf("decision func: %w", err)
 			}
 			return nil
