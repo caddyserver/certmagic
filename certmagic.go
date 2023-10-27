@@ -268,7 +268,18 @@ type OnDemandConfig struct {
 	// whether a certificate can be obtained or renewed
 	// for the given name. If an error is returned, the
 	// request will be denied.
+	// If both this and DecisionContextFunc are set, only
+	// DecisionContextFunc will be used.
+	// Deprecated: Use DecisionContextFunc instead.
 	DecisionFunc func(name string) error
+
+	// If set, this function will be called to determine
+	// whether a certificate can be obtained or renewed
+	// for the given name. If an error is returned, the
+	// request will be denied.
+	// If both this and DecisionContextFunc are set, only
+	// DecisionContextFunc will be used.
+	DecisionContextFunc func(ctx context.Context, name string) error
 
 	// Sources for getting new, unmanaged certificates.
 	// They will be invoked only during TLS handshakes

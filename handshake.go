@@ -313,7 +313,7 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	// Make sure a certificate is allowed for the given name. If not, it doesn't
 	// make sense to try loading one from storage (issue #185), getting it from a
 	// certificate manager, or obtaining one from an issuer.
-	if err := cfg.checkIfCertShouldBeObtained(name, false); err != nil {
+	if err := cfg.checkIfCertShouldBeObtained(ctx, name, false); err != nil {
 		return Certificate{}, fmt.Errorf("certificate is not allowed for server name %s: %v", name, err)
 	}
 
@@ -438,7 +438,7 @@ func (cfg *Config) optionalMaintenance(ctx context.Context, log *zap.Logger, cer
 // checkIfCertShouldBeObtained checks to see if an on-demand TLS certificate
 // should be obtained for a given domain based upon the config settings. If
 // a non-nil error is returned, do not issue a new certificate for name.
-func (cfg *Config) checkIfCertShouldBeObtained(name string, requireOnDemand bool) error {
+func (cfg *Config) checkIfCertShouldBeObtained(ctx context.Context, name string, requireOnDemand bool) error {
 	if requireOnDemand && cfg.OnDemand == nil {
 		return fmt.Errorf("not configured for on-demand certificate issuance")
 	}
@@ -446,6 +446,12 @@ func (cfg *Config) checkIfCertShouldBeObtained(name string, requireOnDemand bool
 		return fmt.Errorf("subject name does not qualify for certificate: %s", name)
 	}
 	if cfg.OnDemand != nil {
+		if cfg.OnDemand.DecisionContextFunc != nil {
+			if err := cfg.OnDemand.DecisionContextFunc(ctx, name); err != nil {
+				return fmt.Errorf("decision func: %w", err)
+			}
+			return nil
+		}
 		if cfg.OnDemand.DecisionFunc != nil {
 			if err := cfg.OnDemand.DecisionFunc(name); err != nil {
 				return fmt.Errorf("decision func: %w", err)
@@ -685,7 +691,7 @@ func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.Clien
 		defer cancel()
 
 		// Make sure a certificate for this name should be renewed on-demand
-		err := cfg.checkIfCertShouldBeObtained(name, true)
+		err := cfg.checkIfCertShouldBeObtained(ctx, name, true)
 		if err != nil {
 			// if not, remove from cache (it will be deleted from storage later)
 			cfg.certCache.mu.Lock()
