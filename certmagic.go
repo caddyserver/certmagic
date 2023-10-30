@@ -268,7 +268,7 @@ type OnDemandConfig struct {
 	// whether a certificate can be obtained or renewed
 	// for the given name. If an error is returned, the
 	// request will be denied.
-	DecisionFunc func(name string) error
+	DecisionFunc func(ctx context.Context, name string) error
 
 	// Sources for getting new, unmanaged certificates.
 	// They will be invoked only during TLS handshakes
