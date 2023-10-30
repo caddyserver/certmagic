@@ -314,7 +314,7 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	// make sense to try loading one from storage (issue #185), getting it from a
 	// certificate manager, or obtaining one from an issuer.
 	if err := cfg.checkIfCertShouldBeObtained(ctx, name, false); err != nil {
-		return Certificate{}, fmt.Errorf("certificate is not allowed for server name %s: %v", name, err)
+		return Certificate{}, fmt.Errorf("certificate is not allowed for server name %s: %w", name, err)
 	}
 
 	// If an external Manager is configured, try to get it from them.
