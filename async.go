@@ -155,8 +155,8 @@ var AttemptsCtxKey retryStateCtxKey
 // front. We figure that intermittent errors would be
 // resolved after the first retry, but any errors after
 // that would probably require at least a few minutes
-// to clear up: either for DNS to propagate, for the
-// administrator to fix their DNS or network properties,
+// or hours to clear up: either for DNS to propagate, for
+// the administrator to fix their DNS or network config,
 // or some other external factor needs to change. We
 // chose intervals that we think will be most useful
 // without introducing unnecessary delay. The last
@@ -168,13 +168,20 @@ var retryIntervals = []time.Duration{
 	2 * time.Minute,
 	5 * time.Minute, // elapsed: 10 min
 	10 * time.Minute,
-	20 * time.Minute,
+	10 * time.Minute,
+	10 * time.Minute,
 	20 * time.Minute, // elapsed: 1 hr
+	20 * time.Minute,
+	20 * time.Minute,
+	20 * time.Minute, // elapsed: 2 hr
 	30 * time.Minute,
-	30 * time.Minute, // elapsed: 2 hr
+	30 * time.Minute, // elapsed: 3 hr
 	1 * time.Hour,
-	3 * time.Hour, // elapsed: 6 hr
-	6 * time.Hour, // for up to maxRetryDuration
+	1 * time.Hour,
+	1 * time.Hour, // elapsed: 6 hr
+	3 * time.Hour,
+	3 * time.Hour, // elapsed: 12 hr
+	6 * time.Hour, // repeat for up to maxRetryDuration
 }
 
 // maxRetryDuration is the maximum duration to try
