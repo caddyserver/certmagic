@@ -58,6 +58,10 @@ func (cfg *Config) GetCertificateWithContext(ctx context.Context, clientHello *t
 		return nil, fmt.Errorf("handshake aborted by event handler: %w", err)
 	}
 
+	if ctx == nil {
+		// tests can't set context on a tls.ClientHelloInfo because it's unexported :(
+		ctx = context.Background()
+	}
 	ctx = context.WithValue(ctx, ClientHelloInfoCtxKey, clientHello)
 
 	// special case: serve up the certificate for a TLS-ALPN ACME challenge
