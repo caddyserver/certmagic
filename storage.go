@@ -133,7 +133,7 @@ type Locker interface {
 	// is released or becomes stale.
 	//
 	// If the named lock represents an idempotent operation, callers
-	// should awlays check to make sure the work still needs to be
+	// should always check to make sure the work still needs to be
 	// completed after acquiring the lock. You never know if another
 	// process already completed the task while you were waiting to
 	// acquire it.

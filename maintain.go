@@ -17,9 +17,11 @@ package certmagic
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
-	"log"
+	"io/fs"
 	"path"
 	"runtime"
 	"strings"
@@ -390,30 +392,113 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 
 // CleanStorageOptions specifies how to clean up a storage unit.
 type CleanStorageOptions struct {
-	OCSPStaples            bool
+	// Optional custom logger.
+	Logger *zap.Logger
+
+	// Optional ID of the instance initiating the cleaning.
+	InstanceID string
+
+	// If set, cleaning will be skipped if it was performed
+	// more recently than this interval.
+	Interval time.Duration
+
+	// Whether to clean cached OCSP staples.
+	OCSPStaples bool
+
+	// Whether to cleanup expired certificates, and if so,
+	// how long to let them stay after they've expired.
 	ExpiredCerts           bool
 	ExpiredCertGracePeriod time.Duration
 }
 
 // CleanStorage removes assets which are no longer useful,
 // according to opts.
-func CleanStorage(ctx context.Context, storage Storage, opts CleanStorageOptions) {
-	if opts.OCSPStaples {
-		err := deleteOldOCSPStaples(ctx, storage)
+func CleanStorage(ctx context.Context, storage Storage, opts CleanStorageOptions) error {
+	const (
+		lockName   = "storage_clean"
+		storageKey = "last_clean.json"
+	)
+
+	if opts.Logger == nil {
+		opts.Logger = defaultLogger.Named("clean_storage")
+	}
+	opts.Logger = opts.Logger.With(zap.Any("storage", storage))
+
+	// storage cleaning should be globally exclusive
+	if err := storage.Lock(ctx, lockName); err != nil {
+		return fmt.Errorf("unable to acquire %s lock: %v", lockName, err)
+	}
+	defer func() {
+		if err := storage.Unlock(ctx, lockName); err != nil {
+			opts.Logger.Error("unable to release lock", zap.Error(err))
+			return
+		}
+	}()
+
+	// cleaning should not happen more often than the interval
+	if opts.Interval > 0 {
+		lastCleanBytes, err := storage.Load(ctx, storageKey)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("loading last clean timestamp: %v", err)
+		}
+		var lastClean lastCleanPayload
+		err = json.Unmarshal(lastCleanBytes, &lastClean)
 		if err != nil {
-			log.Printf("[ERROR] Deleting old OCSP staples: %v", err)
+			return fmt.Errorf("decoding last clean data: %v", err)
+		}
+		lastTLSClean := lastClean["tls"]
+		if time.Since(lastTLSClean.Timestamp) < opts.Interval {
+			nextTime := time.Now().Add(opts.Interval)
+			opts.Logger.Warn("storage cleaning happened too recently; skipping for now",
+				zap.String("instance", lastTLSClean.InstanceID),
+				zap.Time("try_again", nextTime),
+				zap.Duration("try_again_in", time.Until(nextTime)),
+			)
+			return nil
+		}
+	}
+
+	opts.Logger.Info("cleaning storage unit")
+
+	if opts.OCSPStaples {
+		err := deleteOldOCSPStaples(ctx, storage, opts.Logger)
+		if err != nil {
+			opts.Logger.Error("deleting old OCSP staples", zap.Error(err))
 		}
 	}
 	if opts.ExpiredCerts {
-		err := deleteExpiredCerts(ctx, storage, opts.ExpiredCertGracePeriod)
+		err := deleteExpiredCerts(ctx, storage, opts.Logger, opts.ExpiredCertGracePeriod)
 		if err != nil {
-			log.Printf("[ERROR] Deleting expired certificates: %v", err)
+			opts.Logger.Error("deleting expired certificates staples", zap.Error(err))
 		}
 	}
 	// TODO: delete stale locks?
+
+	// update the last-clean time
+	lastCleanBytes, err := json.Marshal(lastCleanPayload{
+		"tls": lastCleaned{
+			Timestamp:  time.Now(),
+			InstanceID: opts.InstanceID,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("encoding last cleaned info: %v", err)
+	}
+	if err := storage.Store(ctx, storageKey, lastCleanBytes); err != nil {
+		return fmt.Errorf("storing last clean info: %v", err)
+	}
+
+	return nil
 }
 
-func deleteOldOCSPStaples(ctx context.Context, storage Storage) error {
+type lastCleanPayload map[string]lastCleaned
+
+type lastCleaned struct {
+	Timestamp  time.Time `json:"timestamp"`
+	InstanceID string    `json:"instance_id,omitempty"`
+}
+
+func deleteOldOCSPStaples(ctx context.Context, storage Storage, logger *zap.Logger) error {
 	ocspKeys, err := storage.List(ctx, prefixOCSP, false)
 	if err != nil {
 		// maybe just hasn't been created yet; no big deal
@@ -428,7 +513,7 @@ func deleteOldOCSPStaples(ctx context.Context, storage Storage) error {
 		}
 		ocspBytes, err := storage.Load(ctx, key)
 		if err != nil {
-			log.Printf("[ERROR] While deleting old OCSP staples, unable to load staple file: %v", err)
+			logger.Error("while deleting old OCSP staples, unable to load staple file", zap.Error(err))
 			continue
 		}
 		resp, err := ocsp.ParseResponse(ocspBytes, nil)
@@ -436,7 +521,7 @@ func deleteOldOCSPStaples(ctx context.Context, storage Storage) error {
 			// contents are invalid; delete it
 			err = storage.Delete(ctx, key)
 			if err != nil {
-				log.Printf("[ERROR] Purging corrupt staple file %s: %v", key, err)
+				logger.Error("purging corrupt staple file", zap.String("storage_key", key), zap.Error(err))
 			}
 			continue
 		}
@@ -444,14 +529,14 @@ func deleteOldOCSPStaples(ctx context.Context, storage Storage) error {
 			// response has expired; delete it
 			err = storage.Delete(ctx, key)
 			if err != nil {
-				log.Printf("[ERROR] Purging expired staple file %s: %v", key, err)
+				logger.Error("purging expired staple file", zap.String("storage_key", key), zap.Error(err))
 			}
 		}
 	}
 	return nil
 }
 
-func deleteExpiredCerts(ctx context.Context, storage Storage, gracePeriod time.Duration) error {
+func deleteExpiredCerts(ctx context.Context, storage Storage, logger *zap.Logger, gracePeriod time.Duration) error {
 	issuerKeys, err := storage.List(ctx, prefixCerts, false)
 	if err != nil {
 		// maybe just hasn't been created yet; no big deal
@@ -461,7 +546,7 @@ func deleteExpiredCerts(ctx context.Context, storage Storage, gracePeriod time.D
 	for _, issuerKey := range issuerKeys {
 		siteKeys, err := storage.List(ctx, issuerKey, false)
 		if err != nil {
-			log.Printf("[ERROR] Listing contents of %s: %v", issuerKey, err)
+			logger.Error("listing contents", zap.String("issuer_key", issuerKey), zap.Error(err))
 			continue
 		}
 
@@ -475,7 +560,7 @@ func deleteExpiredCerts(ctx context.Context, storage Storage, gracePeriod time.D
 
 			siteAssets, err := storage.List(ctx, siteKey, false)
 			if err != nil {
-				log.Printf("[ERROR] Listing contents of %s: %v", siteKey, err)
+				logger.Error("listing site contents", zap.String("site_key", siteKey), zap.Error(err))
 				continue
 			}
 
@@ -498,18 +583,23 @@ func deleteExpiredCerts(ctx context.Context, storage Storage, gracePeriod time.D
 				}
 
 				if expiredTime := time.Since(expiresAt(cert)); expiredTime >= gracePeriod {
-					log.Printf("[INFO] Certificate %s expired %s ago; cleaning up", assetKey, expiredTime)
+					logger.Info("certificate expired beyond grace period; cleaning up",
+						zap.String("asset_key", assetKey),
+						zap.Duration("expired_for", expiredTime),
+						zap.Duration("grace_period", gracePeriod))
 					baseName := strings.TrimSuffix(assetKey, ".crt")
 					for _, relatedAsset := range []string{
 						assetKey,
 						baseName + ".key",
 						baseName + ".json",
 					} {
-						log.Printf("[INFO] Deleting %s because resource expired", relatedAsset)
+						logger.Info("deleting asset because resource expired", zap.String("asset_key", relatedAsset))
 						err := storage.Delete(ctx, relatedAsset)
 						if err != nil {
-							log.Printf("[ERROR] Cleaning up asset related to expired certificate for %s: %s: %v",
-								baseName, relatedAsset, err)
+							logger.Error("could not clean up asset related to expired certificate",
+								zap.String("base_name", baseName),
+								zap.String("related_asset", relatedAsset),
+								zap.Error(err))
 						}
 					}
 				}
@@ -521,7 +611,7 @@ func deleteExpiredCerts(ctx context.Context, storage Storage, gracePeriod time.D
 				continue
 			}
 			if len(siteAssets) == 0 {
-				log.Printf("[INFO] Deleting %s because key is empty", siteKey)
+				logger.Info("deleting site folder because key is empty", zap.String("site_key", siteKey))
 				err := storage.Delete(ctx, siteKey)
 				if err != nil {
 					return fmt.Errorf("deleting empty site folder %s: %v", siteKey, err)
