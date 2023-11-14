@@ -58,6 +58,8 @@ func (cfg *Config) GetCertificateWithContext(ctx context.Context, clientHello *t
 		return nil, fmt.Errorf("handshake aborted by event handler: %w", err)
 	}
 
+	ctx = context.WithValue(ctx, ClientHelloInfoCtxKey, clientHello)
+
 	// special case: serve up the certificate for a TLS-ALPN ACME challenge
 	// (https://tools.ietf.org/html/draft-ietf-acme-tls-alpn-05)
 	for _, proto := range clientHello.SupportedProtos {
@@ -875,3 +877,13 @@ var (
 	certLoadWaitChans   = make(map[string]chan struct{})
 	certLoadWaitChansMu sync.Mutex
 )
+
+type helloInfoCtxKey string
+
+// ClientHelloInfoCtxKey is the key by which the ClientHelloInfo can be extracted from
+// a context.Context within a DecisionFunc. However, be advised that it is best practice
+// that the decision whether to obtain a certificate is be based solely on the name,
+// not other properties of the specific connection/client requesting the connection.
+// Fpr example, it is not adviseable to use a client's IP address to decide whether to
+// allow a certificate. Instead, the ClientHello can be useful for logging, etc.
+const ClientHelloInfoCtxKey helloInfoCtxKey = "certmagic:ClientHelloInfo"
