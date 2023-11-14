@@ -50,7 +50,7 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 }
 
 func (cfg *Config) GetCertificateWithContext(ctx context.Context, clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	if err := cfg.emit(ctx, "tls_get_certificate", map[string]any{"client_hello": clientHello}); err != nil {
+	if err := cfg.emit(ctx, "tls_get_certificate", map[string]any{"client_hello": clientHelloWithoutConn(clientHello)}); err != nil {
 		cfg.Logger.Error("TLS handshake aborted by event handler",
 			zap.String("server_name", clientHello.ServerName),
 			zap.String("remote", clientHello.Conn.RemoteAddr().String()),
@@ -881,6 +881,45 @@ var (
 	certLoadWaitChans   = make(map[string]chan struct{})
 	certLoadWaitChansMu sync.Mutex
 )
+
+type serializableClientHello struct {
+	CipherSuites      []uint16
+	ServerName        string
+	SupportedCurves   []tls.CurveID
+	SupportedPoints   []uint8
+	SignatureSchemes  []tls.SignatureScheme
+	SupportedProtos   []string
+	SupportedVersions []uint16
+
+	RemoteAddr, LocalAddr net.Addr // values copied from the Conn as they are still useful/needed
+	conn                  net.Conn // unexported so it's not serialized
+}
+
+// clientHelloWithoutConn returns the data from the ClientHelloInfo without the
+// pesky exported Conn field, which often causes an error when serializing because
+// the underlying type may be unserializable.
+func clientHelloWithoutConn(hello *tls.ClientHelloInfo) serializableClientHello {
+	if hello == nil {
+		return serializableClientHello{}
+	}
+	var remote, local net.Addr
+	if hello.Conn != nil {
+		remote = hello.Conn.RemoteAddr()
+		local = hello.Conn.LocalAddr()
+	}
+	return serializableClientHello{
+		CipherSuites:      hello.CipherSuites,
+		ServerName:        hello.ServerName,
+		SupportedCurves:   hello.SupportedCurves,
+		SupportedPoints:   hello.SupportedPoints,
+		SignatureSchemes:  hello.SignatureSchemes,
+		SupportedProtos:   hello.SupportedProtos,
+		SupportedVersions: hello.SupportedVersions,
+		RemoteAddr:        remote,
+		LocalAddr:         local,
+		conn:              hello.Conn,
+	}
+}
 
 type helloInfoCtxKey string
 
