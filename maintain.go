@@ -438,23 +438,27 @@ func CleanStorage(ctx context.Context, storage Storage, opts CleanStorageOptions
 	// cleaning should not happen more often than the interval
 	if opts.Interval > 0 {
 		lastCleanBytes, err := storage.Load(ctx, storageKey)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("loading last clean timestamp: %v", err)
-		}
-		var lastClean lastCleanPayload
-		err = json.Unmarshal(lastCleanBytes, &lastClean)
-		if err != nil {
-			return fmt.Errorf("decoding last clean data: %v", err)
-		}
-		lastTLSClean := lastClean["tls"]
-		if time.Since(lastTLSClean.Timestamp) < opts.Interval {
-			nextTime := time.Now().Add(opts.Interval)
-			opts.Logger.Warn("storage cleaning happened too recently; skipping for now",
-				zap.String("instance", lastTLSClean.InstanceID),
-				zap.Time("try_again", nextTime),
-				zap.Duration("try_again_in", time.Until(nextTime)),
-			)
-			return nil
+		if !errors.Is(err, fs.ErrNotExist) {
+			if err != nil {
+				return fmt.Errorf("loading last clean timestamp: %v", err)
+			}
+
+			var lastClean lastCleanPayload
+			err = json.Unmarshal(lastCleanBytes, &lastClean)
+			if err != nil {
+				return fmt.Errorf("decoding last clean data: %v", err)
+			}
+
+			lastTLSClean := lastClean["tls"]
+			if time.Since(lastTLSClean.Timestamp) < opts.Interval {
+				nextTime := time.Now().Add(opts.Interval)
+				opts.Logger.Warn("storage cleaning happened too recently; skipping for now",
+					zap.String("instance", lastTLSClean.InstanceID),
+					zap.Time("try_again", nextTime),
+					zap.Duration("try_again_in", time.Until(nextTime)),
+				)
+				return nil
+			}
 		}
 	}
 
