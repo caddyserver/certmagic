@@ -176,11 +176,17 @@ var retryIntervals = []time.Duration{
 	20 * time.Minute, // elapsed: 2 hr
 	30 * time.Minute,
 	30 * time.Minute, // elapsed: 3 hr
+	30 * time.Minute,
+	30 * time.Minute, // elapsed: 4 hr
+	30 * time.Minute,
+	30 * time.Minute, // elapsed: 5 hr
+	1 * time.Hour,    // elapsed: 6 hr
 	1 * time.Hour,
-	1 * time.Hour,
-	1 * time.Hour, // elapsed: 6 hr
+	1 * time.Hour, // elapsed: 8 hr
+	2 * time.Hour,
+	2 * time.Hour, // elapsed: 12 hr
 	3 * time.Hour,
-	3 * time.Hour, // elapsed: 12 hr
+	3 * time.Hour, // elapsed: 18 hr
 	6 * time.Hour, // repeat for up to maxRetryDuration
 }
 

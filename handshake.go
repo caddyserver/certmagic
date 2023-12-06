@@ -927,6 +927,6 @@ type helloInfoCtxKey string
 // a context.Context within a DecisionFunc. However, be advised that it is best practice
 // that the decision whether to obtain a certificate is be based solely on the name,
 // not other properties of the specific connection/client requesting the connection.
-// Fpr example, it is not adviseable to use a client's IP address to decide whether to
+// For example, it is not adviseable to use a client's IP address to decide whether to
 // allow a certificate. Instead, the ClientHello can be useful for logging, etc.
 const ClientHelloInfoCtxKey helloInfoCtxKey = "certmagic:ClientHelloInfo"
