@@ -185,6 +185,15 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls
 	if err != nil {
 		return "", err
 	}
+	if time.Now().After(cert.Leaf.NotAfter) {
+		cfg.Logger.Warn("unmanaged certificate has expired",
+			zap.Time("not_after", cert.Leaf.NotAfter),
+			zap.Strings("sans", cert.Names))
+	} else if time.Until(cert.Leaf.NotAfter) < 24*time.Hour {
+		cfg.Logger.Warn("unmanaged certificate expires within 1 day",
+			zap.Time("not_after", cert.Leaf.NotAfter),
+			zap.Strings("sans", cert.Names))
+	}
 	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
 	if err != nil {
 		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
