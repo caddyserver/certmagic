@@ -393,12 +393,35 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 		}
 	}
 
-	certChains, err := client.acmeClient.ObtainCertificateUsingCSR(ctx, client.account, csr)
-	if err != nil {
-		return nil, usingTestCA, fmt.Errorf("%v %w (ca=%s)", nameSet, err, client.acmeClient.Directory)
-	}
-	if len(certChains) == 0 {
-		return nil, usingTestCA, fmt.Errorf("no certificate chains")
+	// do this in a loop because there's an error case that may necessitate a retry, but not more than once
+	var certChains []acme.Certificate
+	for i := 0; i < 2; i++ {
+		certChains, err = client.acmeClient.ObtainCertificateUsingCSR(ctx, client.account, csr)
+		if err != nil {
+			var prob acme.Problem
+			if errors.As(err, &prob) && prob.Type == acme.ProblemTypeAccountDoesNotExist {
+				// the account we have no longer exists on the CA, so we need to create a new one;
+				// we could use the same key pair, but this is a good opportunity to rotate keys
+				// (see https://caddy.community/t/acme-account-is-not-regenerated-when-acme-server-gets-reinstalled/22627)
+				// (basically this happens if the CA gets reset or reinstalled; usually just internal PKI)
+				err := am.deleteAccountLocally(ctx, client.iss.CA, client.account)
+				if err != nil {
+					return nil, usingTestCA, fmt.Errorf("%v ACME account no longer exists on CA, but resetting our local copy of the account info failed: %v", nameSet, err)
+				}
+
+				// recreate account and try again
+				client, err = am.newACMEClientWithAccount(ctx, useTestCA, false)
+				if err != nil {
+					return nil, false, err
+				}
+				continue
+			}
+			return nil, usingTestCA, fmt.Errorf("%v %w (ca=%s)", nameSet, err, client.acmeClient.Directory)
+		}
+		if len(certChains) == 0 {
+			return nil, usingTestCA, fmt.Errorf("no certificate chains")
+		}
+		break
 	}
 
 	preferredChain := am.selectPreferredChain(certChains)
