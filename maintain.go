@@ -452,7 +452,7 @@ func CleanStorage(ctx context.Context, storage Storage, opts CleanStorageOptions
 			lastTLSClean := lastClean["tls"]
 			if time.Since(lastTLSClean.Timestamp) < opts.Interval {
 				nextTime := time.Now().Add(opts.Interval)
-				opts.Logger.Warn("storage cleaning happened too recently; skipping for now",
+				opts.Logger.Info("storage cleaning happened too recently; skipping for now",
 					zap.String("instance", lastTLSClean.InstanceID),
 					zap.Time("try_again", nextTime),
 					zap.Duration("try_again_in", time.Until(nextTime)),
