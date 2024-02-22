@@ -400,6 +400,11 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 		if err != nil {
 			var prob acme.Problem
 			if errors.As(err, &prob) && prob.Type == acme.ProblemTypeAccountDoesNotExist {
+				am.Logger.Warn("ACME account does not exist on server; attempting to recreate",
+					zap.Strings("account_contact", client.account.Contact),
+					zap.String("account_location", client.account.Location),
+					zap.Object("problem", prob))
+
 				// the account we have no longer exists on the CA, so we need to create a new one;
 				// we could use the same key pair, but this is a good opportunity to rotate keys
 				// (see https://caddy.community/t/acme-account-is-not-regenerated-when-acme-server-gets-reinstalled/22627)
