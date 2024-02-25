@@ -193,13 +193,21 @@ func (iss *ACMEIssuer) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 			if iss.AltHTTPPort > 0 {
 				useHTTPPort = iss.AltHTTPPort
 			}
+
+			// enable http01 solver inject
+			var http01Solver acmez.Solver
+			if iss.Http01Solver != nil {
+				http01Solver = iss.Http01Solver
+			} else {
+				http01Solver = &httpSolver{
+					acmeIssuer: iss,
+					address:    net.JoinHostPort(iss.ListenHost, strconv.Itoa(useHTTPPort)),
+				}
+			}
 			client.ChallengeSolvers[acme.ChallengeTypeHTTP01] = distributedSolver{
 				storage:                iss.config.Storage,
 				storageKeyIssuerPrefix: iss.storageKeyCAPrefix(client.Directory),
-				solver: &httpSolver{
-					acmeIssuer: iss,
-					address:    net.JoinHostPort(iss.ListenHost, strconv.Itoa(useHTTPPort)),
-				},
+				solver:                 http01Solver,
 			}
 		}
 

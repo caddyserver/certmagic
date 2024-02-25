@@ -83,6 +83,9 @@ type ACMEIssuer struct {
 	// from this package
 	DNS01Solver acmez.Solver
 
+	// The solver for http-01
+	Http01Solver acmez.Solver
+
 	// TrustedRoots specifies a pool of root CA
 	// certificates to trust when communicating
 	// over a network to a peer.
