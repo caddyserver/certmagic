@@ -168,12 +168,24 @@ func getOCSPForCert(ocspConfig OCSPConfig, bundle []byte) ([]byte, *ocsp.Respons
 		return nil, nil, fmt.Errorf("override disables querying OCSP responder: %v", issuedCert.OCSPServer[0])
 	}
 
+	// configure HTTP client if necessary
+	httpClient := http.DefaultClient
+	if ocspConfig.HTTPProxy != nil {
+		httpClient = &http.Client{
+			Transport: &http.Transport{
+				Proxy: ocspConfig.HTTPProxy,
+			},
+			Timeout: 30 * time.Second,
+		}
+	}
+
+	// get issuer certificate if needed
 	if len(certificates) == 1 {
 		if len(issuedCert.IssuingCertificateURL) == 0 {
 			return nil, nil, fmt.Errorf("no URL to issuing certificate")
 		}
 
-		resp, err := http.Get(issuedCert.IssuingCertificateURL[0])
+		resp, err := httpClient.Get(issuedCert.IssuingCertificateURL[0])
 		if err != nil {
 			return nil, nil, fmt.Errorf("getting issuer certificate: %v", err)
 		}
@@ -202,7 +214,7 @@ func getOCSPForCert(ocspConfig OCSPConfig, bundle []byte) ([]byte, *ocsp.Respons
 	}
 
 	reader := bytes.NewReader(ocspReq)
-	req, err := http.Post(respURL, "application/ocsp-request", reader)
+	req, err := httpClient.Post(respURL, "application/ocsp-request", reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("making OCSP request: %v", err)
 	}

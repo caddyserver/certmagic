@@ -29,6 +29,7 @@ import (
 	"io/fs"
 	weakrand "math/rand"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -1173,6 +1174,10 @@ type OCSPConfig struct {
 	// embedded in certificates. Mapping to an empty
 	// URL will disable OCSP from that responder.
 	ResponderOverrides map[string]string
+
+	// Optionally specify a function that can return the URL
+	// for an HTTP proxy to use for OCSP-related HTTP requests.
+	HTTPProxy func(*http.Request) (*url.URL, error)
 }
 
 // certIssueLockOp is the name of the operation used
