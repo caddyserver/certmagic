@@ -67,6 +67,9 @@ type Cache struct {
 	doneChan chan struct{}
 
 	logger *zap.Logger
+
+	// maintain status
+	maintainStatus int32
 }
 
 // NewCache returns a new, valid Cache for efficiently
@@ -126,6 +129,8 @@ func NewCache(opts CacheOptions) *Cache {
 
 	go c.maintainAssets(0)
 
+	c.maintainStatus = 1
+
 	return c
 }
 
@@ -142,6 +147,17 @@ func (certCache *Cache) SetOptions(opts CacheOptions) {
 func (certCache *Cache) Stop() {
 	close(certCache.stopChan) // signal to stop
 	<-certCache.doneChan      // wait for stop to complete
+	certCache.maintainStatus = 0
+}
+
+func (certCache *Cache) Start() {
+	if certCache.maintainStatus == 1 {
+		return
+	}
+	certCache.maintainStatus = 1
+	certCache.stopChan = make(chan struct{})
+	certCache.doneChan = make(chan struct{})
+	go certCache.maintainAssets(0)
 }
 
 // CacheOptions is used to configure certificate caches.
