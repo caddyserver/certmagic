@@ -231,12 +231,25 @@ func checkDNSPropagation(fqdn, value string, resolvers []string) (bool, error) {
 		return false, err
 	}
 
-	return checkAuthoritativeNss(fqdn, value, authoritativeNss)
+	return checkAuthoritativeNss(fqdn, value, authoritativeNss, resolvers)
 }
 
 // checkAuthoritativeNss queries each of the given nameservers for the expected TXT record.
-func checkAuthoritativeNss(fqdn, value string, nameservers []string) (bool, error) {
+func checkAuthoritativeNss(fqdn, value string, nameservers []string, resolvers []string) (bool, error) {
 	for _, ns := range nameservers {
+		// if resolvers are given, use them to get the authoritative nameservers IP instead of using its fqdn
+		if len(resolvers) > 0 {
+			ar, err := dnsQuery(ns, dns.TypeA, resolvers, true)
+			if err != nil {
+				return false, err
+			}
+			for _, a := range ar.Answer {
+				if aa, ok := a.(*dns.A); ok {
+					ns = aa.A.String()
+				}
+			}
+		}
+
 		r, err := dnsQuery(fqdn, dns.TypeTXT, []string{net.JoinHostPort(ns, "53")}, true)
 		if err != nil {
 			return false, err
