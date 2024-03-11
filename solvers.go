@@ -361,6 +361,7 @@ func (s *DNS01Solver) Wait(ctx context.Context, challenge acme.Challenge) error 
 	const interval = 2 * time.Second
 
 	// how we'll do the checks
+	checkAuthoritativeServers := len(s.Resolvers) == 0
 	resolvers := recursiveNameservers(s.Resolvers)
 
 	var err error
@@ -372,7 +373,7 @@ func (s *DNS01Solver) Wait(ctx context.Context, challenge acme.Challenge) error 
 			return ctx.Err()
 		}
 		var ready bool
-		ready, err = checkDNSPropagation(dnsName, keyAuth, resolvers)
+		ready, err = checkDNSPropagation(dnsName, keyAuth, resolvers, checkAuthoritativeServers)
 		if err != nil {
 			return fmt.Errorf("checking DNS propagation of %q: %w", dnsName, err)
 		}

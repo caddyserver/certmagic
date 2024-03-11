@@ -210,8 +210,10 @@ func populateNameserverPorts(servers []string) {
 	}
 }
 
-// checkDNSPropagation checks if the expected TXT record has been propagated to all authoritative nameservers.
-func checkDNSPropagation(fqdn, value string, resolvers []string) (bool, error) {
+// checkDNSPropagation checks if the expected TXT record has been propagated.
+// If checkAuthoritativeServers is true, the authoritative nameservers are checked directly,
+// otherwise only the given resolvers are checked.
+func checkDNSPropagation(fqdn, value string, resolvers []string, checkAuthoritativeServers bool) (bool, error) {
 	if !strings.HasSuffix(fqdn, ".") {
 		fqdn += "."
 	}
@@ -226,18 +228,22 @@ func checkDNSPropagation(fqdn, value string, resolvers []string) (bool, error) {
 		fqdn = updateDomainWithCName(r, fqdn)
 	}
 
-	authoritativeNss, err := lookupNameservers(fqdn, resolvers)
-	if err != nil {
-		return false, err
+	if checkAuthoritativeServers {
+		authoritativeServers, err := lookupNameservers(fqdn, resolvers)
+		if err != nil {
+			return false, err
+		}
+		populateNameserverPorts(authoritativeServers)
+		resolvers = authoritativeServers
 	}
 
-	return checkAuthoritativeNss(fqdn, value, authoritativeNss)
+	return checkNameservers(fqdn, value, resolvers)
 }
 
-// checkAuthoritativeNss queries each of the given nameservers for the expected TXT record.
-func checkAuthoritativeNss(fqdn, value string, nameservers []string) (bool, error) {
+// checkNameservers queries each of the given nameservers for the expected TXT record.
+func checkNameservers(fqdn, value string, nameservers []string) (bool, error) {
 	for _, ns := range nameservers {
-		r, err := dnsQuery(fqdn, dns.TypeTXT, []string{net.JoinHostPort(ns, "53")}, true)
+		r, err := dnsQuery(fqdn, dns.TypeTXT, []string{ns}, true)
 		if err != nil {
 			return false, err
 		}
