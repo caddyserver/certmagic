@@ -125,6 +125,7 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 4. Persistent storage
 	- Typically the local file system (default)
 	- Other integrations available/possible
+5. Go 1.21 or newer
 
 **_Before using this library, your domain names MUST be pointed (A/AAAA records) at your server (unless you use the DNS challenge)!_**
 
