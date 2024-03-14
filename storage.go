@@ -289,7 +289,7 @@ func acquireLock(ctx context.Context, storage Storage, lockKey string) error {
 }
 
 func releaseLock(ctx context.Context, storage Storage, lockKey string) error {
-	err := storage.Unlock(context.TODO(), lockKey) // TODO: in Go 1.21, use WithoutCancel (see #247)
+	err := storage.Unlock(context.WithoutCancel(ctx), lockKey)
 	if err == nil {
 		locksMu.Lock()
 		delete(locks, lockKey)
