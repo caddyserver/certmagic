@@ -240,7 +240,7 @@ func checkDNSPropagation(fqdn, value string, resolvers []string, checkAuthoritat
 	return checkNameservers(fqdn, value, resolvers)
 }
 
-// checkNameservers queries each of the given nameservers for the expected TXT record.
+// checkNameservers checks if any of the given nameservers has the expected TXT record.
 func checkNameservers(fqdn, value string, nameservers []string) (bool, error) {
 	for _, ns := range nameservers {
 		r, err := dnsQuery(fqdn, dns.TypeTXT, []string{ns}, true)
@@ -258,23 +258,17 @@ func checkNameservers(fqdn, value string, nameservers []string) (bool, error) {
 			return false, fmt.Errorf("NS %s returned %s for %s", ns, dns.RcodeToString[r.Rcode], fqdn)
 		}
 
-		var found bool
 		for _, rr := range r.Answer {
 			if txt, ok := rr.(*dns.TXT); ok {
 				record := strings.Join(txt.Txt, "")
 				if record == value {
-					found = true
-					break
+					return true, nil
 				}
 			}
 		}
-
-		if !found {
-			return false, nil
-		}
 	}
 
-	return true, nil
+	return false, nil
 }
 
 // lookupNameservers returns the authoritative nameservers for the given fqdn.
