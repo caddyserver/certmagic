@@ -171,6 +171,16 @@ func (am *ACMEIssuer) saveAccount(ctx context.Context, ca string, account acme.A
 	return storeTx(ctx, am.config.Storage, all)
 }
 
+// deleteAccountLocally deletes the registration info and private key of the account
+// for the given CA from storage.
+func (am *ACMEIssuer) deleteAccountLocally(ctx context.Context, ca string, account acme.Account) error {
+	primaryContact := getPrimaryContact(account)
+	if err := am.config.Storage.Delete(ctx, am.storageKeyUserReg(ca, primaryContact)); err != nil {
+		return err
+	}
+	return am.config.Storage.Delete(ctx, am.storageKeyUserPrivateKey(ca, primaryContact))
+}
+
 // setEmail does everything it can to obtain an email address
 // from the user within the scope of memory and storage to use
 // for ACME TLS. If it cannot get an email address, it does nothing
