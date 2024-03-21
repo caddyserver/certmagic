@@ -293,7 +293,7 @@ tlsConfig.NextProtos = append([]string{"h2", "http/1.1"}, tlsConfig.NextProtos..
 // we can simply set its GetCertificate field and append the
 // TLS-ALPN challenge protocol to the NextProtos
 myTLSConfig.GetCertificate = magic.GetCertificate
-myTLSConfig.NextProtos = append(myTLSConfig.NextProtos, tlsalpn01.ACMETLS1Protocol)
+myTLSConfig.NextProtos = append(myTLSConfig.NextProtos, acmez.ACMETLS1Protocol)
 
 // the HTTP challenge has to be handled by your HTTP server;
 // if you don't have one, you should have disabled it earlier
@@ -380,7 +380,7 @@ Or make two simple changes to an existing `tls.Config`:
 
 ```go
 myTLSConfig.GetCertificate = magic.GetCertificate
-myTLSConfig.NextProtos = append(myTLSConfig.NextProtos, tlsalpn01.ACMETLS1Protocol}
+myTLSConfig.NextProtos = append(myTLSConfig.NextProtos, acmez.ACMETLS1Protocol}
 ```
 
 Then just make sure your TLS listener is listening on port 443:
