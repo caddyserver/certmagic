@@ -211,7 +211,7 @@ func populateNameserverPorts(servers []string) {
 }
 
 // checkDNSPropagation checks if the expected TXT record has been propagated to all authoritative nameservers.
-func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, resolvers []string) (bool, error) {
+func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, checkAuthoritativeServers bool, resolvers []string) (bool, error) {
 	if !strings.HasSuffix(fqdn, ".") {
 		fqdn += "."
 	}
@@ -229,12 +229,16 @@ func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, reso
 		}
 	}
 
-	authoritativeNss, err := lookupNameservers(fqdn, resolvers)
-	if err != nil {
-		return false, err
+	if checkAuthoritativeServers {
+		authoritativeServers, err := lookupNameservers(fqdn, resolvers)
+		if err != nil {
+			return false, err
+		}
+		populateNameserverPorts(authoritativeServers)
+		resolvers = authoritativeServers
 	}
 
-	return checkAuthoritativeNss(fqdn, recType, expectedValue, authoritativeNss)
+	return checkAuthoritativeNss(fqdn, recType, expectedValue, resolvers)
 }
 
 // checkAuthoritativeNss queries each of the given nameservers for the expected TXT record.
@@ -255,36 +259,29 @@ func checkAuthoritativeNss(fqdn string, recType uint16, expectedValue string, na
 			return false, fmt.Errorf("NS %s returned %s for %s", ns, dns.RcodeToString[r.Rcode], fqdn)
 		}
 
-		var found bool
 		for _, rr := range r.Answer {
 			switch recType {
 			case dns.TypeTXT:
 				if txt, ok := rr.(*dns.TXT); ok {
 					record := strings.Join(txt.Txt, "")
 					if record == expectedValue {
-						found = true
-						break
+						return true, nil
 					}
 				}
 			case dns.TypeCNAME:
 				if cname, ok := rr.(*dns.CNAME); ok {
 					// TODO: whether a DNS provider assumes a trailing dot or not varies, and we may have to standardize this in libdns packages
 					if strings.TrimSuffix(cname.Target, ".") == strings.TrimSuffix(expectedValue, ".") {
-						found = true
-						break
+						return true, nil
 					}
 				}
 			default:
 				return false, fmt.Errorf("unsupported record type: %d", recType)
 			}
 		}
-
-		if !found {
-			return false, nil
-		}
 	}
 
-	return true, nil
+	return false, nil
 }
 
 // lookupNameservers returns the authoritative nameservers for the given fqdn.
