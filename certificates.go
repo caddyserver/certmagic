@@ -162,7 +162,7 @@ func (cfg *Config) loadManagedCertificate(ctx context.Context, domain string) (C
 //
 // This method is safe for concurrent use.
 func (cfg *Config) CacheUnmanagedCertificatePEMFile(ctx context.Context, certFile, keyFile string, tags []string) (string, error) {
-	cert, err := cfg.makeCertificateFromDiskWithOCSP(ctx, cfg.Storage, certFile, keyFile)
+	cert, err := cfg.makeCertificateFromDiskWithOCSP(ctx, certFile, keyFile)
 	if err != nil {
 		return "", err
 	}
@@ -224,7 +224,7 @@ func (cfg *Config) CacheUnmanagedCertificatePEMBytes(ctx context.Context, certBy
 // certificate and key files. It fills out all the fields in
 // the certificate except for the Managed and OnDemand flags.
 // (It is up to the caller to set those.) It staples OCSP.
-func (cfg Config) makeCertificateFromDiskWithOCSP(ctx context.Context, storage Storage, certFile, keyFile string) (Certificate, error) {
+func (cfg Config) makeCertificateFromDiskWithOCSP(ctx context.Context, certFile, keyFile string) (Certificate, error) {
 	certPEMBlock, err := os.ReadFile(certFile)
 	if err != nil {
 		return Certificate{}, err
