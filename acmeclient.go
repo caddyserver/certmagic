@@ -20,6 +20,7 @@ import (
 	"fmt"
 	weakrand "math/rand"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -186,38 +187,24 @@ func (iss *ACMEIssuer) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 	if iss.DNS01Solver == nil {
 		// enable HTTP-01 challenge
 		if !iss.DisableHTTPChallenge {
-			useHTTPPort := HTTPChallengePort
-			if HTTPPort > 0 && HTTPPort != HTTPChallengePort {
-				useHTTPPort = HTTPPort
-			}
-			if iss.AltHTTPPort > 0 {
-				useHTTPPort = iss.AltHTTPPort
-			}
 			client.ChallengeSolvers[acme.ChallengeTypeHTTP01] = distributedSolver{
 				storage:                iss.config.Storage,
 				storageKeyIssuerPrefix: iss.storageKeyCAPrefix(client.Directory),
 				solver: &httpSolver{
-					acmeIssuer: iss,
-					address:    net.JoinHostPort(iss.ListenHost, strconv.Itoa(useHTTPPort)),
+					handler: iss.HTTPChallengeHandler(http.NewServeMux()),
+					address: net.JoinHostPort(iss.ListenHost, strconv.Itoa(iss.getHTTPPort())),
 				},
 			}
 		}
 
 		// enable TLS-ALPN-01 challenge
 		if !iss.DisableTLSALPNChallenge {
-			useTLSALPNPort := TLSALPNChallengePort
-			if HTTPSPort > 0 && HTTPSPort != TLSALPNChallengePort {
-				useTLSALPNPort = HTTPSPort
-			}
-			if iss.AltTLSALPNPort > 0 {
-				useTLSALPNPort = iss.AltTLSALPNPort
-			}
 			client.ChallengeSolvers[acme.ChallengeTypeTLSALPN01] = distributedSolver{
 				storage:                iss.config.Storage,
 				storageKeyIssuerPrefix: iss.storageKeyCAPrefix(client.Directory),
 				solver: &tlsALPNSolver{
 					config:  iss.config,
-					address: net.JoinHostPort(iss.ListenHost, strconv.Itoa(useTLSALPNPort)),
+					address: net.JoinHostPort(iss.ListenHost, strconv.Itoa(iss.getTLSALPNPort())),
 				},
 			}
 		}
@@ -246,6 +233,28 @@ func (iss *ACMEIssuer) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 	}
 
 	return client, nil
+}
+
+func (iss *ACMEIssuer) getHTTPPort() int {
+	useHTTPPort := HTTPChallengePort
+	if HTTPPort > 0 && HTTPPort != HTTPChallengePort {
+		useHTTPPort = HTTPPort
+	}
+	if iss.AltHTTPPort > 0 {
+		useHTTPPort = iss.AltHTTPPort
+	}
+	return useHTTPPort
+}
+
+func (iss *ACMEIssuer) getTLSALPNPort() int {
+	useTLSALPNPort := TLSALPNChallengePort
+	if HTTPSPort > 0 && HTTPSPort != TLSALPNChallengePort {
+		useTLSALPNPort = HTTPSPort
+	}
+	if iss.AltTLSALPNPort > 0 {
+		useTLSALPNPort = iss.AltTLSALPNPort
+	}
+	return useTLSALPNPort
 }
 
 func (c *acmeClient) throttle(ctx context.Context, names []string) error {

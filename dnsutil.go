@@ -211,19 +211,22 @@ func populateNameserverPorts(servers []string) {
 }
 
 // checkDNSPropagation checks if the expected TXT record has been propagated to all authoritative nameservers.
-func checkDNSPropagation(fqdn, value string, resolvers []string) (bool, error) {
+func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, resolvers []string) (bool, error) {
 	if !strings.HasSuffix(fqdn, ".") {
 		fqdn += "."
 	}
 
-	// Initial attempt to resolve at the recursive NS
-	r, err := dnsQuery(fqdn, dns.TypeTXT, resolvers, true)
-	if err != nil {
-		return false, err
-	}
-
-	if r.Rcode == dns.RcodeSuccess {
-		fqdn = updateDomainWithCName(r, fqdn)
+	// Initial attempt to resolve at the recursive NS - but do not actually
+	// dereference (follow) a CNAME record if we are targeting a CNAME record
+	// itself
+	if recType != dns.TypeCNAME {
+		r, err := dnsQuery(fqdn, recType, resolvers, true)
+		if err != nil {
+			return false, err
+		}
+		if r.Rcode == dns.RcodeSuccess {
+			fqdn = updateDomainWithCName(r, fqdn)
+		}
 	}
 
 	authoritativeNss, err := lookupNameservers(fqdn, resolvers)
@@ -231,13 +234,13 @@ func checkDNSPropagation(fqdn, value string, resolvers []string) (bool, error) {
 		return false, err
 	}
 
-	return checkAuthoritativeNss(fqdn, value, authoritativeNss)
+	return checkAuthoritativeNss(fqdn, recType, expectedValue, authoritativeNss)
 }
 
 // checkAuthoritativeNss queries each of the given nameservers for the expected TXT record.
-func checkAuthoritativeNss(fqdn, value string, nameservers []string) (bool, error) {
+func checkAuthoritativeNss(fqdn string, recType uint16, expectedValue string, nameservers []string) (bool, error) {
 	for _, ns := range nameservers {
-		r, err := dnsQuery(fqdn, dns.TypeTXT, []string{net.JoinHostPort(ns, "53")}, true)
+		r, err := dnsQuery(fqdn, recType, []string{net.JoinHostPort(ns, "53")}, true)
 		if err != nil {
 			return false, err
 		}
@@ -254,12 +257,25 @@ func checkAuthoritativeNss(fqdn, value string, nameservers []string) (bool, erro
 
 		var found bool
 		for _, rr := range r.Answer {
-			if txt, ok := rr.(*dns.TXT); ok {
-				record := strings.Join(txt.Txt, "")
-				if record == value {
-					found = true
-					break
+			switch recType {
+			case dns.TypeTXT:
+				if txt, ok := rr.(*dns.TXT); ok {
+					record := strings.Join(txt.Txt, "")
+					if record == expectedValue {
+						found = true
+						break
+					}
 				}
+			case dns.TypeCNAME:
+				if cname, ok := rr.(*dns.CNAME); ok {
+					// TODO: whether a DNS provider assumes a trailing dot or not varies, and we may have to standardize this in libdns packages
+					if strings.TrimSuffix(cname.Target, ".") == strings.TrimSuffix(expectedValue, ".") {
+						found = true
+						break
+					}
+				}
+			default:
+				return false, fmt.Errorf("unsupported record type: %d", recType)
 			}
 		}
 
