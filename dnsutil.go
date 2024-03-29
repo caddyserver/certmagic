@@ -210,7 +210,7 @@ func populateNameserverPorts(servers []string) {
 	}
 }
 
-// checkDNSPropagation checks if the expected TXT record has been propagated to all authoritative nameservers.
+// checkDNSPropagation checks if the expected record has been propagated to all authoritative nameservers.
 func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, checkAuthoritativeServers bool, resolvers []string) (bool, error) {
 	if !strings.HasSuffix(fqdn, ".") {
 		fqdn += "."
@@ -241,7 +241,7 @@ func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, chec
 	return checkAuthoritativeNss(fqdn, recType, expectedValue, resolvers)
 }
 
-// checkAuthoritativeNss queries each of the given nameservers for the expected TXT record.
+// checkAuthoritativeNss queries each of the given nameservers for the expected record.
 func checkAuthoritativeNss(fqdn string, recType uint16, expectedValue string, nameservers []string) (bool, error) {
 	for _, ns := range nameservers {
 		r, err := dnsQuery(fqdn, recType, []string{ns}, true)
