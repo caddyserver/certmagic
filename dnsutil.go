@@ -222,7 +222,7 @@ func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, chec
 	if recType != dns.TypeCNAME {
 		r, err := dnsQuery(fqdn, recType, resolvers, true)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("CNAME dns query: %v", err)
 		}
 		if r.Rcode == dns.RcodeSuccess {
 			fqdn = updateDomainWithCName(r, fqdn)
@@ -232,7 +232,7 @@ func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, chec
 	if checkAuthoritativeServers {
 		authoritativeServers, err := lookupNameservers(fqdn, resolvers)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("looking up authoritative nameservers: %v", err)
 		}
 		populateNameserverPorts(authoritativeServers)
 		resolvers = authoritativeServers
@@ -244,9 +244,9 @@ func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, chec
 // checkAuthoritativeNss queries each of the given nameservers for the expected TXT record.
 func checkAuthoritativeNss(fqdn string, recType uint16, expectedValue string, nameservers []string) (bool, error) {
 	for _, ns := range nameservers {
-		r, err := dnsQuery(fqdn, recType, []string{net.JoinHostPort(ns, "53")}, true)
+		r, err := dnsQuery(fqdn, recType, []string{ns}, true)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("querying authoritative nameservers: %v", err)
 		}
 
 		if r.Rcode != dns.RcodeSuccess {
@@ -290,12 +290,12 @@ func lookupNameservers(fqdn string, resolvers []string) ([]string, error) {
 
 	zone, err := findZoneByFQDN(fqdn, resolvers)
 	if err != nil {
-		return nil, fmt.Errorf("could not determine the zone: %w", err)
+		return nil, fmt.Errorf("could not determine the zone for '%s': %w", fqdn, err)
 	}
 
 	r, err := dnsQuery(zone, dns.TypeNS, resolvers, true)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("querying NS resolver for zone '%s' recursively: %v", zone, err)
 	}
 
 	for _, rr := range r.Answer {

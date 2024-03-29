@@ -430,6 +430,8 @@ func (s *DNSManager) wait(ctx context.Context, zrec zoneRecord) error {
 		recType = dns.TypeCNAME
 	}
 
+	absName := libdns.AbsoluteName(zrec.record.Name, zrec.zone)
+
 	var err error
 	start := time.Now()
 	for time.Since(start) < timeout {
@@ -439,9 +441,9 @@ func (s *DNSManager) wait(ctx context.Context, zrec zoneRecord) error {
 			return ctx.Err()
 		}
 		var ready bool
-		ready, err = checkDNSPropagation(libdns.AbsoluteName(zrec.record.Name, zrec.zone), recType, zrec.record.Value, checkAuthoritativeServers, resolvers)
+		ready, err = checkDNSPropagation(absName, recType, zrec.record.Value, checkAuthoritativeServers, resolvers)
 		if err != nil {
-			return fmt.Errorf("checking DNS propagation of %q: %w", zrec.record.Name, err)
+			return fmt.Errorf("checking DNS propagation of %q (relative=%s zone=%s resolvers=%v): %w", absName, zrec.record.Name, zrec.zone, resolvers, err)
 		}
 		if ready {
 			return nil

@@ -280,6 +280,11 @@ func hashCertificateChain(certChain [][]byte) string {
 
 func namesFromCSR(csr *x509.CertificateRequest) []string {
 	var nameSet []string
+	// TODO: CommonName should not be used (it has been deprecated for 25+ years,
+	// but Sectigo CA still requires it to be filled out and not overlap SANs...)
+	if csr.Subject.CommonName != "" {
+		nameSet = append(nameSet, csr.Subject.CommonName)
+	}
 	nameSet = append(nameSet, csr.DNSNames...)
 	nameSet = append(nameSet, csr.EmailAddresses...)
 	for _, v := range csr.IPAddresses {

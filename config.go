@@ -562,7 +562,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			}
 		}
 
-		csr, err := cfg.generateCSR(privKey, []string{name})
+		csr, err := cfg.generateCSR(privKey, []string{name}, false)
 		if err != nil {
 			return err
 		}
@@ -584,7 +584,19 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 				}
 			}
 
-			issuedCert, err = issuer.Issue(ctx, csr)
+			// TODO: ZeroSSL's API currently requires CommonName to be set, and requires it be
+			// distinct from SANs. If this was a cert it would violate the BRs, but their certs
+			// are compliant, so their CSR requirements just needlessly add friction, complexity,
+			// and inefficiency for clients. CommonName has been deprecated for 25+ years.
+			useCSR := csr
+			if _, ok := issuer.(*ZeroSSLIssuer); ok {
+				useCSR, err = cfg.generateCSR(privKey, []string{name}, true)
+				if err != nil {
+					return err
+				}
+			}
+
+			issuedCert, err = issuer.Issue(ctx, useCSR)
 			if err == nil {
 				issuerUsed = issuer
 				break
@@ -808,7 +820,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			}
 		}
 
-		csr, err := cfg.generateCSR(privateKey, []string{name})
+		csr, err := cfg.generateCSR(privateKey, []string{name}, false)
 		if err != nil {
 			return err
 		}
@@ -818,6 +830,18 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		var issuerUsed Issuer
 		var issuerKeys []string
 		for _, issuer := range cfg.Issuers {
+			// TODO: ZeroSSL's API currently requires CommonName to be set, and requires it be
+			// distinct from SANs. If this was a cert it would violate the BRs, but their certs
+			// are compliant, so their CSR requirements just needlessly add friction, complexity,
+			// and inefficiency for clients. CommonName has been deprecated for 25+ years.
+			useCSR := csr
+			if _, ok := issuer.(*ZeroSSLIssuer); ok {
+				useCSR, err = cfg.generateCSR(privateKey, []string{name}, true)
+				if err != nil {
+					return err
+				}
+			}
+
 			issuerKeys = append(issuerKeys, issuer.IssuerKey())
 			if prechecker, ok := issuer.(PreChecker); ok {
 				err = prechecker.PreCheck(ctx, []string{name}, interactive)
@@ -826,7 +850,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 				}
 			}
 
-			issuedCert, err = issuer.Issue(ctx, csr)
+			issuedCert, err = issuer.Issue(ctx, useCSR)
 			if err == nil {
 				issuerUsed = issuer
 				break
@@ -898,10 +922,16 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 	return err
 }
 
-func (cfg *Config) generateCSR(privateKey crypto.PrivateKey, sans []string) (*x509.CertificateRequest, error) {
+// generateCSR generates a CSR for the given SANs. If useCN is true, CommonName will get the first SAN (TODO: this is only a temporary hack for ZeroSSL API support).
+func (cfg *Config) generateCSR(privateKey crypto.PrivateKey, sans []string, useCN bool) (*x509.CertificateRequest, error) {
 	csrTemplate := new(x509.CertificateRequest)
 
 	for _, name := range sans {
+		// TODO: This is a temporary hack to support ZeroSSL API...
+		if useCN && csrTemplate.Subject.CommonName == "" && len(name) <= 64 {
+			csrTemplate.Subject.CommonName = name
+			continue
+		}
 		if ip := net.ParseIP(name); ip != nil {
 			csrTemplate.IPAddresses = append(csrTemplate.IPAddresses, ip)
 		} else if strings.Contains(name, "@") {

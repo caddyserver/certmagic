@@ -42,14 +42,13 @@ func NewZeroSSLIssuer(cfg *Config, template ZeroSSLIssuer) *ZeroSSLIssuer {
 }
 
 // ZeroSSLIssuer can get certificates from ZeroSSL's API. (To use ZeroSSL's ACME
-// endpoint, use the ACMEIssuer instead.)
+// endpoint, use the ACMEIssuer instead.) Note that use of the API is restricted
+// by payment tier.
 type ZeroSSLIssuer struct {
 	// The API key (or "access key") for using the ZeroSSL API.
 	APIKey string
 
 	// How many days the certificate should be valid for.
-	// Note that customizing certificate lifetime may be
-	// a paid feature.
 	ValidityDays int
 
 	// The host to bind to when opening a listener for
