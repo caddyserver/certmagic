@@ -130,6 +130,7 @@ func expiresAt(cert *x509.Certificate) time.Time {
 //
 // This method is safe for concurrent use.
 func (cfg *Config) CacheManagedCertificate(ctx context.Context, domain string) (Certificate, error) {
+	domain = cfg.transformSubject(ctx, nil, domain)
 	cert, err := cfg.loadManagedCertificate(ctx, domain)
 	if err != nil {
 		return cert, err

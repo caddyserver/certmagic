@@ -136,8 +136,16 @@ type Config struct {
 	// storage is properly configured and has sufficient
 	// space, you can disable this check to reduce I/O
 	// if that is expensive for you.
-	// EXPERIMENTAL: Option subject to change or removal.
+	// EXPERIMENTAL: Subject to change or removal.
 	DisableStorageCheck bool
+
+	// SubjectTransformer is a hook that can transform the
+	// subject (SAN) of a certificate being loaded or issued.
+	// For example, a common use case is to replace the
+	// left-most label with an asterisk (*) to become a
+	// wildcard certificate.
+	// EXPERIMENTAL: Subject to change or removal.
+	SubjectTransformer func(ctx context.Context, domain string) string
 
 	// Set a logger to enable logging. If not set,
 	// a default logger will be created.
@@ -485,6 +493,10 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 		return fmt.Errorf("no issuers configured; impossible to obtain or check for existing certificate in storage")
 	}
 
+	log := cfg.Logger.Named("obtain")
+
+	name = cfg.transformSubject(ctx, log, name)
+
 	// if storage has all resources for this certificate, obtain is a no-op
 	if cfg.storageHasCertResourcesAnyIssuer(ctx, name) {
 		return nil
@@ -496,8 +508,6 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 	if err != nil {
 		return fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
 	}
-
-	log := cfg.Logger.Named("obtain")
 
 	log.Info("acquiring lock", zap.String("identifier", name))
 
@@ -736,14 +746,16 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		return fmt.Errorf("no issuers configured; impossible to renew or check existing certificate in storage")
 	}
 
+	log := cfg.Logger.Named("renew")
+
+	name = cfg.transformSubject(ctx, log, name)
+
 	// ensure storage is writeable and readable
 	// TODO: this is not necessary every time; should only perform check once every so often for each storage, which may require some global state...
 	err := cfg.checkStorage(ctx)
 	if err != nil {
 		return fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
 	}
-
-	log := cfg.Logger.Named("renew")
 
 	log.Info("acquiring lock", zap.String("identifier", name))
 
@@ -1081,6 +1093,19 @@ func (cfg *Config) getChallengeInfo(ctx context.Context, identifier string) (Cha
 	}
 
 	return Challenge{Challenge: chalInfo}, true, nil
+}
+
+func (cfg *Config) transformSubject(ctx context.Context, logger *zap.Logger, name string) string {
+	if cfg.SubjectTransformer == nil {
+		return name
+	}
+	transformedName := cfg.SubjectTransformer(ctx, name)
+	if logger != nil && transformedName != name {
+		logger.Debug("transformed subject name",
+			zap.String("original", name),
+			zap.String("transformed", transformedName))
+	}
+	return transformedName
 }
 
 // checkStorage tests the storage by writing random bytes
