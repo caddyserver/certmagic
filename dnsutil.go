@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"go.uber.org/zap"
 )
 
 // Code in this file adapted from go-acme/lego, July 2020:
@@ -19,19 +20,21 @@ import (
 
 // findZoneByFQDN determines the zone apex for the given fqdn by recursing
 // up the domain labels until the nameserver returns a SOA record in the
-// answer section.
-func findZoneByFQDN(fqdn string, nameservers []string) (string, error) {
+// answer section. The logger must be non-nil.
+func findZoneByFQDN(logger *zap.Logger, fqdn string, nameservers []string) (string, error) {
 	if !strings.HasSuffix(fqdn, ".") {
 		fqdn += "."
 	}
-	soa, err := lookupSoaByFqdn(fqdn, nameservers)
+	soa, err := lookupSoaByFqdn(logger, fqdn, nameservers)
 	if err != nil {
 		return "", err
 	}
 	return soa.zone, nil
 }
 
-func lookupSoaByFqdn(fqdn string, nameservers []string) (*soaCacheEntry, error) {
+func lookupSoaByFqdn(logger *zap.Logger, fqdn string, nameservers []string) (*soaCacheEntry, error) {
+	logger = logger.Named("soa_lookup")
+
 	if !strings.HasSuffix(fqdn, ".") {
 		fqdn += "."
 	}
@@ -41,10 +44,11 @@ func lookupSoaByFqdn(fqdn string, nameservers []string) (*soaCacheEntry, error) 
 
 	// prefer cached version if fresh
 	if ent := fqdnSOACache[fqdn]; ent != nil && !ent.isExpired() {
+		logger.Debug("using cached SOA result", zap.String("entry", ent.zone))
 		return ent, nil
 	}
 
-	ent, err := fetchSoaByFqdn(fqdn, nameservers)
+	ent, err := fetchSoaByFqdn(logger, fqdn, nameservers)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +66,7 @@ func lookupSoaByFqdn(fqdn string, nameservers []string) (*soaCacheEntry, error) 
 	return ent, nil
 }
 
-func fetchSoaByFqdn(fqdn string, nameservers []string) (*soaCacheEntry, error) {
+func fetchSoaByFqdn(logger *zap.Logger, fqdn string, nameservers []string) (*soaCacheEntry, error) {
 	var err error
 	var in *dns.Msg
 
@@ -77,6 +81,7 @@ func fetchSoaByFqdn(fqdn string, nameservers []string) (*soaCacheEntry, error) {
 		if in == nil {
 			continue
 		}
+		logger.Debug("fetched SOA", zap.String("msg", in.String()))
 
 		switch in.Rcode {
 		case dns.RcodeSuccess:
@@ -211,7 +216,9 @@ func populateNameserverPorts(servers []string) {
 }
 
 // checkDNSPropagation checks if the expected record has been propagated to all authoritative nameservers.
-func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, checkAuthoritativeServers bool, resolvers []string) (bool, error) {
+func checkDNSPropagation(logger *zap.Logger, fqdn string, recType uint16, expectedValue string, checkAuthoritativeServers bool, resolvers []string) (bool, error) {
+	logger = logger.Named("propagation")
+
 	if !strings.HasSuffix(fqdn, ".") {
 		fqdn += "."
 	}
@@ -230,13 +237,14 @@ func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, chec
 	}
 
 	if checkAuthoritativeServers {
-		authoritativeServers, err := lookupNameservers(fqdn, resolvers)
+		authoritativeServers, err := lookupNameservers(logger, fqdn, resolvers)
 		if err != nil {
 			return false, fmt.Errorf("looking up authoritative nameservers: %v", err)
 		}
 		populateNameserverPorts(authoritativeServers)
 		resolvers = authoritativeServers
 	}
+	logger.Debug("checking authoritative nameservers", zap.Strings("resolvers", resolvers))
 
 	return checkAuthoritativeNss(fqdn, recType, expectedValue, resolvers)
 }
@@ -285,10 +293,10 @@ func checkAuthoritativeNss(fqdn string, recType uint16, expectedValue string, na
 }
 
 // lookupNameservers returns the authoritative nameservers for the given fqdn.
-func lookupNameservers(fqdn string, resolvers []string) ([]string, error) {
+func lookupNameservers(logger *zap.Logger, fqdn string, resolvers []string) ([]string, error) {
 	var authoritativeNss []string
 
-	zone, err := findZoneByFQDN(fqdn, resolvers)
+	zone, err := findZoneByFQDN(logger, fqdn, resolvers)
 	if err != nil {
 		return nil, fmt.Errorf("could not determine the zone for '%s': %w", fqdn, err)
 	}
