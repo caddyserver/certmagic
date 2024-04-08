@@ -210,42 +210,43 @@ func populateNameserverPorts(servers []string) {
 	}
 }
 
-// checkDNSPropagation checks if the expected TXT record has been propagated.
-// If checkAuthoritativeServers is true, the authoritative nameservers are checked directly,
-// otherwise only the given resolvers are checked.
-func checkDNSPropagation(fqdn, value string, resolvers []string, checkAuthoritativeServers bool) (bool, error) {
+// checkDNSPropagation checks if the expected record has been propagated to all authoritative nameservers.
+func checkDNSPropagation(fqdn string, recType uint16, expectedValue string, checkAuthoritativeServers bool, resolvers []string) (bool, error) {
 	if !strings.HasSuffix(fqdn, ".") {
 		fqdn += "."
 	}
 
-	// Initial attempt to resolve at the recursive NS
-	r, err := dnsQuery(fqdn, dns.TypeTXT, resolvers, true)
-	if err != nil {
-		return false, err
-	}
-
-	if r.Rcode == dns.RcodeSuccess {
-		fqdn = updateDomainWithCName(r, fqdn)
+	// Initial attempt to resolve at the recursive NS - but do not actually
+	// dereference (follow) a CNAME record if we are targeting a CNAME record
+	// itself
+	if recType != dns.TypeCNAME {
+		r, err := dnsQuery(fqdn, recType, resolvers, true)
+		if err != nil {
+			return false, fmt.Errorf("CNAME dns query: %v", err)
+		}
+		if r.Rcode == dns.RcodeSuccess {
+			fqdn = updateDomainWithCName(r, fqdn)
+		}
 	}
 
 	if checkAuthoritativeServers {
 		authoritativeServers, err := lookupNameservers(fqdn, resolvers)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("looking up authoritative nameservers: %v", err)
 		}
 		populateNameserverPorts(authoritativeServers)
 		resolvers = authoritativeServers
 	}
 
-	return checkNameservers(fqdn, value, resolvers)
+	return checkAuthoritativeNss(fqdn, recType, expectedValue, resolvers)
 }
 
-// checkNameservers checks if any of the given nameservers has the expected TXT record.
-func checkNameservers(fqdn, value string, nameservers []string) (bool, error) {
+// checkAuthoritativeNss queries each of the given nameservers for the expected record.
+func checkAuthoritativeNss(fqdn string, recType uint16, expectedValue string, nameservers []string) (bool, error) {
 	for _, ns := range nameservers {
-		r, err := dnsQuery(fqdn, dns.TypeTXT, []string{ns}, true)
+		r, err := dnsQuery(fqdn, recType, []string{ns}, true)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("querying authoritative nameservers: %v", err)
 		}
 
 		if r.Rcode != dns.RcodeSuccess {
@@ -259,11 +260,23 @@ func checkNameservers(fqdn, value string, nameservers []string) (bool, error) {
 		}
 
 		for _, rr := range r.Answer {
-			if txt, ok := rr.(*dns.TXT); ok {
-				record := strings.Join(txt.Txt, "")
-				if record == value {
-					return true, nil
+			switch recType {
+			case dns.TypeTXT:
+				if txt, ok := rr.(*dns.TXT); ok {
+					record := strings.Join(txt.Txt, "")
+					if record == expectedValue {
+						return true, nil
+					}
 				}
+			case dns.TypeCNAME:
+				if cname, ok := rr.(*dns.CNAME); ok {
+					// TODO: whether a DNS provider assumes a trailing dot or not varies, and we may have to standardize this in libdns packages
+					if strings.TrimSuffix(cname.Target, ".") == strings.TrimSuffix(expectedValue, ".") {
+						return true, nil
+					}
+				}
+			default:
+				return false, fmt.Errorf("unsupported record type: %d", recType)
 			}
 		}
 	}
@@ -277,12 +290,12 @@ func lookupNameservers(fqdn string, resolvers []string) ([]string, error) {
 
 	zone, err := findZoneByFQDN(fqdn, resolvers)
 	if err != nil {
-		return nil, fmt.Errorf("could not determine the zone: %w", err)
+		return nil, fmt.Errorf("could not determine the zone for '%s': %w", fqdn, err)
 	}
 
 	r, err := dnsQuery(zone, dns.TypeNS, resolvers, true)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("querying NS resolver for zone '%s' recursively: %v", zone, err)
 	}
 
 	for _, rr := range r.Answer {

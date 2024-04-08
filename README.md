@@ -60,13 +60,16 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 		- [Advanced use](#advanced-use)
 	- [Wildcard Certificates](#wildcard-certificates)
 	- [Behind a load balancer (or in a cluster)](#behind-a-load-balancer-or-in-a-cluster)
-	- [The ACME Challenges](#the-acme-challenges)
-		- [HTTP Challenge](#http-challenge)
-		- [TLS-ALPN Challenge](#tls-alpn-challenge)
-		- [DNS Challenge](#dns-challenge)
-	- [On-Demand TLS](#on-demand-tls)
-	- [Storage](#storage)
-	- [Cache](#cache)
+- [The ACME Challenges](#the-acme-challenges)
+	- [HTTP Challenge](#http-challenge)
+	- [TLS-ALPN Challenge](#tls-alpn-challenge)
+	- [DNS Challenge](#dns-challenge)
+- [On-Demand TLS](#on-demand-tls)
+- [Storage](#storage)
+- [Cache](#cache)
+- [Events](#events)
+- [ZeroSSL](#zerossl)
+- [FAQ](#faq)
 - [Contributing](#contributing)
 - [Project History](#project-history)
 - [Credits and License](#credits-and-license)
@@ -402,8 +405,10 @@ To enable it, just set the `DNS01Solver` field on a `certmagic.ACMEIssuer` struc
 import "github.com/libdns/cloudflare"
 
 certmagic.DefaultACME.DNS01Solver = &certmagic.DNS01Solver{
-	DNSProvider: &cloudflare.Provider{
-		APIToken: "topsecret",
+	DNSManager: certmagic.DNSManager{
+		DNSProvider: &cloudflare.Provider{
+			APIToken: "topsecret",
+		},
 	},
 }
 ```
@@ -504,6 +509,26 @@ CertMagic emits events when possible things of interest happen. Set the [`OnEven
 	- `revoked_at`: When the certificate was revoked
 
 `OnEvent` can return an error. Some events may be aborted by returning an error. For example, returning an error from `cert_obtained` can cancel obtaining the certificate. Only return an error from `OnEvent` if you want to abort program flow.
+
+## ZeroSSL
+
+ZeroSSL has both ACME and HTTP API services for getting certificates. CertMagic works with both of them.
+
+To use ZeroSSL's ACME server, configure CertMagic with an [`ACMEIssuer`](https://pkg.go.dev/github.com/caddyserver/certmagic#ACMEIssuer) like you would with any other ACME CA (just adjust the directory URL). External Account Binding (EAB) is required for ZeroSSL. You can use the [ZeroSSL API](https://pkg.go.dev/github.com/caddyserver/zerossl) to generate one, or your account dashboard.
+
+To use ZeroSSL's API instead, use the [`ZeroSSLIssuer`](https://pkg.go.dev/github.com/caddyserver/certmagic#ZeroSSLIssuer). Here is a simple example:
+
+```go
+magic := certmagic.NewDefault()
+
+magic.Issuers = []certmagic.Issuer{
+	certmagic.NewZeroSSLIssuer(magic, certmagic.ZeroSSLIssuer{
+		APIKey: "<your ZeroSSL API key>",
+	}),
+}
+
+err := magic.ManageSync(ctx, []string{"example.com"})
+```
 
 ## FAQ
 
