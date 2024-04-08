@@ -650,7 +650,9 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			return fmt.Errorf("[%s] Obtain: saving assets: %v", name, err)
 		}
 
-		log.Info("certificate obtained successfully", zap.String("identifier", name))
+		log.Info("certificate obtained successfully",
+			zap.String("identifier", name),
+			zap.String("issuer", issuerUsed.IssuerKey()))
 
 		certKey := certRes.NamesKey()
 
@@ -907,7 +909,9 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			return fmt.Errorf("[%s] Renew: saving assets: %v", name, err)
 		}
 
-		log.Info("certificate renewed successfully", zap.String("identifier", name))
+		log.Info("certificate renewed successfully",
+			zap.String("identifier", name),
+			zap.String("issuer", issuerKey))
 
 		certKey := newCertRes.NamesKey()
 
