@@ -565,11 +565,18 @@ var DefaultACME = ACMEIssuer{
 	HTTPProxy: http.ProxyFromEnvironment,
 }
 
-// Some well-known CA endpoints available to use.
+// Some well-known CA endpoints available to use. See
+// the documentation for each service; some may require
+// External Account Binding (EAB) and possibly payment.
+// COMPATIBILITY NOTICE: These constants refer to external
+// resources and are thus subject to change or removal
+// without a major version bump.
 const (
-	LetsEncryptStagingCA    = "https://acme-staging-v02.api.letsencrypt.org/directory"
-	LetsEncryptProductionCA = "https://acme-v02.api.letsencrypt.org/directory"
-	ZeroSSLProductionCA     = "https://acme.zerossl.com/v2/DV90"
+	LetsEncryptStagingCA    = "https://acme-staging-v02.api.letsencrypt.org/directory" // https://letsencrypt.org/docs/staging-environment/
+	LetsEncryptProductionCA = "https://acme-v02.api.letsencrypt.org/directory"         // https://letsencrypt.org/getting-started/
+	ZeroSSLProductionCA     = "https://acme.zerossl.com/v2/DV90"                       // https://zerossl.com/documentation/acme/
+	GoogleTrustStagingCA    = "https://dv.acme-v02.test-api.pki.goog/directory"        // https://cloud.google.com/certificate-manager/docs/public-ca-tutorial
+	GoogleTrustProductionCA = "https://dv.acme-v02.api.pki.goog/directory"             // https://cloud.google.com/certificate-manager/docs/public-ca-tutorial
 )
 
 // prefixACME is the storage key prefix used for ACME-specific assets.
