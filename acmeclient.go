@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
-	weakrand "math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -31,10 +30,6 @@ import (
 	"github.com/mholt/acmez/acme"
 	"go.uber.org/zap"
 )
-
-func init() {
-	weakrand.Seed(time.Now().UnixNano())
-}
 
 // acmeClient holds state necessary to perform ACME operations
 // for certificate management with an ACME account. Call
