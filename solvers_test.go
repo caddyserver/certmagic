@@ -17,7 +17,7 @@ package certmagic
 import (
 	"testing"
 
-	"github.com/mholt/acmez/acme"
+	"github.com/mholt/acmez/v2/acme"
 )
 
 func Test_challengeKey(t *testing.T) {

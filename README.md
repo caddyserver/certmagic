@@ -90,7 +90,7 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 	- Exponential backoff with carefully-tuned intervals
 	- Retries with optional test/staging CA endpoint instead of production, to avoid rate limits
 - Written in Go, a language with memory-safety guarantees
-- Powered by [ACMEz](https://github.com/mholt/acmez), _the_ premier ACME client library for Go
+- Powered by [ACMEz](https://github.com/mholt/acmez/v2), _the_ premier ACME client library for Go
 - All [libdns](https://github.com/libdns) DNS providers work out-of-the-box
 - Pluggable storage backends (default: file system)
 - Pluggable key sources
@@ -566,7 +566,7 @@ We welcome your contributions! Please see our **[contributing guidelines](https:
 
 ## Project History
 
-CertMagic is the core of Caddy's advanced TLS automation code, extracted into a library. The underlying ACME client implementation is [ACMEz](https://github.com/mholt/acmez). CertMagic's code was originally a central part of Caddy even before Let's Encrypt entered public beta in 2015.
+CertMagic is the core of Caddy's advanced TLS automation code, extracted into a library. The underlying ACME client implementation is [ACMEz](https://github.com/mholt/acmez/v2). CertMagic's code was originally a central part of Caddy even before Let's Encrypt entered public beta in 2015.
 
 In the years since then, Caddy's TLS automation techniques have been widely adopted, tried and tested in production, and served millions of sites and secured trillions of connections.
 

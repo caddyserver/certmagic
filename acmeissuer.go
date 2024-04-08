@@ -28,8 +28,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mholt/acmez"
-	"github.com/mholt/acmez/acme"
+	"github.com/mholt/acmez/v2"
+	"github.com/mholt/acmez/v2/acme"
 	"go.uber.org/zap"
 )
 
@@ -68,6 +68,13 @@ type ACMEIssuer struct {
 	// An optional external account to associate
 	// with this ACME account
 	ExternalAccount *acme.EAB
+
+	// Optionally specify the validity period of
+	// the certificate(s) here as offsets from the
+	// approximate time of certificate issuance,
+	// but note that not all CAs support this
+	// (EXPERIMENTAL: Subject to change)
+	NotBefore, NotAfter time.Duration
 
 	// Disable all HTTP challenges
 	DisableHTTPChallenge bool
@@ -182,6 +189,12 @@ func NewACMEIssuer(cfg *Config, template ACMEIssuer) *ACMEIssuer {
 	}
 	if template.ExternalAccount == nil {
 		template.ExternalAccount = DefaultACME.ExternalAccount
+	}
+	if template.NotBefore != 0 {
+		template.NotBefore = DefaultACME.NotBefore
+	}
+	if template.NotAfter != 0 {
+		template.NotAfter = DefaultACME.NotAfter
 	}
 	if !template.DisableHTTPChallenge {
 		template.DisableHTTPChallenge = DefaultACME.DisableHTTPChallenge
@@ -407,10 +420,21 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 		}
 	}
 
+	params, err := acmez.OrderParametersFromCSR(client.account, csr)
+	if err != nil {
+		return nil, false, fmt.Errorf("generating order parameters from CSR: %v", err)
+	}
+	if am.NotBefore != 0 {
+		params.NotBefore = time.Now().Add(am.NotBefore)
+	}
+	if am.NotAfter != 0 {
+		params.NotAfter = time.Now().Add(am.NotAfter)
+	}
+
 	// do this in a loop because there's an error case that may necessitate a retry, but not more than once
 	var certChains []acme.Certificate
 	for i := 0; i < 2; i++ {
-		certChains, err = client.acmeClient.ObtainCertificateUsingCSR(ctx, client.account, csr)
+		certChains, err = client.acmeClient.ObtainCertificate(ctx, params)
 		if err != nil {
 			var prob acme.Problem
 			if errors.As(err, &prob) && prob.Type == acme.ProblemTypeAccountDoesNotExist {

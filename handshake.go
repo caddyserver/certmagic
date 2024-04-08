@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mholt/acmez"
+	"github.com/mholt/acmez/v2"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ocsp"
 )
