@@ -386,8 +386,8 @@ func SubjectQualifiesForCert(subj string) bool {
 
 // SubjectQualifiesForPublicCert returns true if the subject
 // name appears eligible for automagic TLS with a public
-// CA such as Let's Encrypt. For example: localhost and IP
-// addresses are not eligible because we cannot obtain certs
+// CA such as Let's Encrypt. For example: internal IP addresses
+// and localhost are not eligible because we cannot obtain certs
 // for those names with a public CA. Wildcard names are
 // allowed, as long as they conform to CABF requirements (only
 // one wildcard label, and it must be the left-most label).
@@ -395,12 +395,8 @@ func SubjectQualifiesForPublicCert(subj string) bool {
 	// must at least qualify for a certificate
 	return SubjectQualifiesForCert(subj) &&
 
-		// localhost, .localhost TLD, and .local TLD are ineligible
+		// loopback hosts and internal IPs are ineligible
 		!SubjectIsInternal(subj) &&
-
-		// cannot be an IP address (as of yet), see
-		// https://community.letsencrypt.org/t/certificate-for-static-ip/84/2?u=mholt
-		!SubjectIsIP(subj) &&
 
 		// only one wildcard label allowed, and it must be left-most, with 3+ labels
 		(!strings.Contains(subj, "*") ||
@@ -416,12 +412,55 @@ func SubjectIsIP(subj string) bool {
 }
 
 // SubjectIsInternal returns true if subj is an internal-facing
-// hostname or address.
+// hostname or address, including localhost/loopback hosts.
+// Ports are ignored, if present.
 func SubjectIsInternal(subj string) bool {
+	subj = strings.ToLower(strings.TrimSuffix(hostOnly(subj), "."))
 	return subj == "localhost" ||
 		strings.HasSuffix(subj, ".localhost") ||
 		strings.HasSuffix(subj, ".local") ||
-		strings.HasSuffix(subj, ".home.arpa")
+		strings.HasSuffix(subj, ".home.arpa") ||
+		isInternalIP(subj)
+}
+
+// isInternalIP returns true if the IP of addr
+// belongs to a private network IP range. addr
+// must only be an IP or an IP:port combination.
+func isInternalIP(addr string) bool {
+	privateNetworks := []string{
+		"127.0.0.0/8", // IPv4 loopback
+		"0.0.0.0/16",
+		"10.0.0.0/8",     // RFC1918
+		"172.16.0.0/12",  // RFC1918
+		"192.168.0.0/16", // RFC1918
+		"169.254.0.0/16", // RFC3927 link-local
+		"::1/7",          // IPv6 loopback
+		"fe80::/10",      // IPv6 link-local
+		"fc00::/7",       // IPv6 unique local addr
+	}
+	host := hostOnly(addr)
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, privateNetwork := range privateNetworks {
+		_, ipnet, _ := net.ParseCIDR(privateNetwork)
+		if ipnet.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// hostOnly returns only the host portion of hostport.
+// If there is no port or if there is an error splitting
+// the port off, the whole input string is returned.
+func hostOnly(hostport string) string {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		return hostport // OK; probably had no port to begin with
+	}
+	return host
 }
 
 // MatchWildcard returns true if subject (a candidate DNS name)

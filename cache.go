@@ -16,7 +16,7 @@ package certmagic
 
 import (
 	"fmt"
-	weakrand "math/rand" // seeded elsewhere
+	weakrand "math/rand"
 	"strings"
 	"sync"
 	"time"

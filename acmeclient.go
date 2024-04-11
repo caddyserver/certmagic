@@ -161,8 +161,8 @@ func (iss *ACMEIssuer) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if u.Scheme != "https" && !isLoopback(u.Host) && !isInternal(u.Host) {
-		return nil, fmt.Errorf("%s: insecure CA URL (HTTPS required)", caURL)
+	if u.Scheme != "https" && !SubjectIsInternal(u.Host) {
+		return nil, fmt.Errorf("%s: insecure CA URL (HTTPS required for non-internal CA)", caURL)
 	}
 
 	client := &acmez.Client{

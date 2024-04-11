@@ -522,7 +522,7 @@ To use ZeroSSL's API instead, use the [`ZeroSSLIssuer`](https://pkg.go.dev/githu
 magic := certmagic.NewDefault()
 
 magic.Issuers = []certmagic.Issuer{
-	certmagic.NewZeroSSLIssuer(magic, certmagic.ZeroSSLIssuer{
+	certmagic.ZeroSSLIssuer{
 		APIKey: "<your ZeroSSL API key>",
 	}),
 }

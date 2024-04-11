@@ -26,26 +26,17 @@ import (
 	"time"
 
 	"github.com/caddyserver/zerossl"
+	"github.com/mholt/acmez/v2"
 	"github.com/mholt/acmez/v2/acme"
 	"go.uber.org/zap"
 )
-
-// NewZeroSSLIssuer returns a ZeroSSL issuer with default values filled in
-// for empty fields in the template.
-func NewZeroSSLIssuer(cfg *Config, template ZeroSSLIssuer) *ZeroSSLIssuer {
-	if cfg == nil {
-		panic("cannot make valid ZeroSSLIssuer without an associated CertMagic config")
-	}
-	template.config = cfg
-	template.logger = defaultLogger.Named("zerossl")
-	return &template
-}
 
 // ZeroSSLIssuer can get certificates from ZeroSSL's API. (To use ZeroSSL's ACME
 // endpoint, use the ACMEIssuer instead.) Note that use of the API is restricted
 // by payment tier.
 type ZeroSSLIssuer struct {
 	// The API key (or "access key") for using the ZeroSSL API.
+	// REQUIRED.
 	APIKey string
 
 	// How many days the certificate should be valid for.
@@ -63,8 +54,13 @@ type ZeroSSLIssuer struct {
 	// validation, set this field.
 	CNAMEValidation *DNSManager
 
-	config *Config
-	logger *zap.Logger
+	// Where to store verification material temporarily.
+	// Set this on all instances in a cluster to the same
+	// value to enable distributed verification.
+	Storage Storage
+
+	// An optional (but highly recommended) logger.
+	Logger *zap.Logger
 }
 
 // Issue obtains a certificate for the given csr.
@@ -72,7 +68,12 @@ func (iss *ZeroSSLIssuer) Issue(ctx context.Context, csr *x509.CertificateReques
 	client := iss.getClient()
 
 	identifiers := namesFromCSR(csr)
-	logger := iss.logger.With(zap.Strings("identifiers", identifiers))
+
+	logger := iss.Logger
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	logger = logger.With(zap.Strings("identifiers", identifiers))
 
 	logger.Info("creating certificate")
 
@@ -134,16 +135,19 @@ func (iss *ZeroSSLIssuer) Issue(ctx context.Context, csr *x509.CertificateReques
 			}),
 		}
 
-		distSolver := distributedSolver{
-			storage:                iss.config.Storage,
-			storageKeyIssuerPrefix: "zerossl",
-			solver:                 httpVerifier,
+		var solver acmez.Solver = httpVerifier
+		if iss.Storage != nil {
+			solver = distributedSolver{
+				storage:                iss.Storage,
+				storageKeyIssuerPrefix: iss.IssuerKey(),
+				solver:                 httpVerifier,
+			}
 		}
 
-		if err = distSolver.Present(ctx, acme.Challenge{}); err != nil {
+		if err = solver.Present(ctx, acme.Challenge{}); err != nil {
 			return nil, fmt.Errorf("presenting token for verification: %v", err)
 		}
-		defer distSolver.CleanUp(ctx, acme.Challenge{})
+		defer solver.CleanUp(ctx, acme.Challenge{})
 	} else {
 		verificationMethod = zerossl.CNAMEVerification
 		logger = logger.With(zap.String("verification_method", string(verificationMethod)))
@@ -248,9 +252,7 @@ func (iss *ZeroSSLIssuer) getHTTPPort() int {
 }
 
 // IssuerKey returns the unique issuer key for ZeroSSL.
-func (iss *ZeroSSLIssuer) IssuerKey() string {
-	return "zerossl"
-}
+func (iss *ZeroSSLIssuer) IssuerKey() string { return zerosslIssuerKey }
 
 // Revoke revokes the given certificate. Only do this if there is a security or trust
 // concern with the certificate.
@@ -274,6 +276,7 @@ func (iss *ZeroSSLIssuer) Revoke(ctx context.Context, cert CertificateResource, 
 const (
 	zerosslAPIBase              = "https://" + zerossl.BaseURL + "/acme"
 	zerosslValidationPathPrefix = "/.well-known/pki-validation/"
+	zerosslIssuerKey            = "zerossl"
 )
 
 // Interface guards

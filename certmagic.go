@@ -302,52 +302,6 @@ type OnDemandConfig struct {
 	hostAllowlist map[string]struct{}
 }
 
-// isLoopback returns true if the hostname of addr looks
-// explicitly like a common local hostname. addr must only
-// be a host or a host:port combination.
-func isLoopback(addr string) bool {
-	host := hostOnly(addr)
-	return host == "localhost" ||
-		strings.Trim(host, "[]") == "::1" ||
-		strings.HasPrefix(host, "127.")
-}
-
-// isInternal returns true if the IP of addr
-// belongs to a private network IP range. addr
-// must only be an IP or an IP:port combination.
-// Loopback addresses are considered false.
-func isInternal(addr string) bool {
-	privateNetworks := []string{
-		"10.0.0.0/8",
-		"172.16.0.0/12",
-		"192.168.0.0/16",
-		"fc00::/7",
-	}
-	host := hostOnly(addr)
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	for _, privateNetwork := range privateNetworks {
-		_, ipnet, _ := net.ParseCIDR(privateNetwork)
-		if ipnet.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
-
-// hostOnly returns only the host portion of hostport.
-// If there is no port or if there is an error splitting
-// the port off, the whole input string is returned.
-func hostOnly(hostport string) string {
-	host, _, err := net.SplitHostPort(hostport)
-	if err != nil {
-		return hostport // OK; probably had no port to begin with
-	}
-	return host
-}
-
 // PreChecker is an interface that can be optionally implemented by
 // Issuers. Pre-checks are performed before each call (or batch of
 // identical calls) to Issue(), giving the issuer the option to ensure

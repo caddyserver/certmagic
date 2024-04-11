@@ -323,14 +323,32 @@ func (iss *ACMEIssuer) isAgreed() bool {
 
 // PreCheck performs a few simple checks before obtaining or
 // renewing a certificate with ACME, and returns whether this
-// batch is eligible for certificates if using Let's Encrypt.
-// It also ensures that an email address is available.
+// batch is eligible for certificates. It also ensures that an
+// email address is available if possible.
+//
+// IP certificates via ACME are defined in RFC 8738.
 func (am *ACMEIssuer) PreCheck(ctx context.Context, names []string, interactive bool) error {
-	publicCA := strings.Contains(am.CA, "api.letsencrypt.org") || strings.Contains(am.CA, "acme.zerossl.com") || strings.Contains(am.CA, "api.pki.goog")
+	publicCAsAndIPCerts := map[string]bool{ // map of public CAs to whether they support IP certificates (last updated: Q1 2024)
+		"api.letsencrypt.org": false, // https://community.letsencrypt.org/t/certificate-for-static-ip/84/2?u=mholt
+		"acme.zerossl.com":    false, // only supported via their API, not ACME endpoint
+		"api.pki.goog":        true,  // https://pki.goog/faq/#faq-IPCerts
+		"api.buypass.com":     false, // https://community.buypass.com/t/h7hm76w/buypass-support-for-rfc-8738
+		"acme.ssl.com":        false,
+	}
+	var publicCA, ipCertAllowed bool
+	for caSubstr, ipCert := range publicCAsAndIPCerts {
+		if strings.Contains(am.CA, caSubstr) {
+			publicCA, ipCertAllowed = true, ipCert
+			break
+		}
+	}
 	if publicCA {
 		for _, name := range names {
 			if !SubjectQualifiesForPublicCert(name) {
-				return fmt.Errorf("subject does not qualify for a public certificate: %s", name)
+				return fmt.Errorf("subject '%s' does not qualify for a public certificate", name)
+			}
+			if !ipCertAllowed && SubjectIsIP(name) {
+				return fmt.Errorf("subject '%s' cannot have public IP certificate from %s (if CA's policy has changed, please notify the developers in an issue)", name, am.CA)
 			}
 		}
 	}
