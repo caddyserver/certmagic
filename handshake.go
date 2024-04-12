@@ -752,16 +752,16 @@ func (cfg *Config) getCertFromAnyCertManager(ctx context.Context, hello *tls.Cli
 		return Certificate{}, nil
 	}
 
-	var upstreamCert *tls.Certificate
-
 	// try all the GetCertificate methods on external managers; use first one that returns a certificate
+	var upstreamCert *tls.Certificate
+	var err error
 	for i, certManager := range cfg.OnDemand.Managers {
-		var err error
 		upstreamCert, err = certManager.GetCertificate(ctx, hello)
 		if err != nil {
-			logger.Error("getting certificate from external certificate manager",
+			logger.Error("external certificate manager",
 				zap.String("sni", hello.ServerName),
-				zap.Int("cert_manager", i),
+				zap.String("cert_manager", fmt.Sprintf("%T", certManager)),
+				zap.Int("cert_manager_idx", i),
 				zap.Error(err))
 			continue
 		}
@@ -769,14 +769,16 @@ func (cfg *Config) getCertFromAnyCertManager(ctx context.Context, hello *tls.Cli
 			break
 		}
 	}
+	if err != nil {
+		return Certificate{}, fmt.Errorf("external certificate manager indicated that it is unable to yield certificate: %v", err)
+	}
 	if upstreamCert == nil {
 		logger.Debug("all external certificate managers yielded no certificates and no errors", zap.String("sni", hello.ServerName))
 		return Certificate{}, nil
 	}
 
 	var cert Certificate
-	err := fillCertFromLeaf(&cert, *upstreamCert)
-	if err != nil {
+	if err = fillCertFromLeaf(&cert, *upstreamCert); err != nil {
 		return Certificate{}, fmt.Errorf("external certificate manager: %s: filling cert from leaf: %v", hello.ServerName, err)
 	}
 
