@@ -16,6 +16,7 @@ package certmagic
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/mholt/acmez/v2/acme"
@@ -91,7 +92,7 @@ func solveHTTPChallenge(logger *zap.Logger, w http.ResponseWriter, r *http.Reque
 	challengeReqPath := challenge.HTTP01ResourcePath()
 	if r.URL.Path == challengeReqPath &&
 		strings.EqualFold(hostOnly(r.Host), challenge.Identifier.Value) && // mitigate DNS rebinding attacks
-		r.Method == "GET" {
+		r.Method == http.MethodGet {
 		w.Header().Add("Content-Type", "text/plain")
 		w.Write([]byte(challenge.KeyAuthorization))
 		r.Close = true
@@ -116,7 +117,94 @@ func SolveHTTPChallenge(logger *zap.Logger, w http.ResponseWriter, r *http.Reque
 // LooksLikeHTTPChallenge returns true if r looks like an ACME
 // HTTP challenge request from an ACME server.
 func LooksLikeHTTPChallenge(r *http.Request) bool {
-	return r.Method == "GET" && strings.HasPrefix(r.URL.Path, challengeBasePath)
+	return r.Method == http.MethodGet &&
+		strings.HasPrefix(r.URL.Path, acmeHTTPChallengeBasePath)
 }
 
-const challengeBasePath = "/.well-known/acme-challenge"
+// LooksLikeZeroSSLHTTPValidation returns true if the request appears to be
+// domain validation from a ZeroSSL/Sectigo CA. NOTE: This API is
+// non-standard and is subject to change.
+func LooksLikeZeroSSLHTTPValidation(r *http.Request) bool {
+	return r.Method == http.MethodGet &&
+		strings.HasPrefix(r.URL.Path, zerosslHTTPValidationBasePath)
+}
+
+// HTTPValidationHandler wraps the ZeroSSL HTTP validation handler such that
+// it can pass verification checks from ZeroSSL's API.
+//
+// If a request is not a ZeroSSL HTTP validation request, h will be invoked.
+func (iss *ZeroSSLIssuer) HTTPValidationHandler(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if iss.HandleZeroSSLHTTPValidation(w, r) {
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// HandleZeroSSLHTTPValidation is to ZeroSSL API HTTP validation requests like HandleHTTPChallenge
+// is to ACME HTTP challenge requests.
+func (iss *ZeroSSLIssuer) HandleZeroSSLHTTPValidation(w http.ResponseWriter, r *http.Request) bool {
+	if iss == nil {
+		return false
+	}
+	if !LooksLikeZeroSSLHTTPValidation(r) {
+		return false
+	}
+	return iss.distributedHTTPValidationAnswer(w, r)
+}
+
+func (iss *ZeroSSLIssuer) distributedHTTPValidationAnswer(w http.ResponseWriter, r *http.Request) bool {
+	if iss == nil {
+		return false
+	}
+	logger := iss.Logger
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	host := hostOnly(r.Host)
+	valInfo, distributed, err := iss.getDistributedValidationInfo(r.Context(), host)
+	if err != nil {
+		logger.Error("looking up info for HTTP validation",
+			zap.String("host", host),
+			zap.String("remote_addr", r.RemoteAddr),
+			zap.String("user_agent", r.Header.Get("User-Agent")),
+			zap.Error(err))
+		return false
+	}
+	return answerHTTPValidation(logger, w, r, valInfo, distributed)
+}
+
+func answerHTTPValidation(logger *zap.Logger, rw http.ResponseWriter, req *http.Request, valInfo acme.Challenge, distributed bool) bool {
+	// ensure URL matches
+	validationURL, err := url.Parse(valInfo.URL)
+	if err != nil {
+		logger.Error("got invalid URL from CA",
+			zap.String("file_validation_url", valInfo.URL),
+			zap.Error(err))
+		rw.WriteHeader(http.StatusInternalServerError)
+		return true
+	}
+	if req.URL.Path != validationURL.Path {
+		rw.WriteHeader(http.StatusNotFound)
+		return true
+	}
+
+	rw.Header().Add("Content-Type", "text/plain")
+	req.Close = true
+
+	rw.Write([]byte(valInfo.Token))
+
+	logger.Info("served HTTP validation credential",
+		zap.String("validation_path", valInfo.URL),
+		zap.String("challenge", "http-01"),
+		zap.String("remote", req.RemoteAddr),
+		zap.Bool("distributed", distributed))
+
+	return true
+}
+
+const (
+	acmeHTTPChallengeBasePath     = "/.well-known/acme-challenge"
+	zerosslHTTPValidationBasePath = "/.well-known/pki-validation/"
+)

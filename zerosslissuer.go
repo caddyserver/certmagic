@@ -17,10 +17,10 @@ package certmagic
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -68,6 +68,9 @@ func (iss *ZeroSSLIssuer) Issue(ctx context.Context, csr *x509.CertificateReques
 	client := iss.getClient()
 
 	identifiers := namesFromCSR(csr)
+	if len(identifiers) == 0 {
+		return nil, fmt.Errorf("no identifiers on CSR")
+	}
 
 	logger := iss.Logger
 	if logger == nil {
@@ -104,35 +107,7 @@ func (iss *ZeroSSLIssuer) Issue(ctx context.Context, csr *x509.CertificateReques
 
 		httpVerifier := &httpSolver{
 			address: net.JoinHostPort(iss.ListenHost, strconv.Itoa(iss.getHTTPPort())),
-			handler: http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-				if !strings.HasPrefix(req.URL.Path, zerosslValidationPathPrefix) {
-					return
-				}
-
-				validation, ok := cert.Validation.OtherMethods[req.Host]
-				if !ok {
-					rw.WriteHeader(http.StatusNotFound)
-					return
-				}
-
-				// ensure URL matches
-				validationURL, err := url.Parse(validation.FileValidationURLHTTP)
-				if err != nil {
-					logger.Error("got invalid URL from CA",
-						zap.String("file_validation_url", validation.FileValidationURLHTTP),
-						zap.Error(err))
-					rw.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-				if req.URL.Path != validationURL.Path {
-					rw.WriteHeader(http.StatusNotFound)
-					return
-				}
-
-				logger.Info("served HTTP validation file")
-
-				fmt.Fprint(rw, strings.Join(validation.FileValidationContent, "\n"))
-			}),
+			handler: iss.HTTPValidationHandler(http.NewServeMux()),
 		}
 
 		var solver acmez.Solver = httpVerifier
@@ -144,10 +119,23 @@ func (iss *ZeroSSLIssuer) Issue(ctx context.Context, csr *x509.CertificateReques
 			}
 		}
 
-		if err = solver.Present(ctx, acme.Challenge{}); err != nil {
-			return nil, fmt.Errorf("presenting token for verification: %v", err)
+		// since the distributed solver was originally designed for ACME,
+		// the API is geared around ACME challenges. ZeroSSL's HTTP validation
+		// is very similar to the HTTP challenge, but not quite compatible,
+		// so we kind of shim the ZeroSSL validation data into a Challenge
+		// object... it is not a perfect use of this type but it's pretty close
+		valInfo := cert.Validation.OtherMethods[identifiers[0]]
+		fakeChallenge := acme.Challenge{
+			Identifier: acme.Identifier{
+				Value: identifiers[0], // used for storage key
+			},
+			URL:   valInfo.FileValidationURLHTTP,
+			Token: strings.Join(cert.Validation.OtherMethods[identifiers[0]].FileValidationContent, "\n"),
 		}
-		defer solver.CleanUp(ctx, acme.Challenge{})
+		if err = solver.Present(ctx, fakeChallenge); err != nil {
+			return nil, fmt.Errorf("presenting validation file for verification: %v", err)
+		}
+		defer solver.CleanUp(ctx, fakeChallenge)
 	} else {
 		verificationMethod = zerossl.CNAMEVerification
 		logger = logger.With(zap.String("verification_method", string(verificationMethod)))
@@ -271,6 +259,32 @@ func (iss *ZeroSSLIssuer) Revoke(ctx context.Context, cert CertificateResource, 
 		return fmt.Errorf("unsupported reason: %d", reason)
 	}
 	return iss.getClient().RevokeCertificate(ctx, cert.IssuerData.(zerossl.CertificateObject).ID, r)
+}
+
+func (iss *ZeroSSLIssuer) getDistributedValidationInfo(ctx context.Context, identifier string) (acme.Challenge, bool, error) {
+	ds := distributedSolver{
+		storage:                iss.Storage,
+		storageKeyIssuerPrefix: StorageKeys.Safe(iss.IssuerKey()),
+	}
+	tokenKey := ds.challengeTokensKey(identifier)
+
+	valObjectBytes, err := iss.Storage.Load(ctx, tokenKey)
+	if err != nil {
+		return acme.Challenge{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)
+	}
+
+	if len(valObjectBytes) == 0 {
+		return acme.Challenge{}, false, fmt.Errorf("no information found to solve challenge for identifier: %s", identifier)
+	}
+
+	// since the distributed solver's API is geared around ACME challenges,
+	// we crammed the validation info into a Challenge object
+	var chal acme.Challenge
+	if err = json.Unmarshal(valObjectBytes, &chal); err != nil {
+		return acme.Challenge{}, false, fmt.Errorf("decoding HTTP validation token file %s (corrupted?): %v", tokenKey, err)
+	}
+
+	return chal, true, nil
 }
 
 const (
