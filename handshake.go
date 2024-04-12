@@ -316,13 +316,6 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 		}()
 	}
 
-	// Make sure a certificate is allowed for the given name. If not, it doesn't
-	// make sense to try loading one from storage (issue #185), getting it from a
-	// certificate manager, or obtaining one from an issuer.
-	if err := cfg.checkIfCertShouldBeObtained(ctx, name, false); err != nil {
-		return Certificate{}, fmt.Errorf("certificate is not allowed for server name %s: %w", name, err)
-	}
-
 	// If an external Manager is configured, try to get it from them.
 	// Only continue to use our own logic if it returns empty+nil.
 	externalCert, err := cfg.getCertFromAnyCertManager(ctx, hello, logger)
@@ -331,6 +324,12 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	}
 	if !externalCert.Empty() {
 		return externalCert, nil
+	}
+
+	// Make sure a certificate is allowed for the given name. If not, it doesn't make sense
+	// to try loading one from storage (issue #185) or obtaining one from an issuer.
+	if err := cfg.checkIfCertShouldBeObtained(ctx, name, false); err != nil {
+		return Certificate{}, fmt.Errorf("certificate is not allowed for server name %s: %w", name, err)
 	}
 
 	// We might be able to load or obtain a needed certificate. Load from

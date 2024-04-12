@@ -348,7 +348,9 @@ type Revoker interface {
 type Manager interface {
 	// GetCertificate returns the certificate to use to complete the handshake.
 	// Since this is called during every TLS handshake, it must be very fast and not block.
-	// Returning (nil, nil) is valid and is simply treated as a no-op.
+	// Returning (nil, nil) is valid and is simply treated as a no-op. Return (nil, nil)
+	// when the Manager has no certificate for this handshake. Return an error or a
+	// certificate only if the Manager is supposed to get a certificate for this handshake.
 	GetCertificate(context.Context, *tls.ClientHelloInfo) (*tls.Certificate, error)
 }
 
