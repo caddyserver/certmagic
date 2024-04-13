@@ -24,6 +24,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -664,6 +665,10 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 			"private_key_path": StorageKeys.SitePrivateKey(issuerKey, certKey),
 			"certificate_path": StorageKeys.SiteCert(issuerKey, certKey),
 			"metadata_path":    StorageKeys.SiteMeta(issuerKey, certKey),
+			"csr_pem": pem.EncodeToMemory(&pem.Block{
+				Type:  "CERTIFICATE REQUEST",
+				Bytes: csr.Raw,
+			}),
 		})
 
 		return nil
@@ -924,6 +929,10 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			"private_key_path": StorageKeys.SitePrivateKey(issuerKey, certKey),
 			"certificate_path": StorageKeys.SiteCert(issuerKey, certKey),
 			"metadata_path":    StorageKeys.SiteMeta(issuerKey, certKey),
+			"csr_pem": pem.EncodeToMemory(&pem.Block{
+				Type:  "CERTIFICATE REQUEST",
+				Bytes: csr.Raw,
+			}),
 		})
 
 		return nil
