@@ -92,7 +92,7 @@ func (s *FileStorage) Load(_ context.Context, key string) ([]byte, error) {
 
 // Delete deletes the value at key.
 func (s *FileStorage) Delete(_ context.Context, key string) error {
-	return os.Remove(s.Filename(key))
+	return os.RemoveAll(s.Filename(key))
 }
 
 // List returns all keys that match prefix.
