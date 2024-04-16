@@ -452,13 +452,18 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 	// do this in a loop because there's an error case that may necessitate a retry, but not more than once
 	var certChains []acme.Certificate
 	for i := 0; i < 2; i++ {
+		am.Logger.Info("using ACME account",
+			zap.String("account_id", params.Account.Location),
+			zap.Strings("account_contact", params.Account.Contact))
+
 		certChains, err = client.acmeClient.ObtainCertificate(ctx, params)
 		if err != nil {
 			var prob acme.Problem
 			if errors.As(err, &prob) && prob.Type == acme.ProblemTypeAccountDoesNotExist {
 				am.Logger.Warn("ACME account does not exist on server; attempting to recreate",
+					zap.String("account_id", client.account.Location),
 					zap.Strings("account_contact", client.account.Contact),
-					zap.String("account_location", client.account.Location),
+					zap.String("key_location", am.storageKeyUserPrivateKey(client.acmeClient.Directory, am.getEmail())),
 					zap.Object("problem", prob))
 
 				// the account we have no longer exists on the CA, so we need to create a new one;
@@ -491,6 +496,8 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 		Certificate: preferredChain.ChainPEM,
 		Metadata:    preferredChain,
 	}
+
+	am.Logger.Debug("selected certificate chain", zap.String("url", preferredChain.URL))
 
 	return ic, usingTestCA, nil
 }
