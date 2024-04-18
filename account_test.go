@@ -17,6 +17,7 @@ package certmagic
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,6 +26,131 @@ import (
 	"testing"
 	"time"
 )
+
+// memoryStorage is an in-memory storage implementation with known contents *and* fixed iteration order for List.
+type memoryStorage struct {
+	contents []memoryStorageItem
+}
+
+type memoryStorageItem struct {
+	key  string
+	data []byte
+}
+
+func (m *memoryStorage) lookup(_ context.Context, key string) *memoryStorageItem {
+	for _, item := range m.contents {
+		if item.key == key {
+			return &item
+		}
+	}
+	return nil
+}
+func (m *memoryStorage) Delete(ctx context.Context, key string) error {
+	for i, item := range m.contents {
+		if item.key == key {
+			m.contents = append(m.contents[:i], m.contents[i+1:]...)
+			return nil
+		}
+	}
+	return fs.ErrNotExist
+}
+func (m *memoryStorage) Store(ctx context.Context, key string, value []byte) error {
+	m.contents = append(m.contents, memoryStorageItem{key: key, data: value})
+	return nil
+}
+func (m *memoryStorage) Exists(ctx context.Context, key string) bool {
+	return m.lookup(ctx, key) != nil
+}
+func (m *memoryStorage) List(ctx context.Context, path string, recursive bool) ([]string, error) {
+	if recursive {
+		panic("unimplemented")
+	}
+
+	result := []string{}
+nextitem:
+	for _, item := range m.contents {
+		if !strings.HasPrefix(item.key, path+"/") {
+			continue
+		}
+		name := strings.TrimPrefix(item.key, path+"/")
+		if i := strings.Index(name, "/"); i >= 0 {
+			name = name[:i]
+		}
+
+		for _, existing := range result {
+			if existing == name {
+				continue nextitem
+			}
+		}
+		result = append(result, name)
+	}
+	return result, nil
+}
+func (m *memoryStorage) Load(ctx context.Context, key string) ([]byte, error) {
+	if item := m.lookup(ctx, key); item != nil {
+		return item.data, nil
+	}
+	return nil, fs.ErrNotExist
+}
+func (m *memoryStorage) Stat(ctx context.Context, key string) (KeyInfo, error) {
+	if item := m.lookup(ctx, key); item != nil {
+		return KeyInfo{Key: key, Size: int64(len(item.data))}, nil
+	}
+	return KeyInfo{}, fs.ErrNotExist
+}
+func (m *memoryStorage) Lock(ctx context.Context, name string) error   { panic("unimplemented") }
+func (m *memoryStorage) Unlock(ctx context.Context, name string) error { panic("unimplemented") }
+
+var _ Storage = (*memoryStorage)(nil)
+
+type recordingStorage struct {
+	Storage
+	calls []recordedCall
+}
+
+func (r *recordingStorage) Delete(ctx context.Context, key string) error {
+	r.record("Delete", key)
+	return r.Storage.Delete(ctx, key)
+}
+func (r *recordingStorage) Exists(ctx context.Context, key string) bool {
+	r.record("Exists", key)
+	return r.Storage.Exists(ctx, key)
+}
+func (r *recordingStorage) List(ctx context.Context, path string, recursive bool) ([]string, error) {
+	r.record("List", path, recursive)
+	return r.Storage.List(ctx, path, recursive)
+}
+func (r *recordingStorage) Load(ctx context.Context, key string) ([]byte, error) {
+	r.record("Load", key)
+	return r.Storage.Load(ctx, key)
+}
+func (r *recordingStorage) Lock(ctx context.Context, name string) error {
+	r.record("Lock", name)
+	return r.Storage.Lock(ctx, name)
+}
+func (r *recordingStorage) Stat(ctx context.Context, key string) (KeyInfo, error) {
+	r.record("Stat", key)
+	return r.Storage.Stat(ctx, key)
+}
+func (r *recordingStorage) Store(ctx context.Context, key string, value []byte) error {
+	r.record("Store", key)
+	return r.Storage.Store(ctx, key, value)
+}
+func (r *recordingStorage) Unlock(ctx context.Context, name string) error {
+	r.record("Unlock", name)
+	return r.Storage.Unlock(ctx, name)
+}
+
+type recordedCall struct {
+	name string
+	args []interface{}
+}
+
+func (r *recordingStorage) record(name string, args ...interface{}) {
+	r.calls = append(r.calls, recordedCall{name: name, args: args})
+}
+
+var _ Storage = (*recordingStorage)(nil)
 
 func TestNewAccount(t *testing.T) {
 	am := &ACMEIssuer{CA: dummyCA, mu: new(sync.Mutex)}
@@ -156,6 +282,116 @@ func TestGetAccountAlreadyExists(t *testing.T) {
 	// Assert emails are the same
 	if !reflect.DeepEqual(account.Contact, loadedAccount.Contact) {
 		t.Errorf("Expected contacts to be equal, but was '%s' before and '%s' after loading", account.Contact, loadedAccount.Contact)
+	}
+}
+
+func TestGetAccountAlreadyExistsSkipsBroken(t *testing.T) {
+	ctx := context.Background()
+
+	am := &ACMEIssuer{CA: dummyCA, mu: new(sync.Mutex)}
+	testConfig := &Config{
+		Issuers:   []Issuer{am},
+		Storage:   &memoryStorage{},
+		Logger:    defaultTestLogger,
+		certCache: new(Cache),
+	}
+	am.config = testConfig
+
+	email := "me@foobar.com"
+
+	// Create a "corrupted" account
+	am.config.Storage.Store(ctx, am.storageKeyUserReg(am.CA, "notmeatall@foobar.com"), []byte("this is not a valid account"))
+
+	// Create the actual account
+	account, err := am.newAccount(email)
+	if err != nil {
+		t.Fatalf("Error creating account: %v", err)
+	}
+	err = am.saveAccount(ctx, am.CA, account)
+	if err != nil {
+		t.Fatalf("Error saving account: %v", err)
+	}
+
+	// Expect to load account from disk
+	keyBytes, err := PEMEncodePrivateKey(account.PrivateKey)
+	if err != nil {
+		t.Fatalf("Error encoding private key: %v", err)
+	}
+
+	loadedAccount, err := am.GetAccount(ctx, keyBytes)
+	if err != nil {
+		t.Fatalf("Error getting account: %v", err)
+	}
+
+	// Assert keys are the same
+	if !privateKeysSame(account.PrivateKey, loadedAccount.PrivateKey) {
+		t.Error("Expected private key to be the same after loading, but it wasn't")
+	}
+
+	// Assert emails are the same
+	if !reflect.DeepEqual(account.Contact, loadedAccount.Contact) {
+		t.Errorf("Expected contacts to be equal, but was '%s' before and '%s' after loading", account.Contact, loadedAccount.Contact)
+	}
+}
+
+func TestGetAccountWithEmailAlreadyExists(t *testing.T) {
+	ctx := context.Background()
+
+	am := &ACMEIssuer{CA: dummyCA, mu: new(sync.Mutex)}
+	testConfig := &Config{
+		Issuers:   []Issuer{am},
+		Storage:   &recordingStorage{Storage: &memoryStorage{}},
+		Logger:    defaultTestLogger,
+		certCache: new(Cache),
+	}
+	am.config = testConfig
+
+	email := "me@foobar.com"
+
+	// Set up test
+	account, err := am.newAccount(email)
+	if err != nil {
+		t.Fatalf("Error creating account: %v", err)
+	}
+	err = am.saveAccount(ctx, am.CA, account)
+	if err != nil {
+		t.Fatalf("Error saving account: %v", err)
+	}
+
+	// Set the expected email:
+	am.Email = email
+	err = am.setEmail(ctx, true)
+	if err != nil {
+		t.Fatalf("setEmail error: %v", err)
+	}
+
+	// Expect to load account from disk
+	keyBytes, err := PEMEncodePrivateKey(account.PrivateKey)
+	if err != nil {
+		t.Fatalf("Error encoding private key: %v", err)
+	}
+
+	loadedAccount, err := am.GetAccount(ctx, keyBytes)
+	if err != nil {
+		t.Fatalf("Error getting account: %v", err)
+	}
+
+	// Assert keys are the same
+	if !privateKeysSame(account.PrivateKey, loadedAccount.PrivateKey) {
+		t.Error("Expected private key to be the same after loading, but it wasn't")
+	}
+
+	// Assert emails are the same
+	if !reflect.DeepEqual(account.Contact, loadedAccount.Contact) {
+		t.Errorf("Expected contacts to be equal, but was '%s' before and '%s' after loading", account.Contact, loadedAccount.Contact)
+	}
+
+	// Assert that this was found without listing all accounts
+	rs := testConfig.Storage.(*recordingStorage)
+	for _, call := range rs.calls {
+		if call.name == "List" {
+			t.Error("Unexpected List call")
+		}
 	}
 }
 
