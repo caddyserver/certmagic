@@ -88,11 +88,19 @@ func (*ACMEIssuer) newAccount(email string) (acme.Account, error) {
 // If it does not exist in storage, it will be retrieved from the ACME server and added to storage.
 // The account must already exist; it does not create a new account.
 func (am *ACMEIssuer) GetAccount(ctx context.Context, privateKeyPEM []byte) (acme.Account, error) {
-	account, err := am.loadAccountByKey(ctx, privateKeyPEM)
-	if errors.Is(err, fs.ErrNotExist) {
-		account, err = am.lookUpAccount(ctx, privateKeyPEM)
+	email := am.getEmail()
+	if email == "" {
+		account, err := am.loadAccountByKey(ctx, privateKeyPEM)
+		if err == nil || !errors.Is(err, fs.ErrNotExist) {
+			return account, err
+		}
+	} else {
+		keyBytes, err := am.config.Storage.Load(ctx, am.storageKeyUserPrivateKey(am.CA, email))
+		if err == nil && bytes.Equal(bytes.TrimSpace(keyBytes), bytes.TrimSpace(privateKeyPEM)) {
+			return am.loadAccount(ctx, am.CA, email)
+		}
 	}
-	return account, err
+	return am.lookUpAccount(ctx, privateKeyPEM)
 }
 
 // loadAccountByKey loads the account with the given private key from storage, if it exists.
