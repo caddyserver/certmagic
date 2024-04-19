@@ -190,10 +190,10 @@ func NewACMEIssuer(cfg *Config, template ACMEIssuer) *ACMEIssuer {
 	if template.ExternalAccount == nil {
 		template.ExternalAccount = DefaultACME.ExternalAccount
 	}
-	if template.NotBefore != 0 {
+	if template.NotBefore == 0 {
 		template.NotBefore = DefaultACME.NotBefore
 	}
-	if template.NotAfter != 0 {
+	if template.NotAfter == 0 {
 		template.NotAfter = DefaultACME.NotAfter
 	}
 	if !template.DisableHTTPChallenge {
