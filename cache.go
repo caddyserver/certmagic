@@ -394,18 +394,24 @@ func (certCache *Cache) AllMatchingCertificates(name string) []Certificate {
 	return certs
 }
 
+// SubjectIssuer pairs a subject name with an issuer ID/key.
+type SubjectIssuer struct {
+	Subject, IssuerKey string
+}
+
 // RemoveManaged removes managed certificates for the given subjects from the cache.
-// This effectively stops maintenance of those certificates. Optionally pass an issuer
-// key to remove only certs managed with a certain issuer.
-func (certCache *Cache) RemoveManaged(subjects []string, issuerKey string) {
+// This effectively stops maintenance of those certificates. If an IssuerKey is
+// specified alongside the subject, only certificates for that subject from the
+// specified issuer will be removed.
+func (certCache *Cache) RemoveManaged(subjects []SubjectIssuer) {
 	deleteQueue := make([]string, 0, len(subjects))
-	for _, subject := range subjects {
-		certs := certCache.getAllMatchingCerts(subject) // does NOT expand wildcards; exact matches only
+	for _, subj := range subjects {
+		certs := certCache.getAllMatchingCerts(subj.Subject) // does NOT expand wildcards; exact matches only
 		for _, cert := range certs {
 			if !cert.managed {
 				continue
 			}
-			if issuerKey == "" || cert.issuerKey == issuerKey {
+			if subj.IssuerKey == "" || cert.issuerKey == subj.IssuerKey {
 				deleteQueue = append(deleteQueue, cert.hash)
 			}
 		}
