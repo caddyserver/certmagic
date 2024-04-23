@@ -395,8 +395,9 @@ func (certCache *Cache) AllMatchingCertificates(name string) []Certificate {
 }
 
 // RemoveManaged removes managed certificates for the given subjects from the cache.
-// This effectively stops maintenance of those certificates.
-func (certCache *Cache) RemoveManaged(subjects []string) {
+// This effectively stops maintenance of those certificates. Optionally pass an issuer
+// key to remove only certs managed with a certain issuer.
+func (certCache *Cache) RemoveManaged(subjects []string, issuerKey string) {
 	deleteQueue := make([]string, 0, len(subjects))
 	for _, subject := range subjects {
 		certs := certCache.getAllMatchingCerts(subject) // does NOT expand wildcards; exact matches only
@@ -404,7 +405,9 @@ func (certCache *Cache) RemoveManaged(subjects []string) {
 			if !cert.managed {
 				continue
 			}
-			deleteQueue = append(deleteQueue, cert.hash)
+			if issuerKey == "" || cert.issuerKey == issuerKey {
+				deleteQueue = append(deleteQueue, cert.hash)
+			}
 		}
 	}
 	certCache.Remove(deleteQueue)
