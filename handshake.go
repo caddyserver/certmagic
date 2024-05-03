@@ -120,7 +120,7 @@ func (cfg *Config) getCertificateFromCache(hello *tls.ClientHelloInfo) (cert Cer
 			}
 		}
 
-		// fall back to a "default" certificate, if specified
+		// use a "default" certificate by name, if specified
 		if cfg.DefaultServerName != "" {
 			normDefault := normalizedName(cfg.DefaultServerName)
 			cert, defaulted = cfg.selectCert(hello, normDefault)
@@ -823,9 +823,12 @@ func (cfg *Config) getTLSALPNChallengeCert(clientHello *tls.ClientHelloInfo) (*t
 // getNameFromClientHello returns a normalized form of hello.ServerName.
 // If hello.ServerName is empty (i.e. client did not use SNI), then the
 // associated connection's local address is used to extract an IP address.
-func (*Config) getNameFromClientHello(hello *tls.ClientHelloInfo) string {
+func (cfg *Config) getNameFromClientHello(hello *tls.ClientHelloInfo) string {
 	if name := normalizedName(hello.ServerName); name != "" {
 		return name
+	}
+	if cfg.DefaultServerName != "" {
+		return normalizedName(cfg.DefaultServerName)
 	}
 	return localIPFromConn(hello.Conn)
 }
