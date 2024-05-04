@@ -448,6 +448,9 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 	if am.NotAfter != 0 {
 		params.NotAfter = time.Now().Add(am.NotAfter)
 	}
+	if replacing, ok := ctx.Value(ctxKeyARIReplaces).(*x509.Certificate); ok {
+		params.Replaces = replacing
+	}
 
 	// do this in a loop because there's an error case that may necessitate a retry, but not more than once
 	var certChains []acme.Certificate
@@ -630,6 +633,10 @@ const (
 
 // prefixACME is the storage key prefix used for ACME-specific assets.
 const prefixACME = "acme"
+
+type ctxKey string
+
+const ctxKeyARIReplaces = ctxKey("ari_replaces")
 
 // Interface guards
 var (

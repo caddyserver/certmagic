@@ -102,7 +102,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 	// words, our first iteration through the certificate cache does NOT
 	// perform any operations--only queues them--so that more fine-grained
 	// write locks may be obtained during the actual operations.
-	var renewQueue, reloadQueue, deleteQueue []Certificate
+	var renewQueue, reloadQueue, deleteQueue, ariQueue, ariReloadQueue []Certificate
 
 	certCache.mu.RLock()
 	for certKey, cert := range certCache.cache {
@@ -135,6 +135,29 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 			continue
 		}
 
+		// ACME-specific: see if if ACME Renewal Info (ARI) window needs refreshing
+		if cert.ari.NeedsRefresh() {
+			configs[cert.Names[0]] = cfg
+
+			// see if the stored value has been refreshed already by another instance
+			reloadARI, reloadedARI, err := cfg.storageHasNewerARI(ctx, cert)
+			if err != nil {
+				// something wrong with checking stored ARI, so we better update ARI ourselves
+				log.Warn("error while checking storage for updated ARI; updating ARI",
+					zap.Strings("identifiers", cert.Names),
+					zap.String("cert_hash", cert.hash),
+					zap.Error(err))
+				ariQueue = append(ariQueue, cert)
+			} else if reloadARI {
+				// great, storage has a newer one we can use
+				cert.ari = reloadedARI
+				ariReloadQueue = append(ariReloadQueue, cert)
+			} else {
+				// otherwise, we'll update ARI ourselves
+				ariQueue = append(ariQueue, cert)
+			}
+		}
+
 		// if time is up or expires soon, we need to try to renew it
 		if cert.NeedsRenewal(cfg) {
 			configs[cert.Names[0]] = cfg
@@ -143,14 +166,14 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 			// instance that didn't coordinate with this one; if so, just load it (this
 			// might happen if another instance already renewed it - kinda sloppy but checking disk
 			// first is a simple way to possibly drastically reduce rate limit problems)
-			storedCertExpiring, err := cfg.managedCertInStorageExpiresSoon(ctx, cert)
+			storedCertNeedsRenew, err := cfg.managedCertInStorageNeedsRenewal(ctx, cert)
 			if err != nil {
 				// hmm, weird, but not a big deal, maybe it was deleted or something
 				log.Warn("error while checking if stored certificate is also expiring soon",
 					zap.Strings("identifiers", cert.Names),
 					zap.Error(err))
-			} else if !storedCertExpiring {
-				// if the certificate is NOT expiring soon and there was no error, then we
+			} else if !storedCertNeedsRenew {
+				// if the certificate does NOT need renewal and there was no error, then we
 				// are good to just reload the certificate from storage instead of repeating
 				// a likely-unnecessary renewal procedure
 				reloadQueue = append(reloadQueue, cert)
@@ -165,6 +188,87 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 		}
 	}
 	certCache.mu.RUnlock()
+
+	// Update ARI, first by reloading any that have already been updated in storage
+	for _, cert := range ariReloadQueue {
+		certCache.mu.Lock()
+		cachedCert := certCache.cache[cert.hash]
+		cachedCert.ari = cert.ari
+		certCache.cache[cert.hash] = cachedCert
+		certCache.mu.Unlock()
+		log.Info("reloaded ARI with newer one in storage",
+			zap.Strings("identifiers", cert.Names),
+			zap.String("cert_hash", cert.hash),
+			zap.String("ari_unique_id", cert.ari.UniqueIdentifier),
+			zap.Time("renewal_time", cert.ari.SelectedTime))
+	}
+
+	// Update ARI, now for any that we need to download the update for
+nextARI:
+	for _, cert := range ariQueue {
+		thisCertLogger := log.With(
+			zap.Strings("identifiers", cert.Names),
+			zap.String("cert_hash", cert.hash),
+			zap.String("ari_unique_id", cert.ari.UniqueIdentifier),
+			zap.Time("cert_expiry", cert.Leaf.NotAfter))
+		cfg := configs[cert.Names[0]]
+		for _, iss := range cfg.Issuers {
+			if acmeIss, ok := iss.(*ACMEIssuer); ok {
+				newARI, err := acmeIss.getRenewalInfo(ctx, cert)
+				if err != nil {
+					thisCertLogger.Error("failed updating renewal info",
+						zap.String("issuer", iss.IssuerKey()),
+						zap.Error(err))
+					continue
+				}
+				// be sure we get the cert from the cache while inside a lock to avoid logical races
+				certCache.mu.Lock()
+				cachedCert := certCache.cache[cert.hash]
+				cachedCert.ari = newARI
+				certCache.cache[cert.hash] = cert
+				certCache.mu.Unlock()
+
+				// update the ARI value in storage
+				certData, err := cfg.loadStoredACMECertificateMetadata(ctx, cert)
+				if err != nil {
+					thisCertLogger.Error("failed loading stored certificate metadata",
+						zap.String("issuer", iss.IssuerKey()),
+						zap.Error(err))
+					continue
+				}
+				certData.RenewalInfo = &newARI
+				certDataBytes, err := json.Marshal(certData)
+				if err != nil {
+					thisCertLogger.Error("failed marshaling certificate ACME metadata",
+						zap.String("issuer", iss.IssuerKey()),
+						zap.Error(err))
+					continue
+				}
+				dataBytes, err := json.MarshalIndent(CertificateResource{
+					SANs:       cert.Names,
+					IssuerData: certDataBytes,
+				}, "", "\t")
+				if err != nil {
+					thisCertLogger.Error("could not re-encode certificate metadata",
+						zap.String("issuer", iss.IssuerKey()),
+						zap.Error(err))
+					continue
+				}
+				if err := cfg.Storage.Store(ctx, StorageKeys.SiteMeta(cert.issuerKey, cert.Names[0]), dataBytes); err != nil {
+					thisCertLogger.Error("could not store updated certificate metadata",
+						zap.String("issuer", iss.IssuerKey()),
+						zap.Error(err))
+					continue
+				}
+
+				thisCertLogger.Info("updated ACME renewal information",
+					zap.Time("selected_time", newARI.SelectedTime),
+					zap.Timep("next_update", newARI.RetryAfter))
+				continue nextARI
+			}
+		}
+		thisCertLogger.Warn("no ACME issuer configured for certificate or all failed; unable to update ACME renewal info")
+	}
 
 	// Reload certificates that merely need to be updated in memory
 	for _, oldCert := range reloadQueue {
@@ -388,6 +492,45 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 				zap.Error(err))
 		}
 	}
+}
+
+// storageHasNewerARI returns true if the configured storage has ARI that is newer
+// or different than that of a certificate that is already loaded, along with the
+// value from storage.
+func (cfg *Config) storageHasNewerARI(ctx context.Context, than Certificate) (bool, acme.RenewalInfo, error) {
+	storedCertData, err := cfg.loadStoredACMECertificateMetadata(ctx, than)
+	if err != nil {
+		return false, acme.RenewalInfo{}, err
+	}
+	if storedCertData.RenewalInfo != nil &&
+		(storedCertData.RenewalInfo.RetryAfter.After(*than.ari.RetryAfter) ||
+			// note that windows can move either direction! must check for equality, not before/after
+			!storedCertData.RenewalInfo.SuggestedWindow.Start.Equal(than.ari.SuggestedWindow.Start) ||
+			!storedCertData.RenewalInfo.SuggestedWindow.End.Equal(than.ari.SuggestedWindow.End)) {
+		return true, *storedCertData.RenewalInfo, nil
+	}
+	return false, acme.RenewalInfo{}, nil
+}
+
+// loadStoredACMECertificateMetadata loads the stored ACME certificate data
+// from the cert's sidecar JSON file.
+func (cfg *Config) loadStoredACMECertificateMetadata(ctx context.Context, cert Certificate) (acme.Certificate, error) {
+	metaBytes, err := cfg.Storage.Load(ctx, StorageKeys.SiteMeta(cert.issuerKey, cert.Names[0]))
+	if err != nil {
+		return acme.Certificate{}, fmt.Errorf("loading cert metadata: %w", err)
+	}
+
+	var certRes CertificateResource
+	if err = json.Unmarshal(metaBytes, &certRes); err != nil {
+		return acme.Certificate{}, fmt.Errorf("unmarshaling cert metadata: %w", err)
+	}
+
+	var acmeCert acme.Certificate
+	if err = json.Unmarshal(certRes.IssuerData, &acmeCert); err != nil {
+		return acme.Certificate{}, fmt.Errorf("unmarshaling potential ACME issuer metadata: %v", err)
+	}
+
+	return acmeCert, nil
 }
 
 // CleanStorageOptions specifies how to clean up a storage unit.

@@ -137,44 +137,21 @@ func (iss *ACMEIssuer) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 // independent of any particular ACME account. If useTestCA is true, am.TestCA
 // will be used if it is set; otherwise, the primary CA will be used.
 func (iss *ACMEIssuer) newACMEClient(useTestCA bool) (*acmez.Client, error) {
-	// ensure defaults are filled in
-	var caURL string
-	if useTestCA {
-		caURL = iss.TestCA
+	client, err := iss.newBasicACMEClient()
+	if err != nil {
+		return nil, err
 	}
-	if caURL == "" {
-		caURL = iss.CA
-	}
-	if caURL == "" {
-		caURL = DefaultACME.CA
+
+	// fill in a little more beyond a basic client
+	if useTestCA && iss.TestCA != "" {
+		client.Client.Directory = iss.TestCA
 	}
 	certObtainTimeout := iss.CertObtainTimeout
 	if certObtainTimeout == 0 {
 		certObtainTimeout = DefaultACME.CertObtainTimeout
 	}
-
-	// ensure endpoint is secure (assume HTTPS if scheme is missing)
-	if !strings.Contains(caURL, "://") {
-		caURL = "https://" + caURL
-	}
-	u, err := url.Parse(caURL)
-	if err != nil {
-		return nil, err
-	}
-	if u.Scheme != "https" && !SubjectIsInternal(u.Host) {
-		return nil, fmt.Errorf("%s: insecure CA URL (HTTPS required for non-internal CA)", caURL)
-	}
-
-	client := &acmez.Client{
-		Client: &acme.Client{
-			Directory:   caURL,
-			PollTimeout: certObtainTimeout,
-			UserAgent:   buildUAString(),
-			HTTPClient:  iss.httpClient,
-		},
-		ChallengeSolvers: make(map[string]acmez.Solver),
-	}
-	client.Logger = iss.Logger.Named("acme_client")
+	client.Client.PollTimeout = certObtainTimeout
+	client.ChallengeSolvers = make(map[string]acmez.Solver)
 
 	// configure challenges (most of the time, DNS challenge is
 	// exclusive of other ones because it is usually only used
@@ -228,6 +205,42 @@ func (iss *ACMEIssuer) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 	}
 
 	return client, nil
+}
+
+// newBasicACMEClient sets up a basically-functional ACME client that is not capable
+// of solving challenges but can provide basic interactions with the server.
+func (iss *ACMEIssuer) newBasicACMEClient() (*acmez.Client, error) {
+	caURL := iss.CA
+	if caURL == "" {
+		caURL = DefaultACME.CA
+	}
+	// ensure endpoint is secure (assume HTTPS if scheme is missing)
+	if !strings.Contains(caURL, "://") {
+		caURL = "https://" + caURL
+	}
+	u, err := url.Parse(caURL)
+	if err != nil {
+		return nil, err
+	}
+	if u.Scheme != "https" && !SubjectIsInternal(u.Host) {
+		return nil, fmt.Errorf("%s: insecure CA URL (HTTPS required for non-internal CA)", caURL)
+	}
+	return &acmez.Client{
+		Client: &acme.Client{
+			Directory:  caURL,
+			UserAgent:  buildUAString(),
+			HTTPClient: iss.httpClient,
+			Logger:     iss.Logger.Named("acme_client"),
+		},
+	}, nil
+}
+
+func (iss *ACMEIssuer) getRenewalInfo(ctx context.Context, cert Certificate) (acme.RenewalInfo, error) {
+	acmeClient, err := iss.newBasicACMEClient()
+	if err != nil {
+		return acme.RenewalInfo{}, err
+	}
+	return acmeClient.GetRenewalInfo(ctx, cert.Certificate.Leaf)
 }
 
 func (iss *ACMEIssuer) getHTTPPort() int {

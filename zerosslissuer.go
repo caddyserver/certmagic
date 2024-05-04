@@ -258,7 +258,11 @@ func (iss *ZeroSSLIssuer) Revoke(ctx context.Context, cert CertificateResource, 
 	default:
 		return fmt.Errorf("unsupported reason: %d", reason)
 	}
-	return iss.getClient().RevokeCertificate(ctx, cert.IssuerData.(zerossl.CertificateObject).ID, r)
+	var certObj zerossl.CertificateObject
+	if err := json.Unmarshal(cert.IssuerData, &certObj); err != nil {
+		return err
+	}
+	return iss.getClient().RevokeCertificate(ctx, certObj.ID, r)
 }
 
 func (iss *ZeroSSLIssuer) getDistributedValidationInfo(ctx context.Context, identifier string) (acme.Challenge, bool, error) {

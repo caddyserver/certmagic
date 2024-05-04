@@ -18,12 +18,15 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/mholt/acmez/v2/acme"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ocsp"
 )
@@ -56,6 +59,9 @@ type Certificate struct {
 
 	// The unique string identifying the issuer of this certificate.
 	issuerKey string
+
+	// ACME Renewal Information, if available
+	ari acme.RenewalInfo
 }
 
 // Empty returns true if the certificate struct is not filled out; at
@@ -67,10 +73,44 @@ func (cert Certificate) Empty() bool {
 // Hash returns a checksum of the certificate chain's DER-encoded bytes.
 func (cert Certificate) Hash() string { return cert.hash }
 
-// NeedsRenewal returns true if the certificate is
-// expiring soon (according to cfg) or has expired.
+// NeedsRenewal returns true if the certificate is expiring
+// soon (according to ARI and/or cfg) or has expired.
 func (cert Certificate) NeedsRenewal(cfg *Config) bool {
-	return currentlyInRenewalWindow(cert.Leaf.NotBefore, expiresAt(cert.Leaf), cfg.RenewalWindowRatio)
+	return certNeedsRenewal(cfg, cert.Leaf, cert.ari)
+}
+
+func certNeedsRenewal(cfg *Config, leaf *x509.Certificate, ari acme.RenewalInfo) bool {
+	// first check ARI: if it says it's time to renew, it's time to renew
+	selectedTime := ari.SelectedTime
+	if selectedTime.IsZero() &&
+		(!ari.SuggestedWindow.Start.IsZero() && !ari.SuggestedWindow.End.IsZero()) {
+		// if for some reason a random time in the window hasn't been selected yet, we
+		// can always improvise one, even if this is called multiple times; many random
+		// times isn't really any different from one :D (code borrowed from our acme package)
+		start, end := ari.SuggestedWindow.Start.Unix()+1, ari.SuggestedWindow.End.Unix()
+		selectedTime = time.Unix(rand.Int63n(end-start)+start, 0).UTC()
+	}
+	if !selectedTime.IsZero() {
+		// ARI spec recommends an algorithm that renews after the randomly-selected
+		// time OR just before it if the next waking time would be after it; this
+		// cutoff can actually be before the start of the renewal window, but the spec
+		// author says that's OK: https://github.com/aarongable/draft-acme-ari/issues/71
+		cutoff := ari.SelectedTime.Add(-cfg.certCache.options.RenewCheckInterval)
+		if time.Now().After(cutoff) {
+			return true
+		}
+
+		// according to ARI, we are not ready to renew; however, for redundancy
+		// do not rely solely on ARI calculations... give credence to the expiration
+		// date; in fact, I want to ignore ARI if we are past a "dangerously close"
+		// limit, to avoid any possibility of a bug in ARI compromising a site's
+		// uptime: we should always always always give heed to actual validity period
+		if currentlyInRenewalWindow(leaf.NotBefore, expiresAt(leaf), 9.0/10.0) {
+			return true
+		}
+	}
+	// if ARI is not available, just use expiration date as a guide
+	return currentlyInRenewalWindow(leaf.NotBefore, expiresAt(leaf), cfg.RenewalWindowRatio)
 }
 
 // Expired returns true if the certificate has expired.
@@ -85,8 +125,8 @@ func (cert Certificate) Expired() bool {
 	return time.Now().After(expiresAt(cert.Leaf))
 }
 
-// currentlyInRenewalWindow returns true if the current time is
-// within the renewal window, according to the given start/end
+// currentlyInRenewalWindow returns true if the current time is within
+// (or after) the renewal window, according to the given start/end
 // dates and the ratio of the renewal window. If true is returned,
 // the certificate being considered is due for renewal.
 func currentlyInRenewalWindow(notBefore, notAfter time.Time, renewalWindowRatio float64) bool {
@@ -154,7 +194,21 @@ func (cfg *Config) loadManagedCertificate(ctx context.Context, domain string) (C
 	}
 	cert.managed = true
 	cert.issuerKey = certRes.issuerKey
+	if ari, err := certRes.getARI(); err == nil && ari != nil {
+		cert.ari = *ari
+	}
 	return cert, nil
+}
+
+// getARI unpacks ACME Renewal Information from the issuer data, if available.
+// It is only an error if there is invalid JSON.
+func (certRes CertificateResource) getARI() (*acme.RenewalInfo, error) {
+	if len(certRes.IssuerData) == 0 {
+		return nil, nil
+	}
+	var acmeCert acme.Certificate
+	err := json.Unmarshal(certRes.IssuerData, &acmeCert)
+	return acmeCert.RenewalInfo, err
 }
 
 // CacheUnmanagedCertificatePEMFile loads a certificate for host using certFile
@@ -329,21 +383,22 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 	return nil
 }
 
-// managedCertInStorageExpiresSoon returns true if cert (being a
-// managed certificate) is expiring within RenewDurationBefore.
-// It returns false if there was an error checking the expiration
-// of the certificate as found in storage, or if the certificate
-// in storage is NOT expiring soon. A certificate that is expiring
+// managedCertInStorageNeedsRenewal returns true if cert (being a
+// managed certificate) is expiring soon (according to cfg) or if
+// ACME Renewal Information (ARI) is available and says that it is
+// time to renew (it uses existing ARI; it does not update it).
+// It returns false if there was an error, the cert is not expiring
+// soon, and ARI window is still future. A certificate that is expiring
 // soon in our cache but is not expiring soon in storage probably
 // means that another instance renewed the certificate in the
 // meantime, and it would be a good idea to simply load the cert
 // into our cache rather than repeating the renewal process again.
-func (cfg *Config) managedCertInStorageExpiresSoon(ctx context.Context, cert Certificate) (bool, error) {
+func (cfg *Config) managedCertInStorageNeedsRenewal(ctx context.Context, cert Certificate) (bool, error) {
 	certRes, err := cfg.loadCertResourceAnyIssuer(ctx, cert.Names[0])
 	if err != nil {
 		return false, err
 	}
-	_, needsRenew := cfg.managedCertNeedsRenewal(certRes)
+	_, _, needsRenew := cfg.managedCertNeedsRenewal(certRes)
 	return needsRenew, nil
 }
 
