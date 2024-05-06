@@ -52,6 +52,7 @@ type Config struct {
 	// it should be renewed; for most certificates, the
 	// global default is good, but for extremely short-
 	// lived certs, you may want to raise this to ~0.5.
+	// Ratio is remaining:total lifetime.
 	RenewalWindowRatio float64
 
 	// An optional event callback clients can set
@@ -796,7 +797,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		}
 
 		// check if renew is still needed - might have been renewed while waiting for lock
-		timeLeft, leaf, needsRenew := cfg.managedCertNeedsRenewal(certRes)
+		timeLeft, leaf, needsRenew := cfg.managedCertNeedsRenewal(certRes, false)
 		if !needsRenew {
 			if force {
 				log.Info("certificate does not need to be renewed, but renewal is being forced",
@@ -873,8 +874,17 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 				}
 			}
 
-			// the ACME client will use this to tell the server we are replacing a certificate
-			ctx = context.WithValue(ctx, ctxKeyARIReplaces, leaf)
+			// if we're renewing with the same ACME CA as before, have the ACME
+			// client tell the server we are replacing a certificate (but doing
+			// this on the wrong CA, or when the CA doesn't recognize the certID,
+			// can fail the order)
+			if acmeData, err := certRes.getACMEData(); err == nil && acmeData.CA != "" {
+				if acmeIss, ok := issuer.(*ACMEIssuer); ok {
+					if acmeIss.CA == acmeData.CA {
+						ctx = context.WithValue(ctx, ctxKeyARIReplaces, leaf)
+					}
+				}
+			}
 
 			issuedCert, err = issuer.Issue(ctx, useCSR)
 			if err == nil {
@@ -1219,7 +1229,7 @@ func (cfg *Config) lockKey(op, domainName string) string {
 // or if the process of decoding the cert and checking its expiration returned an error.
 // If there wasn't an error, the leaf cert is also returned, so it can be reused if
 // necessary, since we are parsing the PEM bundle anyway.
-func (cfg *Config) managedCertNeedsRenewal(certRes CertificateResource) (time.Duration, *x509.Certificate, bool) {
+func (cfg *Config) managedCertNeedsRenewal(certRes CertificateResource, emitLogs bool) (time.Duration, *x509.Certificate, bool) {
 	certChain, err := parseCertsFromPEMBundle(certRes.CertificatePEM)
 	if err != nil || len(certChain) == 0 {
 		return 0, nil, true
@@ -1229,7 +1239,7 @@ func (cfg *Config) managedCertNeedsRenewal(certRes CertificateResource) (time.Du
 		ari = *ariPtr
 	}
 	remaining := time.Until(expiresAt(certChain[0]))
-	return remaining, certChain[0], certNeedsRenewal(cfg, certChain[0], ari)
+	return remaining, certChain[0], certNeedsRenewal(cfg, certChain[0], ari, emitLogs)
 }
 
 func (cfg *Config) emit(ctx context.Context, eventName string, data map[string]any) error {

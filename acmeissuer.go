@@ -362,12 +362,13 @@ func (am *ACMEIssuer) Issue(ctx context.Context, csr *x509.CertificateRequest) (
 		panic("missing config pointer (must use NewACMEIssuer)")
 	}
 
-	var isRetry bool
-	if attempts, ok := ctx.Value(AttemptsCtxKey).(*int); ok {
-		isRetry = *attempts > 0
+	var attempts int
+	if attemptsPtr, ok := ctx.Value(AttemptsCtxKey).(*int); ok {
+		attempts = *attemptsPtr
 	}
+	isRetry := attempts > 0
 
-	cert, usedTestCA, err := am.doIssue(ctx, csr, isRetry)
+	cert, usedTestCA, err := am.doIssue(ctx, csr, attempts)
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +396,7 @@ func (am *ACMEIssuer) Issue(ctx context.Context, csr *x509.CertificateRequest) (
 		// other endpoint. This is more likely to happen if a user is testing with
 		// the staging CA as the main CA, then changes their configuration once they
 		// think they are ready for the production endpoint.
-		cert, _, err = am.doIssue(ctx, csr, false)
+		cert, _, err = am.doIssue(ctx, csr, 0)
 		if err != nil {
 			// succeeded with test CA but failed just now with the production CA;
 			// either we are observing differing internal states of each CA that will
@@ -423,7 +424,8 @@ func (am *ACMEIssuer) Issue(ctx context.Context, csr *x509.CertificateRequest) (
 	return cert, err
 }
 
-func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest, useTestCA bool) (*IssuedCertificate, bool, error) {
+func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest, attempts int) (*IssuedCertificate, bool, error) {
+	useTestCA := attempts > 0
 	client, err := am.newACMEClientWithAccount(ctx, useTestCA, false)
 	if err != nil {
 		return nil, false, err
@@ -448,8 +450,21 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 	if am.NotAfter != 0 {
 		params.NotAfter = time.Now().Add(am.NotAfter)
 	}
-	if replacing, ok := ctx.Value(ctxKeyARIReplaces).(*x509.Certificate); ok {
-		params.Replaces = replacing
+
+	// Notify the ACME server we are replacing a certificate (if the caller says we are),
+	// only if the following conditions are met:
+	// - The caller has set a Replaces value in the context, indicating this is a renewal.
+	// - Not using test CA. This should be obvious, but a test CA should be in a separate
+	// environment from production, and thus not have knowledge of the cert being replaced.
+	// - Not a certain attempt number. We skip setting Replaces once early on in the retries
+	// in case the reason the order is failing is only because there is a state inconsistency
+	// between client and server or some sort of bookkeeping error with regards to the certID
+	// and the server is rejecting the ARI certID. In any case, an invalid certID may cause
+	// orders to fail. So try once without setting it.
+	if !usingTestCA && attempts != 2 {
+		if replacing, ok := ctx.Value(ctxKeyARIReplaces).(*x509.Certificate); ok {
+			params.Replaces = replacing
+		}
 	}
 
 	// do this in a loop because there's an error case that may necessitate a retry, but not more than once
