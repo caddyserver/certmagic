@@ -8,7 +8,7 @@ require (
 	github.com/caddyserver/zerossl v0.1.2
 	github.com/klauspost/cpuid/v2 v2.2.7
 	github.com/libdns/libdns v0.2.2
-	github.com/mholt/acmez/v2 v2.0.1-0.20240504153930-8e7d337243f5
+	github.com/mholt/acmez/v2 v2.0.1-0.20240506200913-5a16e768dea9
 	github.com/miekg/dns v1.1.58
 	github.com/zeebo/blake3 v0.2.3
 	go.uber.org/zap v1.27.0

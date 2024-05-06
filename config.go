@@ -447,6 +447,15 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 			return err
 		}
 
+		// ensure ARI is updated before we check whether the cert needs renewing
+		// (we ignore the second return value because we already check if needs renewing anyway)
+		if cert.ari.NeedsRefresh() {
+			cert, _, err = cfg.updateARI(ctx, cert, cfg.Logger)
+			if err != nil {
+				cfg.Logger.Error("updating ARI upon managing", zap.Error(err))
+			}
+		}
+
 		// otherwise, simply renew the certificate if needed
 		if cert.NeedsRenewal(cfg) {
 			var err error
@@ -1239,7 +1248,7 @@ func (cfg *Config) managedCertNeedsRenewal(certRes CertificateResource, emitLogs
 		ari = *ariPtr
 	}
 	remaining := time.Until(expiresAt(certChain[0]))
-	return remaining, certChain[0], certNeedsRenewal(cfg, certChain[0], ari, emitLogs)
+	return remaining, certChain[0], cfg.certNeedsRenewal(certChain[0], ari, emitLogs)
 }
 
 func (cfg *Config) emit(ctx context.Context, eventName string, data map[string]any) error {

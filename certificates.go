@@ -76,7 +76,7 @@ func (cert Certificate) Hash() string { return cert.hash }
 // NeedsRenewal returns true if the certificate is expiring
 // soon (according to ARI and/or cfg) or has expired.
 func (cert Certificate) NeedsRenewal(cfg *Config) bool {
-	return certNeedsRenewal(cfg, cert.Leaf, cert.ari, true)
+	return cfg.certNeedsRenewal(cert.Leaf, cert.ari, true)
 }
 
 // certNeedsRenewal consults ACME Renewal Info (ARI) and certificate expiration to determine
@@ -86,7 +86,7 @@ func (cert Certificate) NeedsRenewal(cfg *Config) bool {
 // first call this to determine if a cert in memory needs renewal, and then right after you
 // call it again to see if the cert in storage still needs renewal -- you probably don't want
 // to log the second time for checking the cert in storage which is mainly for synchronization.
-func certNeedsRenewal(cfg *Config, leaf *x509.Certificate, ari acme.RenewalInfo, emitLogs bool) bool {
+func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo, emitLogs bool) bool {
 	expiration := expiresAt(leaf)
 
 	var logger *zap.Logger
