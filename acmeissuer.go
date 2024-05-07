@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"sort"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"github.com/mholt/acmez/v2"
 	"github.com/mholt/acmez/v2/acme"
 	"go.uber.org/zap"
+	"golang.org/x/net/publicsuffix"
 )
 
 // ACMEIssuer gets certificates using ACME. It implements the PreChecker,
@@ -273,9 +275,11 @@ func NewACMEIssuer(cfg *Config, template ACMEIssuer) *ACMEIssuer {
 			RootCAs: template.TrustedRoots,
 		}
 	}
+	jar, _ := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List}) // lol it never returns an error (as of May 2024)
 	template.httpClient = &http.Client{
 		Transport: transport,
 		Timeout:   HTTPTimeout,
+		Jar:       jar,
 	}
 
 	return &template
