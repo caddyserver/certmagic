@@ -39,6 +39,7 @@ import (
 	"crypto"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -388,7 +389,8 @@ type IssuedCertificate struct {
 	Certificate []byte
 
 	// Any extra information to serialize alongside the
-	// certificate in storage.
+	// certificate in storage. It MUST be serializable
+	// as JSON in order to be preserved.
 	Metadata any
 }
 
@@ -409,7 +411,7 @@ type CertificateResource struct {
 
 	// Any extra information associated with the certificate,
 	// usually provided by the issuer implementation.
-	IssuerData any `json:"issuer_data,omitempty"`
+	IssuerData json.RawMessage `json:"issuer_data,omitempty"`
 
 	// The unique string identifying the issuer of the
 	// certificate; internally useful for storage access.

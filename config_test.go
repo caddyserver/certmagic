@@ -15,7 +15,9 @@
 package certmagic
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"reflect"
 	"testing"
@@ -51,9 +53,9 @@ func TestSaveCertResource(t *testing.T) {
 		SANs:           []string{domain},
 		PrivateKeyPEM:  []byte(keyContents),
 		CertificatePEM: []byte(certContents),
-		IssuerData: &acme.Certificate{
+		IssuerData: mustJSON(acme.Certificate{
 			URL: "https://example.com/cert",
-		},
+		}),
 		issuerKey: am.IssuerKey(),
 	}
 
@@ -62,17 +64,22 @@ func TestSaveCertResource(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// the result of our test will be a map, since we have
-	// no choice but to decode it into an 'any' interface
-	cert.IssuerData = map[string]any{
-		"url": "https://example.com/cert",
-	}
-
 	siteData, err := testConfig.loadCertResource(ctx, am, domain)
 	if err != nil {
 		t.Fatalf("Expected no error reading site, got: %v", err)
 	}
+	siteData.IssuerData = bytes.ReplaceAll(siteData.IssuerData, []byte("\t"), []byte(""))
+	siteData.IssuerData = bytes.ReplaceAll(siteData.IssuerData, []byte("\n"), []byte(""))
+	siteData.IssuerData = bytes.ReplaceAll(siteData.IssuerData, []byte(" "), []byte(""))
 	if !reflect.DeepEqual(cert, siteData) {
-		t.Errorf("Expected '%+v' to match '%+v'", cert, siteData)
+		t.Errorf("Expected '%+v' to match '%+v'\n%s\n%s", cert.IssuerData, siteData.IssuerData, string(cert.IssuerData), string(siteData.IssuerData))
 	}
+}
+
+func mustJSON(val any) []byte {
+	result, err := json.Marshal(val)
+	if err != nil {
+		panic("marshaling JSON: " + err.Error())
+	}
+	return result
 }
