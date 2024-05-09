@@ -65,24 +65,27 @@ func (cfg *Config) GetCertificateWithContext(ctx context.Context, clientHello *t
 	ctx = context.WithValue(ctx, ClientHelloInfoCtxKey, clientHello)
 
 	// special case: serve up the certificate for a TLS-ALPN ACME challenge
-	// (https://tools.ietf.org/html/draft-ietf-acme-tls-alpn-05)
-	for _, proto := range clientHello.SupportedProtos {
-		if proto == acmez.ACMETLS1Protocol {
-			challengeCert, distributed, err := cfg.getTLSALPNChallengeCert(clientHello)
-			if err != nil {
-				cfg.Logger.Error("tls-alpn challenge",
-					zap.String("remote_addr", clientHello.Conn.RemoteAddr().String()),
-					zap.String("server_name", clientHello.ServerName),
-					zap.Error(err))
-				return nil, err
-			}
-			cfg.Logger.Info("served key authentication certificate",
+	// (https://www.rfc-editor.org/rfc/rfc8737.html)
+	// "The ACME server MUST provide an ALPN extension with the single protocol
+	// name "acme-tls/1" and an SNI extension containing only the domain name
+	// being validated during the TLS handshake."
+	if clientHello.ServerName != "" &&
+		len(clientHello.SupportedProtos) == 1 &&
+		clientHello.SupportedProtos[0] == acmez.ACMETLS1Protocol {
+		challengeCert, distributed, err := cfg.getTLSALPNChallengeCert(clientHello)
+		if err != nil {
+			cfg.Logger.Error("tls-alpn challenge",
+				zap.String("remote_addr", clientHello.Conn.RemoteAddr().String()),
 				zap.String("server_name", clientHello.ServerName),
-				zap.String("challenge", "tls-alpn-01"),
-				zap.String("remote", clientHello.Conn.RemoteAddr().String()),
-				zap.Bool("distributed", distributed))
-			return challengeCert, nil
+				zap.Error(err))
+			return nil, err
 		}
+		cfg.Logger.Info("served key authentication certificate",
+			zap.String("server_name", clientHello.ServerName),
+			zap.String("challenge", "tls-alpn-01"),
+			zap.String("remote", clientHello.Conn.RemoteAddr().String()),
+			zap.Bool("distributed", distributed))
+		return challengeCert, nil
 	}
 
 	// get the certificate and serve it up
