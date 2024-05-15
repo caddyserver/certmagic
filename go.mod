@@ -1,11 +1,11 @@
 module github.com/caddyserver/certmagic
 
-go 1.22.0
+go 1.21.0
 
 toolchain go1.22.2
 
 require (
-	github.com/caddyserver/zerossl v0.1.2
+	github.com/caddyserver/zerossl v0.1.3
 	github.com/klauspost/cpuid/v2 v2.2.7
 	github.com/libdns/libdns v0.2.2
 	github.com/mholt/acmez/v2 v2.0.1

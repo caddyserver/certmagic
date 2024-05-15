@@ -1,5 +1,5 @@
-github.com/caddyserver/zerossl v0.1.2 h1:tlEu1VzWGoqcCpivs9liKAKhfpJWYJkHEMmlxRbVAxE=
-github.com/caddyserver/zerossl v0.1.2/go.mod h1:wtiJEHbdvunr40ZzhXlnIkOB8Xj4eKtBKizCcZitJiQ=
+github.com/caddyserver/zerossl v0.1.3 h1:onS+pxp3M8HnHpN5MMbOMyNjmTheJyWRaZYwn+YTAyA=
+github.com/caddyserver/zerossl v0.1.3/go.mod h1:CxA0acn7oEGO6//4rtrRjYgEoa4MFw/XofZnrYwGqG4=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/klauspost/cpuid/v2 v2.0.12/go.mod h1:g2LTdtYhdyuGPqyWyv7qRAmj1WBqxuObKfj5c0PQa7c=
