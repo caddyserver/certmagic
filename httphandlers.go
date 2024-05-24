@@ -74,7 +74,7 @@ func (am *ACMEIssuer) distributedHTTPChallengeSolver(w http.ResponseWriter, r *h
 	host := hostOnly(r.Host)
 	chalInfo, distributed, err := am.config.getChallengeInfo(r.Context(), host)
 	if err != nil {
-		am.Logger.Error("looking up info for HTTP challenge",
+		am.Logger.Warn("looking up info for HTTP challenge",
 			zap.String("host", host),
 			zap.String("remote_addr", r.RemoteAddr),
 			zap.String("user_agent", r.Header.Get("User-Agent")),
@@ -165,7 +165,7 @@ func (iss *ZeroSSLIssuer) distributedHTTPValidationAnswer(w http.ResponseWriter,
 	host := hostOnly(r.Host)
 	valInfo, distributed, err := iss.getDistributedValidationInfo(r.Context(), host)
 	if err != nil {
-		logger.Error("looking up info for HTTP validation",
+		logger.Warn("looking up info for HTTP validation",
 			zap.String("host", host),
 			zap.String("remote_addr", r.RemoteAddr),
 			zap.String("user_agent", r.Header.Get("User-Agent")),
