@@ -39,6 +39,14 @@ type ZeroSSLIssuer struct {
 	// REQUIRED.
 	APIKey string
 
+	// Where to store verification material temporarily.
+	// All instances in a cluster should have the same
+	// Storage value to enable distributed verification.
+	// REQUIRED. (TODO: Make it optional for those not
+	// operating in a cluster. For now, it's simpler to
+	// put info in storage whether distributed or not.)
+	Storage Storage
+
 	// How many days the certificate should be valid for.
 	ValidityDays int
 
@@ -53,11 +61,6 @@ type ZeroSSLIssuer struct {
 	// To use CNAME validation instead of HTTP
 	// validation, set this field.
 	CNAMEValidation *DNSManager
-
-	// Where to store verification material temporarily.
-	// Set this on all instances in a cluster to the same
-	// value to enable distributed verification.
-	Storage Storage
 
 	// An optional (but highly recommended) logger.
 	Logger *zap.Logger
@@ -266,6 +269,10 @@ func (iss *ZeroSSLIssuer) Revoke(ctx context.Context, cert CertificateResource, 
 }
 
 func (iss *ZeroSSLIssuer) getDistributedValidationInfo(ctx context.Context, identifier string) (acme.Challenge, bool, error) {
+	if iss.Storage == nil {
+		return acme.Challenge{}, false, nil
+	}
+
 	ds := distributedSolver{
 		storage:                iss.Storage,
 		storageKeyIssuerPrefix: StorageKeys.Safe(iss.IssuerKey()),
