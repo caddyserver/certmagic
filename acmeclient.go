@@ -235,7 +235,8 @@ func (iss *ACMEIssuer) newBasicACMEClient() (*acmez.Client, error) {
 	}, nil
 }
 
-func (iss *ACMEIssuer) getRenewalInfo(ctx context.Context, cert Certificate) (acme.RenewalInfo, error) {
+// GetRenewalInfo gets the ACME Renewal Information (ARI) for the certificate.
+func (iss *ACMEIssuer) GetRenewalInfo(ctx context.Context, cert Certificate) (acme.RenewalInfo, error) {
 	acmeClient, err := iss.newBasicACMEClient()
 	if err != nil {
 		return acme.RenewalInfo{}, err
@@ -310,6 +311,15 @@ func buildUAString() string {
 		ua = UserAgent + " " + ua
 	}
 	return ua
+}
+
+// RenewalInfoGetter is a type that can get ACME Renewal Information (ARI).
+// Users of this package that wrap the ACMEIssuer or use any other issuer
+// that supports ARI will need to implement this so that CertMagic can
+// update ARI which happens outside the normal issuance flow and is thus
+// not required by the Issuer interface (a type assertion is performed).
+type RenewalInfoGetter interface {
+	GetRenewalInfo(context.Context, Certificate) (acme.RenewalInfo, error)
 }
 
 // These internal rate limits are designed to prevent accidentally
