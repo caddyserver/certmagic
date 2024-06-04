@@ -33,6 +33,7 @@ import (
 	"sync"
 
 	"github.com/mholt/acmez/v2/acme"
+	"go.uber.org/zap"
 )
 
 // getAccount either loads or creates a new account, depending on if
@@ -40,8 +41,15 @@ import (
 func (am *ACMEIssuer) getAccount(ctx context.Context, ca, email string) (acme.Account, error) {
 	acct, err := am.loadAccount(ctx, ca, email)
 	if errors.Is(err, fs.ErrNotExist) {
+		am.Logger.Info("creating new account because no account for configured email is known to us",
+			zap.String("email", email),
+			zap.String("ca", ca),
+			zap.Error(err))
 		return am.newAccount(email)
 	}
+	am.Logger.Debug("using existing ACME account because key found in storage associated with email",
+		zap.String("email", email),
+		zap.String("ca", ca))
 	return acct, err
 }
 

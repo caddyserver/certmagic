@@ -53,6 +53,7 @@ func (iss *ACMEIssuer) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 	// look up or create the ACME account
 	var account acme.Account
 	if iss.AccountKeyPEM != "" {
+		iss.Logger.Info("using configured ACME account")
 		account, err = iss.GetAccount(ctx, []byte(iss.AccountKeyPEM))
 	} else {
 		account, err = iss.getAccount(ctx, client.Directory, iss.getEmail())
@@ -63,6 +64,10 @@ func (iss *ACMEIssuer) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 
 	// register account if it is new
 	if account.Status == "" {
+		iss.Logger.Info("ACME account has empty status; registering account with ACME server",
+			zap.Strings("contact", account.Contact),
+			zap.String("location", account.Location))
+
 		if iss.NewAccountFunc != nil {
 			// obtain lock here, since NewAccountFunc calls happen concurrently and they typically read and change the issuer
 			iss.mu.Lock()
@@ -116,6 +121,9 @@ func (iss *ACMEIssuer) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 		if err != nil {
 			return nil, fmt.Errorf("registering account %v with server: %w", account.Contact, err)
 		}
+		iss.Logger.Info("new ACME account registered",
+			zap.Strings("contact", account.Contact),
+			zap.String("status", account.Status))
 
 		// persist the account to storage
 		err = iss.saveAccount(ctx, client.Directory, account)
