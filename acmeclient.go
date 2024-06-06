@@ -50,16 +50,28 @@ func (iss *ACMEIssuer) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 		return nil, err
 	}
 
-	// look up or create the ACME account
-	var account acme.Account
-	if iss.AccountKeyPEM != "" {
-		iss.Logger.Info("using configured ACME account")
-		account, err = iss.GetAccount(ctx, []byte(iss.AccountKeyPEM))
-	} else {
-		account, err = iss.getAccount(ctx, client.Directory, iss.getEmail())
+	// we try loading the account from storage before a potential
+	// lock, and 0after obtaining the lock as well, to ensure we don't
+	// repeat work done by another instance or goroutine
+	getAccount := func() (acme.Account, error) {
+		// look up or create the ACME account
+		var account acme.Account
+		if iss.AccountKeyPEM != "" {
+			iss.Logger.Info("using configured ACME account")
+			account, err = iss.GetAccount(ctx, []byte(iss.AccountKeyPEM))
+		} else {
+			account, err = iss.getAccount(ctx, client.Directory, iss.getEmail())
+		}
+		if err != nil {
+			return acme.Account{}, fmt.Errorf("getting ACME account: %v", err)
+		}
+		return account, nil
 	}
+
+	// first try getting the account
+	account, err := getAccount()
 	if err != nil {
-		return nil, fmt.Errorf("getting ACME account: %v", err)
+		return nil, err
 	}
 
 	// register account if it is new
@@ -68,67 +80,93 @@ func (iss *ACMEIssuer) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 			zap.Strings("contact", account.Contact),
 			zap.String("location", account.Location))
 
-		if iss.NewAccountFunc != nil {
-			// obtain lock here, since NewAccountFunc calls happen concurrently and they typically read and change the issuer
-			iss.mu.Lock()
-			account, err = iss.NewAccountFunc(ctx, iss, account)
-			iss.mu.Unlock()
-			if err != nil {
-				return nil, fmt.Errorf("account pre-registration callback: %v", err)
+		// synchronize this so the account is only created once
+		acctLockKey := accountRegLockKey(account)
+		err = iss.config.Storage.Lock(ctx, acctLockKey)
+		if err != nil {
+			return nil, fmt.Errorf("locking account registration: %v", err)
+		}
+		defer func() {
+			if err := iss.config.Storage.Unlock(ctx, acctLockKey); err != nil {
+				iss.Logger.Error("failed to unlock account registration lock", zap.Error(err))
 			}
+		}()
+
+		// if we're not the only one waiting for this account, then by this point it should already be registered and in storage; reload it
+		account, err = getAccount()
+		if err != nil {
+			return nil, err
 		}
 
-		// agree to terms
-		if interactive {
-			if !iss.isAgreed() {
-				var termsURL string
-				dir, err := client.GetDirectory(ctx)
+		// if we are the only or first one waiting for this account, then proceed to register it while we have the lock
+		if account.Status == "" {
+			if iss.NewAccountFunc != nil {
+				// obtain lock here, since NewAccountFunc calls happen concurrently and they typically read and change the issuer
+				iss.mu.Lock()
+				account, err = iss.NewAccountFunc(ctx, iss, account)
+				iss.mu.Unlock()
 				if err != nil {
-					return nil, fmt.Errorf("getting directory: %w", err)
+					return nil, fmt.Errorf("account pre-registration callback: %v", err)
 				}
-				if dir.Meta != nil {
-					termsURL = dir.Meta.TermsOfService
-				}
-				if termsURL != "" {
-					agreed := iss.askUserAgreement(termsURL)
-					if !agreed {
-						return nil, fmt.Errorf("user must agree to CA terms")
+			}
+
+			// agree to terms
+			if interactive {
+				if !iss.isAgreed() {
+					var termsURL string
+					dir, err := client.GetDirectory(ctx)
+					if err != nil {
+						return nil, fmt.Errorf("getting directory: %w", err)
 					}
-					iss.mu.Lock()
-					iss.agreed = agreed
-					iss.mu.Unlock()
+					if dir.Meta != nil {
+						termsURL = dir.Meta.TermsOfService
+					}
+					if termsURL != "" {
+						agreed := iss.askUserAgreement(termsURL)
+						if !agreed {
+							return nil, fmt.Errorf("user must agree to CA terms")
+						}
+						iss.mu.Lock()
+						iss.agreed = agreed
+						iss.mu.Unlock()
+					}
 				}
+			} else {
+				// can't prompt a user who isn't there; they should
+				// have reviewed the terms beforehand
+				iss.mu.Lock()
+				iss.agreed = true
+				iss.mu.Unlock()
+			}
+			account.TermsOfServiceAgreed = iss.isAgreed()
+
+			// associate account with external binding, if configured
+			if iss.ExternalAccount != nil {
+				err := account.SetExternalAccountBinding(ctx, client.Client, *iss.ExternalAccount)
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			// create account
+			account, err = client.NewAccount(ctx, account)
+			if err != nil {
+				return nil, fmt.Errorf("registering account %v with server: %w", account.Contact, err)
+			}
+			iss.Logger.Info("new ACME account registered",
+				zap.Strings("contact", account.Contact),
+				zap.String("status", account.Status))
+
+			// persist the account to storage
+			err = iss.saveAccount(ctx, client.Directory, account)
+			if err != nil {
+				return nil, fmt.Errorf("could not save account %v: %v", account.Contact, err)
 			}
 		} else {
-			// can't prompt a user who isn't there; they should
-			// have reviewed the terms beforehand
-			iss.mu.Lock()
-			iss.agreed = true
-			iss.mu.Unlock()
-		}
-		account.TermsOfServiceAgreed = iss.isAgreed()
-
-		// associate account with external binding, if configured
-		if iss.ExternalAccount != nil {
-			err := account.SetExternalAccountBinding(ctx, client.Client, *iss.ExternalAccount)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		// create account
-		account, err = client.NewAccount(ctx, account)
-		if err != nil {
-			return nil, fmt.Errorf("registering account %v with server: %w", account.Contact, err)
-		}
-		iss.Logger.Info("new ACME account registered",
-			zap.Strings("contact", account.Contact),
-			zap.String("status", account.Status))
-
-		// persist the account to storage
-		err = iss.saveAccount(ctx, client.Directory, account)
-		if err != nil {
-			return nil, fmt.Errorf("could not save account %v: %v", account.Contact, err)
+			iss.Logger.Info("account has already been registered; reloaded",
+				zap.Strings("contact", account.Contact),
+				zap.String("status", account.Status),
+				zap.String("location", account.Location))
 		}
 	}
 
