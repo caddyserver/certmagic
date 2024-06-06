@@ -415,6 +415,15 @@ func (am *ACMEIssuer) mostRecentAccountEmail(ctx context.Context, caURL string) 
 	return getPrimaryContact(account), true
 }
 
+func accountRegLockKey(acc acme.Account) string {
+	key := "register_acme_account"
+	if len(acc.Contact) == 0 {
+		return key
+	}
+	key += "_" + getPrimaryContact(acc)
+	return key
+}
+
 // getPrimaryContact returns the first contact on the account (if any)
 // without the scheme. (I guess we assume an email address.)
 func getPrimaryContact(account acme.Account) string {
