@@ -39,13 +39,16 @@ func TestFileStorageStoreLoadRace(t *testing.T) {
 	b := bytes.Repeat([]byte("b"), 4096 * 1024)
 	err = s.Store(ctx, "foo", a)
 	require.NoError(t,err)
+	done := make(chan struct{})
 	go func() {
 		err = s.Store(ctx, "foo", b)
 		require.NoError(t,err)
+		close(done)
 	}()
 	dat, err := s.Load(ctx, "foo")
 	require.NoError(t,err)
 	require.Len(t, dat, 4096 * 8)
+	<-done
 }
 
 
