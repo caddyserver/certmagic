@@ -46,7 +46,7 @@ func TestFileStorageStoreLoadRace(t *testing.T) {
 	dat, err := s.Load(ctx, "foo")
 	<-done
 	require.NoError(t, err)
-	require.Len(t, dat, 4096*8)
+	require.Len(t, dat, 4096*1024)
 }
 
 func TestFileStorageWriteLock(t *testing.T) {
