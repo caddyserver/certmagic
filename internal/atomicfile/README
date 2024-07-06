@@ -1,0 +1,11 @@
+# atomic file
+
+
+this is copied from
+
+https://github.com/containerd/containerd/blob/main/pkg%2Fatomicfile%2Ffile.go
+
+
+see
+
+https://github.com/caddyserver/certmagic/issues/296
