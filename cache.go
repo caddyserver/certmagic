@@ -151,6 +151,7 @@ func (certCache *Cache) Stop() {
 }
 
 func (certCache *Cache) Start() {
+
 	if certCache.maintainStatus == 1 {
 		return
 	}

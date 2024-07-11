@@ -91,6 +91,7 @@ func (certCache *Cache) maintainAssets(panicCount int) {
 // mode (i.e. operating in the background).
 func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 	log := certCache.logger.Named("maintenance")
+	log.Info("start to renew ManagedCertificates")
 
 	// configs will hold a map of certificate name to the config
 	// to use when managing that certificate
@@ -106,6 +107,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 
 	certCache.mu.RLock()
 	for certKey, cert := range certCache.cache {
+		log.Info("cache certKey", zap.String("cert_key", certKey))
 		if !cert.managed {
 			continue
 		}
@@ -116,7 +118,8 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 			deleteQueue = append(deleteQueue, cert)
 			continue
 		}
-
+		certName := cert.Names[0]
+		log.Info("cert name", zap.String("cert_name", certName))
 		// get the config associated with this certificate
 		cfg, err := certCache.getConfig(cert)
 		if err != nil {
@@ -137,6 +140,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 
 		// if time is up or expires soon, we need to try to renew it
 		if cert.NeedsRenewal(cfg) {
+			log.Info("need to renew cert name", zap.String("cert_name", certName))
 			configs[cert.Names[0]] = cfg
 
 			// see if the certificate in storage has already been renewed, possibly by another
@@ -153,6 +157,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 				// if the certificate is NOT expiring soon and there was no error, then we
 				// are good to just reload the certificate from storage instead of repeating
 				// a likely-unnecessary renewal procedure
+				log.Info("add cert to reloadQueue", zap.String("cert_name", certName))
 				reloadQueue = append(reloadQueue, cert)
 				continue
 			}
@@ -161,6 +166,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 			// NOTE: It is super-important to note that the TLS-ALPN challenge requires
 			// a write lock on the cache in order to complete its challenge, so it is extra
 			// vital that this renew operation does not happen inside our read lock!
+			log.Info("add cert to renewQueue", zap.String("cert_name", certName))
 			renewQueue = append(renewQueue, cert)
 		}
 	}
