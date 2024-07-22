@@ -370,9 +370,11 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 	}
 
 	for _, domainName := range domainNames {
+		domainName = normalizedName(domainName)
+
 		// if on-demand is configured, defer obtain and renew operations
 		if cfg.OnDemand != nil {
-			cfg.OnDemand.hostAllowlist[normalizedName(domainName)] = struct{}{}
+			cfg.OnDemand.hostAllowlist[domainName] = struct{}{}
 			continue
 		}
 
