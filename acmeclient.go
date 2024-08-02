@@ -51,7 +51,7 @@ func (iss *ACMEIssuer) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 	}
 
 	// we try loading the account from storage before a potential
-	// lock, and 0after obtaining the lock as well, to ensure we don't
+	// lock, and after obtaining the lock as well, to ensure we don't
 	// repeat work done by another instance or goroutine
 	getAccount := func() (acme.Account, error) {
 		// look up or create the ACME account

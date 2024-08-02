@@ -146,7 +146,7 @@ func (iss *ZeroSSLIssuer) Issue(ctx context.Context, csr *x509.CertificateReques
 		// create the CNAME record(s)
 		records := make(map[string]zoneRecord, len(cert.Validation.OtherMethods))
 		for name, verifyInfo := range cert.Validation.OtherMethods {
-			zr, err := iss.CNAMEValidation.createRecord(ctx, verifyInfo.CnameValidationP1, "CNAME", verifyInfo.CnameValidationP2)
+			zr, err := iss.CNAMEValidation.createRecord(ctx, verifyInfo.CnameValidationP1, "CNAME", verifyInfo.CnameValidationP2+".") // see issue #304
 			if err != nil {
 				return nil, fmt.Errorf("creating CNAME record: %v", err)
 			}
