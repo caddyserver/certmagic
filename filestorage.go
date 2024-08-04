@@ -27,6 +27,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/caddyserver/certmagic/internal/atomicfile"
 )
 
 // FileStorage facilitates forming file paths derived from a root
@@ -82,12 +84,30 @@ func (s *FileStorage) Store(_ context.Context, key string, value []byte) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filename, value, 0600)
+	fp, err := atomicfile.New(filename, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = fp.Write(value)
+	if err != nil {
+		// cancel the write
+		fp.Cancel()
+		return err
+	}
+	// close, thereby flushing the write
+	return fp.Close()
 }
 
 // Load retrieves the value at key.
 func (s *FileStorage) Load(_ context.Context, key string) ([]byte, error) {
-	return os.ReadFile(s.Filename(key))
+	// i believe it's possible for the read call to error but still return bytes, in event of something like a shortread?
+	// therefore, i think it's appropriate to not return any bytes to avoid downstream users of the package erroniously believing that
+	// bytes read + error is a valid response (it should not be)
+	xs, err := os.ReadFile(s.Filename(key))
+	if err != nil {
+		return nil, err
+	}
+	return xs, nil
 }
 
 // Delete deletes the value at key.
