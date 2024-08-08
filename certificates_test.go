@@ -163,6 +163,8 @@ func TestSubjectQualifiesForPublicCert(t *testing.T) {
 		{"local", true},
 		{"foo.local", false},
 		{"foo.bar.local", false},
+		{"foo.internal", false},
+		{"foo.bar.internal", false},
 		{"foo.home.arpa", false},
 		{"foo.bar.home.arpa", false},
 		{"192.168.1.3", false},
