@@ -461,7 +461,7 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 	// between client and server or some sort of bookkeeping error with regards to the certID
 	// and the server is rejecting the ARI certID. In any case, an invalid certID may cause
 	// orders to fail. So try once without setting it.
-	if !usingTestCA && attempts != 2 {
+	if !am.config.DisableARI && !usingTestCA && attempts != 2 {
 		if replacing, ok := ctx.Value(ctxKeyARIReplaces).(*x509.Certificate); ok {
 			params.Replaces = replacing
 		}

@@ -582,7 +582,7 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 	}
 
 	// Check ARI status
-	if cert.ari.NeedsRefresh() {
+	if !cfg.DisableARI && cert.ari.NeedsRefresh() {
 		// we ignore the second return value here because we go on to check renewal status below regardless
 		var err error
 		cert, _, err = cfg.updateARI(ctx, cert, logger)

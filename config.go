@@ -149,6 +149,10 @@ type Config struct {
 	// EXPERIMENTAL: Subject to change or removal.
 	SubjectTransformer func(ctx context.Context, domain string) string
 
+	// Disables both ARI fetching and the use of ARI for renewal decisions.
+	// TEMPORARY: Will likely be removed in the future.
+	DisableARI bool
+
 	// Set a logger to enable logging. If not set,
 	// a default logger will be created.
 	Logger *zap.Logger
@@ -451,7 +455,7 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 
 		// ensure ARI is updated before we check whether the cert needs renewing
 		// (we ignore the second return value because we already check if needs renewing anyway)
-		if cert.ari.NeedsRefresh() {
+		if !cfg.DisableARI && cert.ari.NeedsRefresh() {
 			cert, _, err = cfg.updateARI(ctx, cert, cfg.Logger)
 			if err != nil {
 				cfg.Logger.Error("updating ARI upon managing", zap.Error(err))
@@ -888,11 +892,13 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			// if we're renewing with the same ACME CA as before, have the ACME
 			// client tell the server we are replacing a certificate (but doing
 			// this on the wrong CA, or when the CA doesn't recognize the certID,
-			// can fail the order)
-			if acmeData, err := certRes.getACMEData(); err == nil && acmeData.CA != "" {
-				if acmeIss, ok := issuer.(*ACMEIssuer); ok {
-					if acmeIss.CA == acmeData.CA {
-						ctx = context.WithValue(ctx, ctxKeyARIReplaces, leaf)
+			// can fail the order) -- TODO: change this check to whether we're using the same ACME account, not CA
+			if !cfg.DisableARI {
+				if acmeData, err := certRes.getACMEData(); err == nil && acmeData.CA != "" {
+					if acmeIss, ok := issuer.(*ACMEIssuer); ok {
+						if acmeIss.CA == acmeData.CA {
+							ctx = context.WithValue(ctx, ctxKeyARIReplaces, leaf)
+						}
 					}
 				}
 			}
@@ -1246,8 +1252,10 @@ func (cfg *Config) managedCertNeedsRenewal(certRes CertificateResource, emitLogs
 		return 0, nil, true
 	}
 	var ari acme.RenewalInfo
-	if ariPtr, err := certRes.getARI(); err == nil && ariPtr != nil {
-		ari = *ariPtr
+	if !cfg.DisableARI {
+		if ariPtr, err := certRes.getARI(); err == nil && ariPtr != nil {
+			ari = *ariPtr
+		}
 	}
 	remaining := time.Until(expiresAt(certChain[0]))
 	return remaining, certChain[0], cfg.certNeedsRenewal(certChain[0], ari, emitLogs)

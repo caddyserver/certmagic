@@ -136,7 +136,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 		}
 
 		// ACME-specific: see if if ACME Renewal Info (ARI) window needs refreshing
-		if cert.ari.NeedsRefresh() {
+		if !cfg.DisableARI && cert.ari.NeedsRefresh() {
 			configs[cert.hash] = cfg
 			ariQueue = append(ariQueue, cert)
 		}
