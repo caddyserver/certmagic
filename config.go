@@ -990,23 +990,26 @@ func (cfg *Config) generateCSR(privateKey crypto.PrivateKey, sans []string, useC
 	csrTemplate := new(x509.CertificateRequest)
 
 	for _, name := range sans {
+		// identifiers should be converted to punycode before going into the CSR
+		// (convert IDNs to ASCII according to RFC 5280 section 7)
+		normalizedName, err := idna.ToASCII(name)
+		if err != nil {
+			return nil, fmt.Errorf("converting identifier '%s' to ASCII: %v", name, err)
+		}
+
 		// TODO: This is a temporary hack to support ZeroSSL API...
-		if useCN && csrTemplate.Subject.CommonName == "" && len(name) <= 64 {
-			csrTemplate.Subject.CommonName = name
+		if useCN && csrTemplate.Subject.CommonName == "" && len(normalizedName) <= 64 {
+			csrTemplate.Subject.CommonName = normalizedName
 			continue
 		}
-		if ip := net.ParseIP(name); ip != nil {
+
+		if ip := net.ParseIP(normalizedName); ip != nil {
 			csrTemplate.IPAddresses = append(csrTemplate.IPAddresses, ip)
-		} else if strings.Contains(name, "@") {
-			csrTemplate.EmailAddresses = append(csrTemplate.EmailAddresses, name)
-		} else if u, err := url.Parse(name); err == nil && strings.Contains(name, "/") {
+		} else if strings.Contains(normalizedName, "@") {
+			csrTemplate.EmailAddresses = append(csrTemplate.EmailAddresses, normalizedName)
+		} else if u, err := url.Parse(normalizedName); err == nil && strings.Contains(normalizedName, "/") {
 			csrTemplate.URIs = append(csrTemplate.URIs, u)
 		} else {
-			// convert IDNs to ASCII according to RFC 5280 section 7
-			normalizedName, err := idna.ToASCII(name)
-			if err != nil {
-				return nil, fmt.Errorf("converting identifier '%s' to ASCII: %v", name, err)
-			}
 			csrTemplate.DNSNames = append(csrTemplate.DNSNames, normalizedName)
 		}
 	}
@@ -1014,6 +1017,16 @@ func (cfg *Config) generateCSR(privateKey crypto.PrivateKey, sans []string, useC
 	if cfg.MustStaple {
 		csrTemplate.ExtraExtensions = append(csrTemplate.ExtraExtensions, mustStapleExtension)
 	}
+
+	// IP addresses aren't printed here because I'm too lazy to marshal them as strings, but
+	// we at least print the incoming SANs so it should be obvious what became IPs
+	cfg.Logger.Debug("created CSR",
+		zap.Strings("identifiers", sans),
+		zap.Strings("san_dns_names", csrTemplate.DNSNames),
+		zap.Strings("san_emails", csrTemplate.EmailAddresses),
+		zap.String("common_name", csrTemplate.Subject.CommonName),
+		zap.Int("extra_extensions", len(csrTemplate.ExtraExtensions)),
+	)
 
 	csrDER, err := x509.CreateCertificateRequest(rand.Reader, csrTemplate, privateKey)
 	if err != nil {
