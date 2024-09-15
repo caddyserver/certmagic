@@ -212,7 +212,7 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 					// the previous acquirer either crashed or had some sort of failure that
 					// caused them to be unable to fully acquire or retain the lock, therefore
 					// we should treat it as if the lockfile did not exist
-					Default.Logger.Sugar().Infof("[INFO][%s] %s: Empty lockfile (%v) - likely previous process crashed or storage medium failure; treating as stale", s, filename, err2)
+					Default.Logger.Sugar().Infof("[%s] %s: Empty lockfile (%v) - likely previous process crashed or storage medium failure; treating as stale", s, filename, err2)
 				}
 			} else if err2 != nil {
 				return fmt.Errorf("decoding lockfile contents: %w", err2)
