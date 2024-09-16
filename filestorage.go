@@ -309,7 +309,7 @@ func keepLockfileFresh(filename string) {
 		if err := recover(); err != nil {
 			buf := make([]byte, stackTraceBufferSize)
 			buf = buf[:runtime.Stack(buf, false)]
-			Default.Logger.Sugar().Panicf("active locking: %v\n%s", err, buf)
+			Default.Logger.Sugar().Errorf("active locking: %v\n%s", err, buf)
 		}
 	}()
 
