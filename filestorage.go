@@ -212,7 +212,7 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 					// the previous acquirer either crashed or had some sort of failure that
 					// caused them to be unable to fully acquire or retain the lock, therefore
 					// we should treat it as if the lockfile did not exist
-					Default.Logger.Sugar().Infof("[%s] %s: Empty lockfile (%v) - likely previous process crashed or storage medium failure; treating as stale", s, filename, err2)
+					defaultLogger.Sugar().Infof("[%s] %s: Empty lockfile (%v) - likely previous process crashed or storage medium failure; treating as stale", s, filename, err2)
 				}
 			} else if err2 != nil {
 				return fmt.Errorf("decoding lockfile contents: %w", err2)
@@ -234,7 +234,7 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 			// either have potential to cause infinite loops, as in caddyserver/caddy#4448,
 			// or must give up on perfect mutual exclusivity; however, these cases are rare,
 			// so we prefer the simpler solution that avoids infinite loops)
-			Default.Logger.Sugar().Infof("[%s] Lock for '%s' is stale (created: %s, last update: %s); removing then retrying: %s", s, name, meta.Created, meta.Updated, filename)
+			defaultLogger.Sugar().Infof("[%s] Lock for '%s' is stale (created: %s, last update: %s); removing then retrying: %s", s, name, meta.Created, meta.Updated, filename)
 			if err = os.Remove(filename); err != nil { // hopefully we can replace the lock file quickly!
 				if !errors.Is(err, fs.ErrNotExist) {
 					return fmt.Errorf("unable to delete stale lockfile; deadlocked: %w", err)
@@ -309,7 +309,7 @@ func keepLockfileFresh(filename string) {
 		if err := recover(); err != nil {
 			buf := make([]byte, stackTraceBufferSize)
 			buf = buf[:runtime.Stack(buf, false)]
-			Default.Logger.Sugar().Errorf("active locking: %v\n%s", err, buf)
+			defaultLogger.Sugar().Errorf("active locking: %v\n%s", err, buf)
 		}
 	}()
 
@@ -317,7 +317,7 @@ func keepLockfileFresh(filename string) {
 		time.Sleep(lockFreshnessInterval)
 		done, err := updateLockfileFreshness(filename)
 		if err != nil {
-			Default.Logger.Sugar().Errorf("Keeping lock file fresh: %v - terminating lock maintenance (lockfile: %s)", err, filename)
+			defaultLogger.Sugar().Errorf("Keeping lock file fresh: %v - terminating lock maintenance (lockfile: %s)", err, filename)
 			return
 		}
 		if done {
