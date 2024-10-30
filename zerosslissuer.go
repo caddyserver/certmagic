@@ -62,6 +62,9 @@ type ZeroSSLIssuer struct {
 	// validation, set this field.
 	CNAMEValidation *DNSManager
 
+	// Delay between poll attempts.
+	PollInterval time.Duration
+
 	// An optional (but highly recommended) logger.
 	Logger *zap.Logger
 }
@@ -203,8 +206,8 @@ func (iss *ZeroSSLIssuer) Issue(ctx context.Context, csr *x509.CertificateReques
 	}, nil
 }
 
-func (*ZeroSSLIssuer) waitForCertToBeIssued(ctx context.Context, client zerossl.Client, cert zerossl.CertificateObject) (zerossl.CertificateObject, error) {
-	ticker := time.NewTicker(5 * time.Second)
+func (iss *ZeroSSLIssuer) waitForCertToBeIssued(ctx context.Context, client zerossl.Client, cert zerossl.CertificateObject) (zerossl.CertificateObject, error) {
+	ticker := time.NewTicker(iss.pollInterval())
 	defer ticker.Stop()
 
 	for {
@@ -225,6 +228,13 @@ func (*ZeroSSLIssuer) waitForCertToBeIssued(ctx context.Context, client zerossl.
 			}
 		}
 	}
+}
+
+func (iss *ZeroSSLIssuer) pollInterval() time.Duration {
+	if iss.PollInterval == 0 {
+		return defaultPollInterval
+	}
+	return iss.PollInterval
 }
 
 func (iss *ZeroSSLIssuer) getClient() zerossl.Client {
@@ -299,9 +309,8 @@ func (iss *ZeroSSLIssuer) getDistributedValidationInfo(ctx context.Context, iden
 }
 
 const (
-	zerosslAPIBase              = "https://" + zerossl.BaseURL + "/acme"
-	zerosslValidationPathPrefix = "/.well-known/pki-validation/"
-	zerosslIssuerKey            = "zerossl"
+	zerosslIssuerKey    = "zerossl"
+	defaultPollInterval = 5 * time.Second
 )
 
 // Interface guards

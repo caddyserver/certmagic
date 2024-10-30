@@ -427,7 +427,7 @@ func (cfg *Config) storageHasNewerARI(ctx context.Context, cert Certificate) (bo
 	// or if the one in storage has a later RetryAfter (though I suppose
 	// it's not guaranteed, typically those will move forward in time)
 	if (!cert.ari.HasWindow() && storedCertData.RenewalInfo.HasWindow()) ||
-		storedCertData.RenewalInfo.RetryAfter.After(*cert.ari.RetryAfter) {
+		(cert.ari.RetryAfter == nil || storedCertData.RenewalInfo.RetryAfter.After(*cert.ari.RetryAfter)) {
 		return true, *storedCertData.RenewalInfo, nil
 	}
 	return false, acme.RenewalInfo{}, nil
