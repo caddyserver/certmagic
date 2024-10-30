@@ -309,10 +309,8 @@ func (iss *ZeroSSLIssuer) getDistributedValidationInfo(ctx context.Context, iden
 }
 
 const (
-	zerosslAPIBase              = "https://" + zerossl.BaseURL + "/acme"
-	zerosslValidationPathPrefix = "/.well-known/pki-validation/"
-	zerosslIssuerKey            = "zerossl"
-	defaultPollInterval         = 5 * time.Second
+	zerosslIssuerKey    = "zerossl"
+	defaultPollInterval = 5 * time.Second
 )
 
 // Interface guards
