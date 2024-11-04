@@ -231,9 +231,16 @@ func (cfg *Config) selectCert(hello *tls.ClientHelloInfo, name string) (Certific
 // otherwise it returns an expired certificate that the client supports,
 // otherwise it just returns the first certificate in the list of choices.
 func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificate) (Certificate, error) {
+	if len(choices) == 1 {
+		// Fast path: There's only one choice, so we would always return that one
+		// regardless of whether it is expired or not compatible.
+		return choices[0], nil
+	}
 	if len(choices) == 0 {
 		return Certificate{}, fmt.Errorf("no certificates available")
 	}
+
+	// Slow path: There are choices, so we need to check each of them.
 	now := time.Now()
 	best := choices[0]
 	for _, choice := range choices {
