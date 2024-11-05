@@ -547,14 +547,15 @@ func (s *DNSManager) getDNSPresentMemory(dnsName, recType, value string) (dnsPre
 	defer s.recordsMu.Unlock()
 
 	var memory dnsPresentMemory
+	var found bool
 	for _, mem := range s.records[dnsName] {
 		if mem.zoneRec.record.Type == recType && mem.zoneRec.record.Value == value {
 			memory = mem
+			found = true
 			break
 		}
 	}
-
-	if memory.zoneRec.record.Name == "" {
+	if !found {
 		return dnsPresentMemory{}, fmt.Errorf("no memory of presenting a DNS record for %q (usually OK if presenting also failed)", dnsName)
 	}
 
