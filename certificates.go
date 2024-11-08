@@ -193,7 +193,7 @@ func (cert Certificate) Lifetime() time.Duration {
 	if cert.Leaf == nil || cert.Leaf.NotAfter.IsZero() {
 		return 0
 	}
-	return cert.Leaf.NotAfter.Sub(expiresAt(cert.Leaf))
+	return expiresAt(cert.Leaf).Sub(cert.Leaf.NotBefore)
 }
 
 // currentlyInRenewalWindow returns true if the current time is within
