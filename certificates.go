@@ -338,12 +338,7 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls
 	}
 	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
 	if err != nil {
-		// If the certificate's lifetime is less than a week, then
-		// it's a short-validity cert and we can ignore not having
-		// OCSP. Revocation of short certs is mostly pointless.
-		if cert.Lifetime() > 7*24*time.Hour {
-			cfg.Logger.Warn("stapling OCSP", zap.Error(err))
-		}
+		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
 	}
 	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names})
 	cert.Tags = tags
@@ -392,12 +387,7 @@ func (cfg Config) makeCertificateWithOCSP(ctx context.Context, certPEMBlock, key
 	}
 	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
 	if err != nil {
-		// If the certificate's lifetime is less than a week, then
-		// it's a short-validity cert and we can ignore not having
-		// OCSP. Revocation of short certs is mostly pointless.
-		if cert.Lifetime() > 7*24*time.Hour {
-			cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
-		}
+		cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
 	}
 	return cert, nil
 }
