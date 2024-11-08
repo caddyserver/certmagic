@@ -568,12 +568,17 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 
 		err := stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
 		if err != nil {
-			// An error with OCSP stapling is not the end of the world, and in fact, is
-			// quite common considering not all certs have issuer URLs that support it.
-			logger.Warn("stapling OCSP",
-				zap.String("server_name", hello.ServerName),
-				zap.Strings("sans", cert.Names),
-				zap.Error(err))
+			// If the certificate's lifetime is less than a week, then
+			// it's a short-validity cert and we can ignore not having
+			// OCSP. Revocation of short certs is mostly pointless.
+			if cert.Lifetime() > 7*24*time.Hour {
+				// An error with OCSP stapling is not the end of the world, and in fact, is
+				// quite common considering not all certs have issuer URLs that support it.
+				logger.Warn("stapling OCSP",
+					zap.String("server_name", hello.ServerName),
+					zap.Strings("sans", cert.Names),
+					zap.Error(err))
+			}
 		} else {
 			logger.Debug("successfully stapled new OCSP response",
 				zap.Strings("identifiers", cert.Names),
