@@ -98,7 +98,7 @@ func stapleOCSP(ctx context.Context, ocspConfig OCSPConfig, storage Storage, cer
 		if ocspErr != nil {
 			// For short-lived certificates, this is fine and we can ignore
 			// logging because OCSP doesn't make much sense for them anyway.
-			if cert.Lifetime() > 7*24*time.Hour {
+			if cert.Lifetime() < 7*24*time.Hour {
 				return nil
 			}
 			// There's nothing else we can do to get OCSP for this certificate,
