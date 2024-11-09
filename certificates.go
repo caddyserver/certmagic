@@ -188,6 +188,14 @@ func (cert Certificate) Expired() bool {
 	return time.Now().After(expiresAt(cert.Leaf))
 }
 
+// Lifetime returns the duration of the certificate's validity.
+func (cert Certificate) Lifetime() time.Duration {
+	if cert.Leaf == nil || cert.Leaf.NotAfter.IsZero() {
+		return 0
+	}
+	return expiresAt(cert.Leaf).Sub(cert.Leaf.NotBefore)
+}
+
 // currentlyInRenewalWindow returns true if the current time is within
 // (or after) the renewal window, according to the given start/end
 // dates and the ratio of the renewal window. If true is returned,
