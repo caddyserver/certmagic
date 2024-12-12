@@ -874,7 +874,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			// are compliant, so their CSR requirements just needlessly add friction, complexity,
 			// and inefficiency for clients. CommonName has been deprecated for 25+ years.
 			useCSR := csr
-			if _, ok := issuer.(*ZeroSSLIssuer); ok {
+			if issuer.IssuerKey() == "zerossl" {
 				useCSR, err = cfg.generateCSR(privateKey, []string{name}, true)
 				if err != nil {
 					return err
