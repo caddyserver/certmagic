@@ -6,14 +6,15 @@ toolchain go1.22.2
 
 require (
 	github.com/caddyserver/zerossl v0.1.3
-	github.com/klauspost/cpuid/v2 v2.2.8
+	github.com/klauspost/cpuid/v2 v2.2.9
 	github.com/libdns/libdns v0.2.2
-	github.com/mholt/acmez/v2 v2.0.3
+	github.com/mholt/acmez/v3 v3.0.0
 	github.com/miekg/dns v1.1.62
 	github.com/zeebo/blake3 v0.2.4
 	go.uber.org/zap v1.27.0
+	go.uber.org/zap/exp v0.3.0
 	golang.org/x/crypto v0.31.0
-	golang.org/x/net v0.29.0
+	golang.org/x/net v0.33.0
 )
 
 require (

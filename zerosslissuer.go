@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/caddyserver/zerossl"
-	"github.com/mholt/acmez/v2"
-	"github.com/mholt/acmez/v2/acme"
+	"github.com/mholt/acmez/v3"
+	"github.com/mholt/acmez/v3/acme"
 	"go.uber.org/zap"
 )
 
