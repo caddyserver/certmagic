@@ -278,7 +278,7 @@ func (iss *ACMEIssuer) newBasicACMEClient() (*acmez.Client, error) {
 			Directory:  caURL,
 			UserAgent:  buildUAString(),
 			HTTPClient: iss.httpClient,
-			Logger:     slog.New(zapslog.NewHandler(iss.Logger.Named("acme_client").Core(), nil)),
+			Logger:     slog.New(zapslog.NewHandler(iss.Logger.Named("acme_client").Core())),
 		},
 	}, nil
 }

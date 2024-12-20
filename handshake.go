@@ -556,12 +556,28 @@ func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.Cli
 //
 // This function is safe for use by multiple concurrent goroutines.
 func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHelloInfo, cert Certificate) (Certificate, error) {
-	logger := cfg.Logger.Named("on_demand")
+	logger := cfg.Logger.Named("on_demand").With(
+		zap.Strings("identifiers", cert.Names),
+		zap.String("server_name", hello.ServerName))
+
+	renewIfNecessary := func(ctx context.Context, hello *tls.ClientHelloInfo, cert Certificate) (Certificate, error) {
+		if cfg.certNeedsRenewal(cert.Leaf, cert.ari, true) {
+			// Check if the certificate still exists on disk. If not, we need to obtain a new one.
+			// This can happen if the certificate was cleaned up by the storage cleaner, but still
+			// remains in the in-memory cache.
+			if !cfg.storageHasCertResourcesAnyIssuer(ctx, cert.Names[0]) {
+				logger.Debug("certificate not found on disk; obtaining new certificate")
+				return cfg.obtainOnDemandCertificate(ctx, hello)
+			}
+			// Otherwise, renew the certificate.
+			return cfg.renewDynamicCertificate(ctx, hello, cert)
+		}
+		return cert, nil
+	}
 
 	// Check OCSP staple validity
 	if cert.ocsp != nil && !freshOCSP(cert.ocsp) {
 		logger.Debug("OCSP response needs refreshing",
-			zap.Strings("identifiers", cert.Names),
 			zap.Int("ocsp_status", cert.ocsp.Status),
 			zap.Time("this_update", cert.ocsp.ThisUpdate),
 			zap.Time("next_update", cert.ocsp.NextUpdate))
@@ -570,13 +586,9 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 		if err != nil {
 			// An error with OCSP stapling is not the end of the world, and in fact, is
 			// quite common considering not all certs have issuer URLs that support it.
-			logger.Warn("stapling OCSP",
-				zap.String("server_name", hello.ServerName),
-				zap.Strings("sans", cert.Names),
-				zap.Error(err))
+			logger.Warn("stapling OCSP", zap.Error(err))
 		} else {
 			logger.Debug("successfully stapled new OCSP response",
-				zap.Strings("identifiers", cert.Names),
 				zap.Int("ocsp_status", cert.ocsp.Status),
 				zap.Time("this_update", cert.ocsp.ThisUpdate),
 				zap.Time("next_update", cert.ocsp.NextUpdate))
@@ -590,19 +602,28 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 
 	// Check ARI status
 	if !cfg.DisableARI && cert.ari.NeedsRefresh() {
-		// we ignore the second return value here because we go on to check renewal status below regardless
-		var err error
-		cert, _, err = cfg.updateARI(ctx, cert, logger)
-		if err != nil {
-			logger.Error("updated ARI", zap.Error(err))
-		}
+		// update ARI in a goroutine to avoid blocking an active handshake, since the results of
+		// this do not strictly affect the handshake; even though the cert may be updated with
+		// the new ARI, it is also updated in the cache and in storage, so future handshakes
+		// will utilize it
+		go func(ctx context.Context, hello *tls.ClientHelloInfo, cert Certificate, logger *zap.Logger) {
+			var err error
+			// we ignore the second return value here because we check renewal status below regardless
+			cert, _, err = cfg.updateARI(ctx, cert, logger)
+			if err != nil {
+				logger.Error("updating ARI", zap.Error(err))
+			}
+			_, err = renewIfNecessary(ctx, hello, cert)
+			if err != nil {
+				logger.Error("renewing certificate based on updated ARI", zap.Error(err))
+			}
+		}(ctx, hello, cert, logger)
 	}
 
 	// We attempt to replace any certificates that were revoked.
 	// Crucially, this happens OUTSIDE a lock on the certCache.
 	if certShouldBeForceRenewed(cert) {
 		logger.Warn("on-demand certificate's OCSP status is REVOKED; will try to forcefully renew",
-			zap.Strings("identifiers", cert.Names),
 			zap.Int("ocsp_status", cert.ocsp.Status),
 			zap.Time("revoked_at", cert.ocsp.RevokedAt),
 			zap.Time("this_update", cert.ocsp.ThisUpdate),
@@ -610,21 +631,8 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 		return cfg.renewDynamicCertificate(ctx, hello, cert)
 	}
 
-	// Check cert expiration
-	if cfg.certNeedsRenewal(cert.Leaf, cert.ari, true) {
-		// Check if the certificate still exists on disk. If not, we need to obtain a new one.
-		// This can happen if the certificate was cleaned up by the storage cleaner, but still
-		// remains in the in-memory cache.
-		if !cfg.storageHasCertResourcesAnyIssuer(ctx, cert.Names[0]) {
-			logger.Debug("certificate not found on disk; obtaining new certificate",
-				zap.Strings("identifiers", cert.Names))
-			return cfg.obtainOnDemandCertificate(ctx, hello)
-		}
-		// Otherwise, renew the certificate.
-		return cfg.renewDynamicCertificate(ctx, hello, cert)
-	}
-
-	return cert, nil
+	// Since renewal conditions may have changed, do a renewal if necessary
+	return renewIfNecessary(ctx, hello, cert)
 }
 
 // renewDynamicCertificate renews the certificate for name using cfg. It returns the
