@@ -145,10 +145,10 @@ func (r *recordingStorage) Unlock(ctx context.Context, name string) error {
 
 type recordedCall struct {
 	name string
-	args []interface{}
+	args []any
 }
 
-func (r *recordingStorage) record(name string, args ...interface{}) {
+func (r *recordingStorage) record(name string, args ...any) {
 	r.calls = append(r.calls, recordedCall{name: name, args: args})
 }
 
