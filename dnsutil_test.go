@@ -193,7 +193,7 @@ func TestResolveConfServers(t *testing.T) {
 			expected: []string{"10.200.3.249", "10.200.3.250:5353", "2001:4860:4860::8844", "[10.0.0.1]:5353"},
 		},
 		{
-			fixture:  "testdata/resolv.conf.nonexistant",
+			fixture:  "testdata/resolv.conf.nonexistent",
 			defaults: []string{"127.0.0.1:53"},
 			expected: []string{"127.0.0.1:53"},
 		},

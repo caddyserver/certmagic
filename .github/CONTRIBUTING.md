@@ -34,7 +34,7 @@ Here are some of the expectations we have of contributors:
 
 - **Benchmarks should be included for optimizations.** Optimizations sometimes make code harder to read or have changes that are less than obvious. They should be proven with benchmarks or profiling.
 
-- **[Squash](http://gitready.com/advanced/2009/02/10/squashing-commits-with-rebase.html) insignificant commits.** Every commit should be significant. Commits which merely rewrite a comment or fix a typo can be combined into another commit that has more substance. Interactive rebase can do this, or a simpler way is `git reset --soft <diverging-commit>` then `git commit -s`.
+- **[Squash](https://gitready.com/advanced/2009/02/10/squashing-commits-with-rebase.html) insignificant commits.** Every commit should be significant. Commits which merely rewrite a comment or fix a typo can be combined into another commit that has more substance. Interactive rebase can do this, or a simpler way is `git reset --soft <diverging-commit>` then `git commit -s`.
 
 - **Maintain your contributions.** Please help maintain your change after it is merged.
 
@@ -73,7 +73,7 @@ Please follow the issue template so we have all the needed information. Unredact
 
 Failure to fill out the issue template will probably result in the issue being closed.
 
-We suggest reading [How to Report Bugs Effectively](http://www.chiark.greenend.org.uk/~sgtatham/bugs.html).
+We suggest reading [How to Report Bugs Effectively](https://www.chiark.greenend.org.uk/~sgtatham/bugs.html).
 
 Please be kind. :smile: Remember that CertMagic comes at no cost to you, and you're getting free support when we fix your issues. If we helped you, please consider helping someone else!
 

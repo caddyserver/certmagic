@@ -108,7 +108,7 @@ func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo
 		// (notice that we don't strictly require an ARI window to also exist; we presume
 		// that if a time has been selected, a window does or did exist, even if it didn't
 		// get stored/encoded for some reason - but also: this allows administrators to
-		// manually or explicitly schedule a renewal time indepedently of ARI which could
+		// manually or explicitly schedule a renewal time independently of ARI which could
 		// be useful)
 		selectedTime := ari.SelectedTime
 
@@ -145,7 +145,7 @@ func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo
 			// possibility of a bug in ARI compromising a site's uptime: we should always always
 			// always give heed to actual validity period
 			if currentlyInRenewalWindow(leaf.NotBefore, expiration, 1.0/20.0) {
-				logger.Warn("certificate is in emergency renewal window; superceding ARI",
+				logger.Warn("certificate is in emergency renewal window; superseding ARI",
 					zap.Duration("remaining", time.Until(expiration)),
 					zap.Time("renewal_cutoff", cutoff))
 				return true
