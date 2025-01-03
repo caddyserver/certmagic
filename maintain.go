@@ -527,6 +527,7 @@ func (cfg *Config) updateARI(ctx context.Context, cert Certificate, logger *zap.
 		logger.Debug("iterating issuer for ARI update",
 			zap.String("issuer_key", iss.IssuerKey()),
 			zap.String("looking_for", cert.issuerKey),
+			zap.String("issuer_type", fmt.Sprintf("%T", iss)),
 			zap.Bool("supports_ari", ok))
 		if ok && iss.IssuerKey() == cert.issuerKey {
 			newARI, err = ariGetter.GetRenewalInfo(ctx, cert) // be sure to use existing newARI variable so we can compare against old value in the defer
