@@ -282,7 +282,7 @@ func NewACMEIssuer(cfg *Config, template ACMEIssuer) *ACMEIssuer {
 }
 
 // IssuerKey returns the unique issuer key for the
-// confgured CA endpoint.
+// configured CA endpoint.
 func (am *ACMEIssuer) IssuerKey() string {
 	return am.issuerKey(am.CA)
 }
