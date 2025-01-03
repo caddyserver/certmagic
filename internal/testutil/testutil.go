@@ -64,7 +64,7 @@ func Failnow(t testing.TB, xs string, msgs ...string) {
 	t.FailNow()
 }
 
-func ObjectsAreEqual(expected, actual interface{}) bool {
+func ObjectsAreEqual(expected, actual any) bool {
 	if expected == nil || actual == nil {
 		return expected == actual
 	}
@@ -84,7 +84,7 @@ func ObjectsAreEqual(expected, actual interface{}) bool {
 	return bytes.Equal(exp, act)
 }
 
-func ObjectsAreEqualValues(expected, actual interface{}) bool {
+func ObjectsAreEqualValues(expected, actual any) bool {
 	if ObjectsAreEqual(expected, actual) {
 		return true
 	}
