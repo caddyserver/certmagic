@@ -600,13 +600,22 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 		cfg.certCache.mu.Unlock()
 	}
 
-	// Check ARI status
-	if !cfg.DisableARI && cert.ari.NeedsRefresh() {
+	// Check ARI status, but it's only relevant if the certificate is not expired (otherwise, we already know it needs renewal!)
+	if !cfg.DisableARI && cert.ari.NeedsRefresh() && time.Now().Before(cert.Leaf.NotAfter) {
 		// update ARI in a goroutine to avoid blocking an active handshake, since the results of
 		// this do not strictly affect the handshake; even though the cert may be updated with
 		// the new ARI, it is also updated in the cache and in storage, so future handshakes
 		// will utilize it
-		go func(ctx context.Context, hello *tls.ClientHelloInfo, cert Certificate, logger *zap.Logger) {
+		go func(hello *tls.ClientHelloInfo, cert Certificate, logger *zap.Logger) {
+			// TODO: a different context that isn't tied to the handshake is probably better
+			// than a generic background context; maybe a longer-lived server config context,
+			// or something that the importing package sets on the Config struct; for example,
+			// a Caddy config context could be good, so that ARI updates will continue after
+			// the handshake goes away, but will be stopped if the underlying server is stopped
+			// (for now, use an unusual timeout to help recognize it in log patterns, if needed)
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+			defer cancel()
+
 			var err error
 			// we ignore the second return value here because we check renewal status below regardless
 			cert, _, err = cfg.updateARI(ctx, cert, logger)
@@ -617,7 +626,7 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 			if err != nil {
 				logger.Error("renewing certificate based on updated ARI", zap.Error(err))
 			}
-		}(ctx, hello, cert, logger)
+		}(hello, cert, logger)
 	}
 
 	// We attempt to replace any certificates that were revoked.
