@@ -523,8 +523,7 @@ func (cfg *Config) updateARI(ctx context.Context, cert Certificate, logger *zap.
 
 	// of the issuers configured, hopefully one of them is the ACME CA we got the cert from
 	for _, iss := range cfg.Issuers {
-		ariGetter, ok := iss.(RenewalInfoGetter)
-		if ok && iss.IssuerKey() == cert.issuerKey {
+		if ariGetter, ok := iss.(RenewalInfoGetter); ok && iss.IssuerKey() == cert.issuerKey {
 			newARI, err = ariGetter.GetRenewalInfo(ctx, cert) // be sure to use existing newARI variable so we can compare against old value in the defer
 			if err != nil {
 				// could be anything, but a common error might simply be the "wrong" ACME CA
