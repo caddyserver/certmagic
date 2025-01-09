@@ -69,6 +69,15 @@ type ACMEIssuer struct {
 	// with this ACME account
 	ExternalAccount *acme.EAB
 
+	// Optionally select an ACME profile offered
+	// by the ACME server. The list of supported
+	// profile names can be obtained from the ACME
+	// server's directory endpoint. For details:
+	// https://datatracker.ietf.org/doc/draft-aaron-acme-profiles/
+	//
+	// (EXPERIMENTAL: Subject to change.)
+	Profile string
+
 	// Optionally specify the validity period of
 	// the certificate(s) here as offsets from the
 	// approximate time of certificate issuance,
@@ -450,6 +459,7 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 	if am.NotAfter != 0 {
 		params.NotAfter = time.Now().Add(am.NotAfter)
 	}
+	params.Profile = am.Profile
 
 	// Notify the ACME server we are replacing a certificate (if the caller says we are),
 	// only if the following conditions are met:
