@@ -549,7 +549,15 @@ func (cfg *Config) updateARI(ctx context.Context, cert Certificate, logger *zap.
 
 			// be sure we get the cert from the cache while inside a lock to avoid logical races
 			cfg.certCache.mu.Lock()
-			updatedCert = cfg.certCache.cache[cert.hash]
+			updatedCert, ok = cfg.certCache.cache[cert.hash]
+			if !ok {
+				cfg.certCache.mu.Unlock()
+				logger.Debug("obtained ARI update, but certificate no longer in cache; discarding ARI update",
+					zap.Time("selected_time", newARI.SelectedTime),
+					zap.Timep("next_update", newARI.RetryAfter),
+					zap.String("explanation_url", newARI.ExplanationURL))
+				return
+			}
 			updatedCert.ari = newARI
 			cfg.certCache.cache[cert.hash] = updatedCert
 			cfg.certCache.mu.Unlock()
@@ -581,7 +589,7 @@ func (cfg *Config) updateARI(ctx context.Context, cert Certificate, logger *zap.
 				return
 			}
 
-			logger.Info("updated ACME renewal information",
+			logger.Info("updated and stored ACME renewal information",
 				zap.Time("selected_time", newARI.SelectedTime),
 				zap.Timep("next_update", newARI.RetryAfter),
 				zap.String("explanation_url", newARI.ExplanationURL))
