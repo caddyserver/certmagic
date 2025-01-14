@@ -551,9 +551,14 @@ func (cfg *Config) updateARI(ctx context.Context, cert Certificate, logger *zap.
 			cfg.certCache.mu.Lock()
 			updatedCert, ok = cfg.certCache.cache[cert.hash]
 			if !ok {
+				// cert is no longer in the cache; this can happen for several reasons (past expiration,
+				// rejected by on-demand permission module, random eviction due to full cache, etc), but
+				// it probably means we don't have use of this ARI update now, so while we can return it
+				// to the caller, we don't persist it anywhere beyond that...
 				cfg.certCache.mu.Unlock()
-				updatedCert = cert // return input cert, not an empty one
-				logger.Debug("obtained ARI update, but certificate no longer in cache; discarding ARI update",
+				updatedCert = cert       // return input cert, not an empty one
+				updatedCert.ari = newARI // might as well give it the new ARI for the benefit of our caller, but it won't be updated in the cache or in storage
+				logger.Debug("obtained ARI update, but certificate no longer in cache; ARI update will be returned to caller, but not stored",
 					zap.Time("selected_time", newARI.SelectedTime),
 					zap.Timep("next_update", newARI.RetryAfter),
 					zap.String("explanation_url", newARI.ExplanationURL))
