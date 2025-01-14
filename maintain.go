@@ -552,6 +552,7 @@ func (cfg *Config) updateARI(ctx context.Context, cert Certificate, logger *zap.
 			updatedCert, ok = cfg.certCache.cache[cert.hash]
 			if !ok {
 				cfg.certCache.mu.Unlock()
+				updatedCert = cert // return input cert, not an empty one
 				logger.Debug("obtained ARI update, but certificate no longer in cache; discarding ARI update",
 					zap.Time("selected_time", newARI.SelectedTime),
 					zap.Timep("next_update", newARI.RetryAfter),
