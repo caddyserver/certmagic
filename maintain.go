@@ -507,7 +507,19 @@ func (cfg *Config) updateARI(ctx context.Context, cert Certificate, logger *zap.
 	if err == nil && gotNewARI {
 		// great, storage has a newer one we can use
 		cfg.certCache.mu.Lock()
-		updatedCert = cfg.certCache.cache[cert.hash]
+		var ok bool
+		updatedCert, ok = cfg.certCache.cache[cert.hash]
+		if !ok {
+			// cert is no longer in the cache... why? what's the right thing to do here?
+			cfg.certCache.mu.Unlock()
+			updatedCert = cert       // return input cert, not an empty one
+			updatedCert.ari = newARI // might as well give it the new ARI for the benefit of our caller, but it won't be updated in the cache or in storage
+			logger.Warn("loaded newer ARI from storage, but certificate is no longer in cache; newer ARI will be returned to caller, but not persisted in the cache",
+				zap.Time("selected_time", newARI.SelectedTime),
+				zap.Timep("next_update", newARI.RetryAfter),
+				zap.String("explanation_url", newARI.ExplanationURL))
+			return
+		}
 		updatedCert.ari = newARI
 		cfg.certCache.cache[cert.hash] = updatedCert
 		cfg.certCache.mu.Unlock()
@@ -558,7 +570,7 @@ func (cfg *Config) updateARI(ctx context.Context, cert Certificate, logger *zap.
 				cfg.certCache.mu.Unlock()
 				updatedCert = cert       // return input cert, not an empty one
 				updatedCert.ari = newARI // might as well give it the new ARI for the benefit of our caller, but it won't be updated in the cache or in storage
-				logger.Debug("obtained ARI update, but certificate no longer in cache; ARI update will be returned to caller, but not stored",
+				logger.Warn("obtained ARI update, but certificate no longer in cache; ARI update will be returned to caller, but not stored",
 					zap.Time("selected_time", newARI.SelectedTime),
 					zap.Timep("next_update", newARI.RetryAfter),
 					zap.String("explanation_url", newARI.ExplanationURL))
