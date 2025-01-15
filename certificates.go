@@ -87,6 +87,14 @@ func (cert Certificate) NeedsRenewal(cfg *Config) bool {
 // call it again to see if the cert in storage still needs renewal -- you probably don't want
 // to log the second time for checking the cert in storage which is mainly for synchronization.
 func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo, emitLogs bool) bool {
+	// though this should never happen, safeguard to avoid panics which happened before (since patched; but just in case)
+	if leaf == nil {
+		if emitLogs {
+			cfg.Logger.Error("cannot check if nil leaf cert needs renewal")
+		}
+		return false
+	}
+
 	expiration := expiresAt(leaf)
 
 	var logger *zap.Logger

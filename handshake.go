@@ -561,6 +561,9 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 		zap.String("server_name", hello.ServerName))
 
 	renewIfNecessary := func(ctx context.Context, hello *tls.ClientHelloInfo, cert Certificate) (Certificate, error) {
+		if cert.Leaf == nil {
+			return cert, fmt.Errorf("leaf certificate is unexpectedly nil: either the Certificate got replaced by an empty value, or it was not properly initialized")
+		}
 		if cfg.certNeedsRenewal(cert.Leaf, cert.ari, true) {
 			// Check if the certificate still exists on disk. If not, we need to obtain a new one.
 			// This can happen if the certificate was cleaned up by the storage cleaner, but still
