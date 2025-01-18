@@ -181,7 +181,7 @@ func (iss *ZeroSSLIssuer) Issue(ctx context.Context, csr *x509.CertificateReques
 
 	switch cert.Status {
 	case "pending_validation":
-		logger.Info("validations succeeded; waiting for certificate to be issued")
+		logger.Info("validations initiated; waiting for certificate to be issued")
 
 		cert, err = iss.waitForCertToBeIssued(ctx, client, cert)
 		if err != nil {
