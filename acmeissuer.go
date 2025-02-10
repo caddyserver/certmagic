@@ -48,7 +48,9 @@ type ACMEIssuer struct {
 	// TestCA is the endpoint of the directory for
 	// an ACME CA to use to test domain validation,
 	// but any certs obtained from this CA are
-	// discarded
+	// discarded; it should perform real and valid
+	// ACME verifications, but probably should not
+	// issue real, publicly-trusted certificates
 	TestCA string
 
 	// The email address to use when creating or
