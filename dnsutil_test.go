@@ -7,6 +7,7 @@ package certmagic
 // It has been modified.
 
 import (
+	"context"
 	"net"
 	"reflect"
 	"runtime"
@@ -34,7 +35,7 @@ func TestLookupNameserversOK(t *testing.T) {
 		t.Run(test.fqdn, func(t *testing.T) {
 			t.Parallel()
 
-			nss, err := lookupNameservers(zap.NewNop(), test.fqdn, recursiveNameservers(nil))
+			nss, err := lookupNameservers(context.Background(), zap.NewNop(), test.fqdn, RecursiveNameservers(nil))
 			if err != nil {
 				t.Errorf("Expected no error, got: %v", err)
 			}
@@ -68,7 +69,7 @@ func TestLookupNameserversErr(t *testing.T) {
 		t.Run(test.desc, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := lookupNameservers(zap.NewNop(), test.fqdn, nil)
+			_, err := lookupNameservers(context.Background(), zap.NewNop(), test.fqdn, nil)
 			if err == nil {
 				t.Errorf("expected error, got none")
 			}
@@ -93,28 +94,28 @@ var findXByFqdnTestCases = []struct {
 		fqdn:        "scholar.google.com.",
 		zone:        "google.com.",
 		primaryNs:   "ns1.google.com.",
-		nameservers: recursiveNameservers(nil),
+		nameservers: RecursiveNameservers(nil),
 	},
 	{
 		desc:        "domain is a non-existent subdomain",
 		fqdn:        "foo.google.com.",
 		zone:        "google.com.",
 		primaryNs:   "ns1.google.com.",
-		nameservers: recursiveNameservers(nil),
+		nameservers: RecursiveNameservers(nil),
 	},
 	{
 		desc:        "domain is a eTLD",
 		fqdn:        "example.com.ac.",
 		zone:        "ac.",
 		primaryNs:   "a0.nic.ac.",
-		nameservers: recursiveNameservers(nil),
+		nameservers: RecursiveNameservers(nil),
 	},
 	{
 		desc:        "domain is a cross-zone CNAME",
 		fqdn:        "cross-zone-example.assets.sh.",
 		zone:        "assets.sh.",
 		primaryNs:   "gina.ns.cloudflare.com.",
-		nameservers: recursiveNameservers(nil),
+		nameservers: RecursiveNameservers(nil),
 	},
 	{
 		desc:          "NXDOMAIN",
@@ -160,7 +161,7 @@ func TestFindZoneByFqdn(t *testing.T) {
 			}
 			clearFqdnCache()
 
-			zone, err := findZoneByFQDN(zap.NewNop(), test.fqdn, test.nameservers)
+			zone, err := FindZoneByFQDN(context.Background(), zap.NewNop(), test.fqdn, test.nameservers)
 			if test.expectedError != "" {
 				if err == nil {
 					t.Errorf("test %d: expected error, got none", i)
@@ -219,7 +220,7 @@ func TestRecursiveNameserversAddsPort(t *testing.T) {
 	}
 	custom := []string{"127.0.0.1", "ns1.google.com:43"}
 	expectations := []want{{port: "53"}, {port: "43"}}
-	results := recursiveNameservers(custom)
+	results := RecursiveNameservers(custom)
 
 	if !reflect.DeepEqual(custom, []string{"127.0.0.1", "ns1.google.com:43"}) {
 		t.Errorf("Expected custom nameservers to be unmodified. got %v", custom)
@@ -247,12 +248,12 @@ func TestRecursiveNameserversAddsPort(t *testing.T) {
 }
 
 func TestRecursiveNameserversDefaults(t *testing.T) {
-	results := recursiveNameservers(nil)
+	results := RecursiveNameservers(nil)
 	if len(results) < 1 {
 		t.Errorf("%v Expected at least 1 records as default when nil custom", results)
 	}
 
-	results = recursiveNameservers([]string{})
+	results = RecursiveNameservers([]string{})
 	if len(results) < 1 {
 		t.Errorf("%v Expected at least 1 records as default when empty custom", results)
 	}
