@@ -207,7 +207,7 @@ certmagic.DefaultACME.Email = "you@yours.com"
 certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
 ```
 
-For fully-functional program examples, check out [this Twitter thread](https://twitter.com/mholt6/status/1073103805112147968) (or read it [unrolled into a single post](https://threadreaderapp.com/thread/1073103805112147968.html)). (Note that the package API has changed slightly since these posts.)
+For fully-functional program examples, check out [this X thread](https://x.com/mholt6/status/1073103805112147968) (or read it [unrolled into a single post](https://threadreaderapp.com/thread/1073103805112147968.html)). (Note that the package API has changed slightly since these posts.)
 
 
 #### Serving HTTP handlers with HTTPS
@@ -587,7 +587,7 @@ You can [watch a 2016 dotGo talk](https://youtu.be/KdX51QJWQTA) by the author of
 
 ## Credits and License
 
-CertMagic is a project by [Matthew Holt](https://twitter.com/mholt6), who is the author; and various contributors, who are credited in the commit history of either CertMagic or Caddy.
+CertMagic is a project by [Matthew Holt](https://x.com/mholt6), who is the author; and various contributors, who are credited in the commit history of either CertMagic or Caddy.
 
 CertMagic is licensed under Apache 2.0, an open source license. For convenience, its main points are summarized as follows (but this is no replacement for the actual license text):
 
