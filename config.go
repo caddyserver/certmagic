@@ -991,8 +991,9 @@ func (cfg *Config) generateCSR(privateKey crypto.PrivateKey, sans []string, useC
 
 	for _, name := range sans {
 		// identifiers should be converted to punycode before going into the CSR
-		// (convert IDNs to ASCII according to RFC 5280 section 7)
-		normalizedName, err := idna.ToASCII(name)
+		// (convert IDNs to ASCII according to RFC 5280 section 7, but use profile
+		// recommended by RFC 5891 section 5)
+		normalizedName, err := idna.Lookup.ToASCII(name)
 		if err != nil {
 			return nil, fmt.Errorf("converting identifier '%s' to ASCII: %v", name, err)
 		}

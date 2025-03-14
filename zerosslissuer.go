@@ -258,7 +258,7 @@ func (iss *ZeroSSLIssuer) IssuerKey() string { return zerosslIssuerKey }
 // Revoke revokes the given certificate. Only do this if there is a security or trust
 // concern with the certificate.
 func (iss *ZeroSSLIssuer) Revoke(ctx context.Context, cert CertificateResource, reason int) error {
-	r := zerossl.UnspecifiedReason
+	var r zerossl.RevocationReason
 	switch reason {
 	case acme.ReasonKeyCompromise:
 		r = zerossl.KeyCompromise
@@ -268,6 +268,8 @@ func (iss *ZeroSSLIssuer) Revoke(ctx context.Context, cert CertificateResource, 
 		r = zerossl.Superseded
 	case acme.ReasonCessationOfOperation:
 		r = zerossl.CessationOfOperation
+	case acme.ReasonUnspecified:
+		r = zerossl.UnspecifiedReason
 	default:
 		return fmt.Errorf("unsupported reason: %d", reason)
 	}

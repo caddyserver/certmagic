@@ -268,7 +268,8 @@ type OnDemandConfig struct {
 	// If set, this function will be called to determine
 	// whether a certificate can be obtained or renewed
 	// for the given name. If an error is returned, the
-	// request will be denied.
+	// request will be denied. IDNs will be given as
+	// punycode.
 	DecisionFunc func(ctx context.Context, name string) error
 
 	// Sources for getting new, unmanaged certificates.

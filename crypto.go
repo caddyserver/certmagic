@@ -240,7 +240,8 @@ func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey s
 func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certNamesKey string) (CertificateResource, error) {
 	certRes := CertificateResource{issuerKey: issuer.IssuerKey()}
 
-	normalizedName, err := idna.ToASCII(certNamesKey)
+	// for lookup/comparison, use profile recommended by RFC 5891 section 5
+	normalizedName, err := idna.Lookup.ToASCII(certNamesKey)
 	if err != nil {
 		return CertificateResource{}, fmt.Errorf("converting '%s' to ASCII: %v", certNamesKey, err)
 	}

@@ -28,6 +28,7 @@ import (
 	"github.com/mholt/acmez/v3"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ocsp"
+	"golang.org/x/net/idna"
 )
 
 // GetCertificate gets a certificate to satisfy clientHello. In getting
@@ -288,7 +289,10 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 		return cert, nil
 	}
 
-	name := cfg.getNameFromClientHello(hello)
+	name, err := cfg.getNameFromClientHello(hello)
+	if err != nil {
+		return Certificate{}, err
+	}
 
 	// By this point, we need to load or obtain a certificate. If a swarm of requests comes in for the same
 	// domain, avoid pounding manager or storage thousands of times simultaneously. We use a similar sync
@@ -403,7 +407,10 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 // loadCertFromStorage loads the certificate for name from storage and maintains it
 // (as this is only called with on-demand TLS enabled).
 func (cfg *Config) loadCertFromStorage(ctx context.Context, logger *zap.Logger, hello *tls.ClientHelloInfo) (Certificate, error) {
-	name := cfg.getNameFromClientHello(hello)
+	name, err := cfg.getNameFromClientHello(hello)
+	if err != nil {
+		return Certificate{}, err
+	}
 	loadedCert, err := cfg.CacheManagedCertificate(ctx, name)
 	if errors.Is(err, fs.ErrNotExist) {
 		// If no exact match, try a wildcard variant, which is something we can still use
@@ -484,7 +491,10 @@ func (cfg *Config) checkIfCertShouldBeObtained(ctx context.Context, name string,
 func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.ClientHelloInfo) (Certificate, error) {
 	log := logWithRemote(cfg.Logger.Named("on_demand"), hello)
 
-	name := cfg.getNameFromClientHello(hello)
+	name, err := cfg.getNameFromClientHello(hello)
+	if err != nil {
+		return Certificate{}, err
+	}
 
 	// We must protect this process from happening concurrently, so synchronize.
 	obtainCertWaitChansMu.Lock()
@@ -535,7 +545,7 @@ func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.Cli
 	// obtain the certificate (this puts it in storage) and if successful,
 	// load it from storage so we and any other waiting goroutine can use it
 	var cert Certificate
-	err := cfg.ObtainCertAsync(ctx, name)
+	err = cfg.ObtainCertAsync(ctx, name)
 	if err == nil {
 		// load from storage while others wait to make the op as atomic as possible
 		cert, err = cfg.loadCertFromStorage(ctx, log, hello)
@@ -661,7 +671,10 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 func (cfg *Config) renewDynamicCertificate(ctx context.Context, hello *tls.ClientHelloInfo, currentCert Certificate) (Certificate, error) {
 	logger := logWithRemote(cfg.Logger.Named("on_demand"), hello)
 
-	name := cfg.getNameFromClientHello(hello)
+	name, err := cfg.getNameFromClientHello(hello)
+	if err != nil {
+		return Certificate{}, err
+	}
 	timeLeft := time.Until(expiresAt(currentCert.Leaf))
 	revoked := currentCert.ocsp != nil && currentCert.ocsp.Status == ocsp.Revoked
 
@@ -862,14 +875,18 @@ func (cfg *Config) getTLSALPNChallengeCert(clientHello *tls.ClientHelloInfo) (*t
 // getNameFromClientHello returns a normalized form of hello.ServerName.
 // If hello.ServerName is empty (i.e. client did not use SNI), then the
 // associated connection's local address is used to extract an IP address.
-func (cfg *Config) getNameFromClientHello(hello *tls.ClientHelloInfo) string {
-	if name := normalizedName(hello.ServerName); name != "" {
-		return name
+func (cfg *Config) getNameFromClientHello(hello *tls.ClientHelloInfo) (string, error) {
+	name, err := idna.Lookup.ToASCII(strings.TrimSpace(hello.ServerName))
+	if err != nil {
+		return "", err
+	}
+	if name != "" {
+		return name, nil
 	}
 	if cfg.DefaultServerName != "" {
-		return normalizedName(cfg.DefaultServerName)
+		return normalizedName(cfg.DefaultServerName), nil
 	}
-	return localIPFromConn(hello.Conn)
+	return localIPFromConn(hello.Conn), nil
 }
 
 // logWithRemote adds the remote host and port to the logger.
