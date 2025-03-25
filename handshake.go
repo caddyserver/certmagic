@@ -876,6 +876,12 @@ func (cfg *Config) getTLSALPNChallengeCert(clientHello *tls.ClientHelloInfo) (*t
 // If hello.ServerName is empty (i.e. client did not use SNI), then the
 // associated connection's local address is used to extract an IP address.
 func (cfg *Config) getNameFromClientHello(hello *tls.ClientHelloInfo) (string, error) {
+	// IDNs must be converted to punycode for use in TLS certificates (and SNI), but not
+	// all clients do that, so convert IDNs to ASCII according to RFC 5280 section 7
+	// using profile recommended by RFC 5891 section 5; this solves the "σςΣ" problem
+	// (see https://unicode.org/faq/idn.html#22) where not all normalizations are 1:1.
+	// The Lookup profile, for instance, rejects wildcard characters (*), but they
+	// should never be used in the ClientHello SNI anyway.
 	name, err := idna.Lookup.ToASCII(strings.TrimSpace(hello.ServerName))
 	if err != nil {
 		return "", err
