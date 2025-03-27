@@ -90,7 +90,7 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 	- Exponential backoff with carefully-tuned intervals
 	- Retries with optional test/staging CA endpoint instead of production, to avoid rate limits
 - Written in Go, a language with memory-safety guarantees
-- Powered by [ACMEz](https://github.com/mholt/acmez/v2), _the_ premier ACME client library for Go
+- Powered by [ACMEz](https://github.com/mholt/acmez/v3), _the_ premier ACME client library for Go
 - All [libdns](https://github.com/libdns) DNS providers work out-of-the-box
 - Pluggable storage backends (default: file system)
 - Pluggable key sources
@@ -207,7 +207,7 @@ certmagic.DefaultACME.Email = "you@yours.com"
 certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
 ```
 
-For fully-functional program examples, check out [this Twitter thread](https://twitter.com/mholt6/status/1073103805112147968) (or read it [unrolled into a single post](https://threadreaderapp.com/thread/1073103805112147968.html)). (Note that the package API has changed slightly since these posts.)
+For fully-functional program examples, check out [this X thread](https://x.com/mholt6/status/1073103805112147968) (or read it [unrolled into a single post](https://threadreaderapp.com/thread/1073103805112147968.html)). (Note that the package API has changed slightly since these posts.)
 
 
 #### Serving HTTP handlers with HTTPS
@@ -326,7 +326,7 @@ See [Storage](#storage) and the associated [pkg.go.dev](https://pkg.go.dev/githu
 
 ## The ACME Challenges
 
-This section describes how to solve the ACME challenges. Challenges are how you demonstrate to the certificate authority some control over your domain name, thus authorizing them to grant you a certificate for that name. [The great innovation of ACME](https://www.dotconferences.com/2016/10/matthew-holt-go-with-acme) is that verification by CAs can now be automated, rather than having to click links in emails (who ever thought that was a good idea??).
+This section describes how to solve the ACME challenges. Challenges are how you demonstrate to the certificate authority some control over your domain name, thus authorizing them to grant you a certificate for that name. [The great innovation of ACME](https://www.youtube.com/watch?v=KdX51QJWQTA) is that verification by CAs can now be automated, rather than having to click links in emails (who ever thought that was a good idea??).
 
 If you're using the high-level convenience functions like `HTTPS()`, `Listen()`, or `TLS()`, the HTTP and/or TLS-ALPN challenges are solved for you because they also start listeners. However, if you're making a `Config` and you start your own server manually, you'll need to be sure the ACME challenges can be solved so certificates can be renewed.
 
@@ -567,7 +567,7 @@ We welcome your contributions! Please see our **[contributing guidelines](https:
 
 ## Project History
 
-CertMagic is the core of Caddy's advanced TLS automation code, extracted into a library. The underlying ACME client implementation is [ACMEz](https://github.com/mholt/acmez/v2). CertMagic's code was originally a central part of Caddy even before Let's Encrypt entered public beta in 2015.
+CertMagic is the core of Caddy's advanced TLS automation code, extracted into a library. The underlying ACME client implementation is [ACMEz](https://github.com/mholt/acmez/v3). CertMagic's code was originally a central part of Caddy even before Let's Encrypt entered public beta in 2015.
 
 In the years since then, Caddy's TLS automation techniques have been widely adopted, tried and tested in production, and served millions of sites and secured trillions of connections.
 
@@ -579,15 +579,15 @@ Caddy was also the first to sport "on-demand" issuance technology, which obtains
 
 Consequently, CertMagic brings all these (and more) features and capabilities right into your own Go programs.
 
-You can [watch a 2016 dotGo talk](https://www.dotconferences.com/2016/10/matthew-holt-go-with-acme) by the author of this library about using ACME to automate certificate management in Go programs:
+You can [watch a 2016 dotGo talk](https://youtu.be/KdX51QJWQTA) by the author of this library about using ACME to automate certificate management in Go programs:
 
-[![Matthew Holt speaking at dotGo 2016 about ACME in Go](https://user-images.githubusercontent.com/1128849/49921557-2d506780-fe6b-11e8-97bf-6053b6b4eb48.png)](https://www.dotconferences.com/2016/10/matthew-holt-go-with-acme)
+[![Matthew Holt speaking at dotGo 2016 about ACME in Go](https://user-images.githubusercontent.com/1128849/49921557-2d506780-fe6b-11e8-97bf-6053b6b4eb48.png)](https://youtu.be/KdX51QJWQTA)
 
 
 
 ## Credits and License
 
-CertMagic is a project by [Matthew Holt](https://twitter.com/mholt6), who is the author; and various contributors, who are credited in the commit history of either CertMagic or Caddy.
+CertMagic is a project by [Matthew Holt](https://x.com/mholt6), who is the author; and various contributors, who are credited in the commit history of either CertMagic or Caddy.
 
 CertMagic is licensed under Apache 2.0, an open source license. For convenience, its main points are summarized as follows (but this is no replacement for the actual license text):
 

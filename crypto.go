@@ -240,6 +240,7 @@ func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey s
 func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certNamesKey string) (CertificateResource, error) {
 	certRes := CertificateResource{issuerKey: issuer.IssuerKey()}
 
+	// don't use the Lookup profile because we might be loading a wildcard cert which is rejected by the Lookup profile
 	normalizedName, err := idna.ToASCII(certNamesKey)
 	if err != nil {
 		return CertificateResource{}, fmt.Errorf("converting '%s' to ASCII: %v", certNamesKey, err)

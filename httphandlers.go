@@ -19,7 +19,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/mholt/acmez/v2/acme"
+	"github.com/mholt/acmez/v3/acme"
 	"go.uber.org/zap"
 )
 

@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/caddyserver/zerossl"
-	"github.com/mholt/acmez/v2"
-	"github.com/mholt/acmez/v2/acme"
+	"github.com/mholt/acmez/v3"
+	"github.com/mholt/acmez/v3/acme"
 	"go.uber.org/zap"
 )
 
@@ -61,6 +61,9 @@ type ZeroSSLIssuer struct {
 	// To use CNAME validation instead of HTTP
 	// validation, set this field.
 	CNAMEValidation *DNSManager
+
+	// Delay between poll attempts.
+	PollInterval time.Duration
 
 	// An optional (but highly recommended) logger.
 	Logger *zap.Logger
@@ -178,7 +181,7 @@ func (iss *ZeroSSLIssuer) Issue(ctx context.Context, csr *x509.CertificateReques
 
 	switch cert.Status {
 	case "pending_validation":
-		logger.Info("validations succeeded; waiting for certificate to be issued")
+		logger.Info("validations initiated; waiting for certificate to be issued")
 
 		cert, err = iss.waitForCertToBeIssued(ctx, client, cert)
 		if err != nil {
@@ -203,8 +206,8 @@ func (iss *ZeroSSLIssuer) Issue(ctx context.Context, csr *x509.CertificateReques
 	}, nil
 }
 
-func (*ZeroSSLIssuer) waitForCertToBeIssued(ctx context.Context, client zerossl.Client, cert zerossl.CertificateObject) (zerossl.CertificateObject, error) {
-	ticker := time.NewTicker(5 * time.Second)
+func (iss *ZeroSSLIssuer) waitForCertToBeIssued(ctx context.Context, client zerossl.Client, cert zerossl.CertificateObject) (zerossl.CertificateObject, error) {
+	ticker := time.NewTicker(iss.pollInterval())
 	defer ticker.Stop()
 
 	for {
@@ -225,6 +228,13 @@ func (*ZeroSSLIssuer) waitForCertToBeIssued(ctx context.Context, client zerossl.
 			}
 		}
 	}
+}
+
+func (iss *ZeroSSLIssuer) pollInterval() time.Duration {
+	if iss.PollInterval == 0 {
+		return defaultPollInterval
+	}
+	return iss.PollInterval
 }
 
 func (iss *ZeroSSLIssuer) getClient() zerossl.Client {
@@ -248,7 +258,7 @@ func (iss *ZeroSSLIssuer) IssuerKey() string { return zerosslIssuerKey }
 // Revoke revokes the given certificate. Only do this if there is a security or trust
 // concern with the certificate.
 func (iss *ZeroSSLIssuer) Revoke(ctx context.Context, cert CertificateResource, reason int) error {
-	r := zerossl.UnspecifiedReason
+	var r zerossl.RevocationReason
 	switch reason {
 	case acme.ReasonKeyCompromise:
 		r = zerossl.KeyCompromise
@@ -258,6 +268,8 @@ func (iss *ZeroSSLIssuer) Revoke(ctx context.Context, cert CertificateResource, 
 		r = zerossl.Superseded
 	case acme.ReasonCessationOfOperation:
 		r = zerossl.CessationOfOperation
+	case acme.ReasonUnspecified:
+		r = zerossl.UnspecifiedReason
 	default:
 		return fmt.Errorf("unsupported reason: %d", reason)
 	}
@@ -299,9 +311,8 @@ func (iss *ZeroSSLIssuer) getDistributedValidationInfo(ctx context.Context, iden
 }
 
 const (
-	zerosslAPIBase              = "https://" + zerossl.BaseURL + "/acme"
-	zerosslValidationPathPrefix = "/.well-known/pki-validation/"
-	zerosslIssuerKey            = "zerossl"
+	zerosslIssuerKey    = "zerossl"
+	defaultPollInterval = 5 * time.Second
 )
 
 // Interface guards

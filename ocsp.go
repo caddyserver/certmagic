@@ -93,11 +93,16 @@ func stapleOCSP(ctx context.Context, ocspConfig OCSPConfig, storage Storage, cer
 	// then we need to request it from the OCSP responder
 	if ocspResp == nil || len(ocspBytes) == 0 {
 		ocspBytes, ocspResp, ocspErr = getOCSPForCert(ocspConfig, pemBundle)
+		// An error here is not a problem because a certificate
+		// may simply not contain a link to an OCSP server.
 		if ocspErr != nil {
-			// An error here is not a problem because a certificate may simply
-			// not contain a link to an OCSP server. But we should log it anyway.
+			// For short-lived certificates, this is fine and we can ignore
+			// logging because OCSP doesn't make much sense for them anyway.
+			if cert.Lifetime() < 7*24*time.Hour {
+				return nil
+			}
 			// There's nothing else we can do to get OCSP for this certificate,
-			// so we can return here with the error.
+			// so we can return here with the error to warn about it.
 			return fmt.Errorf("no OCSP stapling for %v: %w", cert.Names, ocspErr)
 		}
 		gotNewOCSP = true

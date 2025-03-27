@@ -30,8 +30,8 @@ import (
 	"time"
 
 	"github.com/libdns/libdns"
-	"github.com/mholt/acmez/v2"
-	"github.com/mholt/acmez/v2/acme"
+	"github.com/mholt/acmez/v3"
+	"github.com/mholt/acmez/v3/acme"
 	"github.com/miekg/dns"
 	"go.uber.org/zap"
 )
@@ -379,7 +379,7 @@ type DNSManager struct {
 func (m *DNSManager) createRecord(ctx context.Context, dnsName, recordType, recordValue string) (zoneRecord, error) {
 	logger := m.logger()
 
-	zone, err := findZoneByFQDN(logger, dnsName, recursiveNameservers(m.Resolvers))
+	zone, err := FindZoneByFQDN(ctx, logger, dnsName, RecursiveNameservers(m.Resolvers))
 	if err != nil {
 		return zoneRecord{}, fmt.Errorf("could not determine zone for domain %q: %v", dnsName, err)
 	}
@@ -439,7 +439,7 @@ func (m *DNSManager) wait(ctx context.Context, zrec zoneRecord) error {
 
 	// how we'll do the checks
 	checkAuthoritativeServers := len(m.Resolvers) == 0
-	resolvers := recursiveNameservers(m.Resolvers)
+	resolvers := RecursiveNameservers(m.Resolvers)
 
 	recType := dns.TypeTXT
 	if zrec.record.Type == "CNAME" {
@@ -464,7 +464,7 @@ func (m *DNSManager) wait(ctx context.Context, zrec zoneRecord) error {
 			zap.Strings("resolvers", resolvers))
 
 		var ready bool
-		ready, err = checkDNSPropagation(logger, absName, recType, zrec.record.Value, checkAuthoritativeServers, resolvers)
+		ready, err = checkDNSPropagation(ctx, logger, absName, recType, zrec.record.Value, checkAuthoritativeServers, resolvers)
 		if err != nil {
 			return fmt.Errorf("checking DNS propagation of %q (relative=%s zone=%s resolvers=%v): %w", absName, zrec.record.Name, zrec.zone, resolvers, err)
 		}
@@ -547,14 +547,15 @@ func (s *DNSManager) getDNSPresentMemory(dnsName, recType, value string) (dnsPre
 	defer s.recordsMu.Unlock()
 
 	var memory dnsPresentMemory
+	var found bool
 	for _, mem := range s.records[dnsName] {
 		if mem.zoneRec.record.Type == recType && mem.zoneRec.record.Value == value {
 			memory = mem
+			found = true
 			break
 		}
 	}
-
-	if memory.zoneRec.record.Name == "" {
+	if !found {
 		return dnsPresentMemory{}, fmt.Errorf("no memory of presenting a DNS record for %q (usually OK if presenting also failed)", dnsName)
 	}
 
