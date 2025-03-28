@@ -29,17 +29,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// testingMemoryStorage is an in-memory storage implementation with known contents *and* fixed iteration order for List.
-type testingMemoryStorage struct {
-	contents []testingMemoryStorageItem
+// memoryStorage is an in-memory storage implementation with known contents *and* fixed iteration order for List.
+type memoryStorage struct {
+	contents []memoryStorageItem
 }
 
-type testingMemoryStorageItem struct {
+type memoryStorageItem struct {
 	key  string
 	data []byte
 }
 
-func (m *testingMemoryStorage) lookup(_ context.Context, key string) *testingMemoryStorageItem {
+func (m *memoryStorage) lookup(_ context.Context, key string) *memoryStorageItem {
 	for _, item := range m.contents {
 		if item.key == key {
 			return &item
@@ -47,7 +47,7 @@ func (m *testingMemoryStorage) lookup(_ context.Context, key string) *testingMem
 	}
 	return nil
 }
-func (m *testingMemoryStorage) Delete(ctx context.Context, key string) error {
+func (m *memoryStorage) Delete(ctx context.Context, key string) error {
 	for i, item := range m.contents {
 		if item.key == key {
 			m.contents = append(m.contents[:i], m.contents[i+1:]...)
@@ -56,14 +56,14 @@ func (m *testingMemoryStorage) Delete(ctx context.Context, key string) error {
 	}
 	return fs.ErrNotExist
 }
-func (m *testingMemoryStorage) Store(ctx context.Context, key string, value []byte) error {
-	m.contents = append(m.contents, testingMemoryStorageItem{key: key, data: value})
+func (m *memoryStorage) Store(ctx context.Context, key string, value []byte) error {
+	m.contents = append(m.contents, memoryStorageItem{key: key, data: value})
 	return nil
 }
-func (m *testingMemoryStorage) Exists(ctx context.Context, key string) bool {
+func (m *memoryStorage) Exists(ctx context.Context, key string) bool {
 	return m.lookup(ctx, key) != nil
 }
-func (m *testingMemoryStorage) List(ctx context.Context, path string, recursive bool) ([]string, error) {
+func (m *memoryStorage) List(ctx context.Context, path string, recursive bool) ([]string, error) {
 	if recursive {
 		panic("unimplemented")
 	}
@@ -88,22 +88,22 @@ nextitem:
 	}
 	return result, nil
 }
-func (m *testingMemoryStorage) Load(ctx context.Context, key string) ([]byte, error) {
+func (m *memoryStorage) Load(ctx context.Context, key string) ([]byte, error) {
 	if item := m.lookup(ctx, key); item != nil {
 		return item.data, nil
 	}
 	return nil, fs.ErrNotExist
 }
-func (m *testingMemoryStorage) Stat(ctx context.Context, key string) (KeyInfo, error) {
+func (m *memoryStorage) Stat(ctx context.Context, key string) (KeyInfo, error) {
 	if item := m.lookup(ctx, key); item != nil {
 		return KeyInfo{Key: key, Size: int64(len(item.data))}, nil
 	}
 	return KeyInfo{}, fs.ErrNotExist
 }
-func (m *testingMemoryStorage) Lock(ctx context.Context, name string) error   { panic("unimplemented") }
-func (m *testingMemoryStorage) Unlock(ctx context.Context, name string) error { panic("unimplemented") }
+func (m *memoryStorage) Lock(ctx context.Context, name string) error   { panic("unimplemented") }
+func (m *memoryStorage) Unlock(ctx context.Context, name string) error { panic("unimplemented") }
 
-var _ Storage = (*testingMemoryStorage)(nil)
+var _ Storage = (*memoryStorage)(nil)
 
 type recordingStorage struct {
 	Storage
@@ -293,7 +293,7 @@ func TestGetAccountAlreadyExistsSkipsBroken(t *testing.T) {
 	am := &ACMEIssuer{CA: dummyCA, Logger: zap.NewNop(), mu: new(sync.Mutex)}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
-		Storage:   &testingMemoryStorage{},
+		Storage:   &memoryStorage{},
 		Logger:    defaultTestLogger,
 		certCache: new(Cache),
 	}
@@ -342,7 +342,7 @@ func TestGetAccountWithEmailAlreadyExists(t *testing.T) {
 	am := &ACMEIssuer{CA: dummyCA, Logger: zap.NewNop(), mu: new(sync.Mutex)}
 	testConfig := &Config{
 		Issuers:   []Issuer{am},
-		Storage:   &recordingStorage{Storage: &testingMemoryStorage{}},
+		Storage:   &recordingStorage{Storage: &memoryStorage{}},
 		Logger:    defaultTestLogger,
 		certCache: new(Cache),
 	}

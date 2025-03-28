@@ -289,7 +289,7 @@ func fileLockIsStale(meta lockMeta) bool {
 // identified by filename. A successfully created
 // lockfile should be removed with removeLockfile.
 func createLockfile(filename string) error {
-	err := atomicallyCreateFile(filename, true)
+	err := atomicallyCreateFile(filename)
 	if err != nil {
 		return err
 	}
@@ -376,29 +376,26 @@ func updateLockfileFreshness(filename string) (bool, error) {
 
 // atomicallyCreateFile atomically creates the file
 // identified by filename if it doesn't already exist.
-func atomicallyCreateFile(filename string, writeLockInfo bool) error {
+func atomicallyCreateFile(filename string) error {
 	// no need to check this error, we only really care about the file creation error
 	_ = os.MkdirAll(filepath.Dir(filename), 0700)
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644)
+	fp, err := atomicfile.New(filename, 0o600)
 	if err != nil {
+		// cancel the write if file creation fails and error out
 		return err
 	}
-	defer f.Close()
-	if writeLockInfo {
-		now := time.Now()
-		meta := lockMeta{
-			Created: now,
-			Updated: now,
-		}
-		if err := json.NewEncoder(f).Encode(meta); err != nil {
-			return err
-		}
-		// see https://github.com/caddyserver/caddy/issues/3954
-		if err := f.Sync(); err != nil {
-			return err
-		}
+	now := time.Now()
+	meta := lockMeta{
+		Created: now,
+		Updated: now,
 	}
-	return nil
+	if err := json.NewEncoder(fp).Encode(meta); err != nil {
+		// cancel the write if json encoding fails and error out
+		fp.Cancel()
+		return err
+	}
+	// close, thereby flushing the write
+	return fp.Close()
 }
 
 // homeDir returns the best guess of the current user's home
