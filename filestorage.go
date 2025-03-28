@@ -289,7 +289,7 @@ func fileLockIsStale(meta lockMeta) bool {
 // identified by filename. A successfully created
 // lockfile should be removed with removeLockfile.
 func createLockfile(filename string) error {
-	err := atomicallyCreateFile(filename)
+	err := atomicallyCreateLockfile(filename)
 	if err != nil {
 		return err
 	}
@@ -374,9 +374,9 @@ func readFileLimit(filename string, limit int) ([]byte, error) {
 	return readBytes, nil
 }
 
-// atomicallyCreateFile atomically creates the lock file
+// atomicallyCreateLockfile atomically creates the lock file
 // identified by filename if it doesn't already exist.
-func atomicallyCreateFile(filename string) error {
+func atomicallyCreateLockfile(filename string) error {
 	now := time.Now()
 	meta := lockMeta{
 		Created: now,
