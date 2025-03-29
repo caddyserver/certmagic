@@ -393,7 +393,8 @@ func atomicallyCreateLockfile(filename string) error {
 func atomicallyWriteFile(filename string, data []byte) error {
 	// no need to check this error, we only really care about the file creation error
 	_ = os.MkdirAll(filepath.Dir(filename), 0700)
-	// check if the file exists
+	// check if the file exists no matter what you do, this is sort of racy. either you read the empty file, or you accidentaly open multiple files.
+	// using native os level locks would be better here.
 	_, err := os.Stat(filename)
 	if err == nil {
 		return os.ErrExist
@@ -411,6 +412,13 @@ func atomicallyWriteFile(filename string, data []byte) error {
 		// cancel the write
 		fp.Cancel()
 		return err
+	}
+	// do another check, as a race check. this still isnt perfect.
+	_, err = os.Stat(filename)
+	if err == nil {
+		// cancel the write
+		fp.Cancel()
+		return os.ErrExist
 	}
 	// close, thereby flushing the write
 	return fp.Close()
