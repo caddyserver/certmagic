@@ -393,6 +393,11 @@ func atomicallyCreateLockfile(filename string) error {
 func atomicallyWriteFile(filename string, data []byte) error {
 	// no need to check this error, we only really care about the file creation error
 	_ = os.MkdirAll(filepath.Dir(filename), 0700)
+	// check if the file exists
+	_, err := os.Stat(filename)
+	if err == nil {
+		return os.ErrExist
+	}
 	fp, err := atomicfile.New(filename, 0o600)
 	if err != nil {
 		// cancel the write if file creation fails and error out
