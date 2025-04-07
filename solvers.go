@@ -383,22 +383,23 @@ func (m *DNSManager) createRecord(ctx context.Context, dnsName, recordType, reco
 	if err != nil {
 		return zoneRecord{}, fmt.Errorf("could not determine zone for domain %q: %v", dnsName, err)
 	}
-	rec := libdns.Record{
-		Type:  recordType,
-		Name:  libdns.RelativeName(dnsName+".", zone),
-		Value: recordValue,
-		TTL:   m.TTL,
+
+	rr := libdns.RR{
+		Type: recordType,
+		Name: libdns.RelativeName(dnsName+".", zone),
+		Data: recordValue,
+		TTL:  m.TTL,
 	}
 
 	logger.Debug("creating DNS record",
 		zap.String("dns_name", dnsName),
 		zap.String("zone", zone),
-		zap.String("record_name", rec.Name),
-		zap.String("record_type", rec.Type),
-		zap.String("record_value", rec.Value),
-		zap.Duration("record_ttl", rec.TTL))
+		zap.String("record_name", rr.Name),
+		zap.String("record_type", rr.Type),
+		zap.String("record_data", rr.Data),
+		zap.Duration("record_ttl", rr.TTL))
 
-	results, err := m.DNSProvider.AppendRecords(ctx, zone, []libdns.Record{rec})
+	results, err := m.DNSProvider.AppendRecords(ctx, zone, []libdns.Record{rr})
 	if err != nil {
 		return zoneRecord{}, fmt.Errorf("adding temporary record for zone %q: %w", zone, err)
 	}
@@ -406,7 +407,7 @@ func (m *DNSManager) createRecord(ctx context.Context, dnsName, recordType, reco
 		return zoneRecord{}, fmt.Errorf("expected one record, got %d: %v", len(results), results)
 	}
 
-	return zoneRecord{zone, results[0]}, nil
+	return zoneRecord{zone, results[0].RR()}, nil
 }
 
 // wait blocks until the TXT record created in Present() appears in
@@ -442,7 +443,7 @@ func (m *DNSManager) wait(ctx context.Context, zrec zoneRecord) error {
 	resolvers := RecursiveNameservers(m.Resolvers)
 
 	recType := dns.TypeTXT
-	if zrec.record.Type == "CNAME" {
+	if zrec.record.RR().Type == "CNAME" {
 		recType = dns.TypeCNAME
 	}
 
@@ -460,11 +461,11 @@ func (m *DNSManager) wait(ctx context.Context, zrec zoneRecord) error {
 		logger.Debug("checking DNS propagation",
 			zap.String("fqdn", absName),
 			zap.String("record_type", zrec.record.Type),
-			zap.String("expected_value", zrec.record.Value),
+			zap.String("expected_data", zrec.record.Data),
 			zap.Strings("resolvers", resolvers))
 
 		var ready bool
-		ready, err = checkDNSPropagation(ctx, logger, absName, recType, zrec.record.Value, checkAuthoritativeServers, resolvers)
+		ready, err = checkDNSPropagation(ctx, logger, absName, recType, zrec.record.Data, checkAuthoritativeServers, resolvers)
 		if err != nil {
 			return fmt.Errorf("checking DNS propagation of %q (relative=%s zone=%s resolvers=%v): %w", absName, zrec.record.Name, zrec.zone, resolvers, err)
 		}
@@ -478,7 +479,7 @@ func (m *DNSManager) wait(ctx context.Context, zrec zoneRecord) error {
 
 type zoneRecord struct {
 	zone   string
-	record libdns.Record
+	record libdns.RR
 }
 
 // CleanUp deletes the DNS TXT record created in Present().
@@ -504,10 +505,9 @@ func (m *DNSManager) cleanUpRecord(_ context.Context, zrec zoneRecord) error {
 
 	logger.Debug("deleting DNS record",
 		zap.String("zone", zrec.zone),
-		zap.String("record_id", zrec.record.ID),
 		zap.String("record_name", zrec.record.Name),
 		zap.String("record_type", zrec.record.Type),
-		zap.String("record_value", zrec.record.Value))
+		zap.String("record_data", zrec.record.Data))
 
 	_, err := m.DNSProvider.DeleteRecords(ctx, zrec.zone, []libdns.Record{zrec.record})
 	if err != nil {
@@ -549,7 +549,7 @@ func (s *DNSManager) getDNSPresentMemory(dnsName, recType, value string) (dnsPre
 	var memory dnsPresentMemory
 	var found bool
 	for _, mem := range s.records[dnsName] {
-		if mem.zoneRec.record.Type == recType && mem.zoneRec.record.Value == value {
+		if mem.zoneRec.record.Type == recType && mem.zoneRec.record.Data == value {
 			memory = mem
 			found = true
 			break
@@ -567,7 +567,7 @@ func (s *DNSManager) deleteDNSPresentMemory(dnsName, keyAuth string) {
 	defer s.recordsMu.Unlock()
 
 	for i, mem := range s.records[dnsName] {
-		if mem.zoneRec.record.Value == keyAuth {
+		if mem.zoneRec.record.Data == keyAuth {
 			s.records[dnsName] = append(s.records[dnsName][:i], s.records[dnsName][i+1:]...)
 			return
 		}
