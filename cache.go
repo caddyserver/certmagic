@@ -92,6 +92,27 @@ type Cache struct {
 // is being terminated, so that it can clean up
 // any locks for other processes to unblock!
 func NewCache(opts CacheOptions) *Cache {
+	c := &Cache{
+		cache:      make(map[string]Certificate),
+		cacheIndex: make(map[string][]string),
+		stopChan:   make(chan struct{}),
+		doneChan:   make(chan struct{}),
+		logger:     opts.Logger,
+	}
+
+	// absolutely do not allow a nil logger; panics galore
+	if c.logger == nil {
+		c.logger = defaultLogger
+	}
+
+	c.SetOptions(opts)
+
+	go c.maintainAssets(0)
+
+	return c
+}
+
+func (certCache *Cache) SetOptions(opts CacheOptions) {
 	// assume default options if necessary
 	if opts.OCSPCheckInterval <= 0 {
 		opts.OCSPCheckInterval = DefaultOCSPCheckInterval
@@ -110,26 +131,6 @@ func NewCache(opts CacheOptions) *Cache {
 		panic("cache must be initialized with a GetConfigForCert callback")
 	}
 
-	c := &Cache{
-		options:    opts,
-		cache:      make(map[string]Certificate),
-		cacheIndex: make(map[string][]string),
-		stopChan:   make(chan struct{}),
-		doneChan:   make(chan struct{}),
-		logger:     opts.Logger,
-	}
-
-	// absolutely do not allow a nil logger; panics galore
-	if c.logger == nil {
-		c.logger = defaultLogger
-	}
-
-	go c.maintainAssets(0)
-
-	return c
-}
-
-func (certCache *Cache) SetOptions(opts CacheOptions) {
 	certCache.optionsMu.Lock()
 	certCache.options = opts
 	certCache.optionsMu.Unlock()
