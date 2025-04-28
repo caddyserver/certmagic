@@ -7,7 +7,7 @@ toolchain go1.24.0
 require (
 	github.com/caddyserver/zerossl v0.1.3
 	github.com/klauspost/cpuid/v2 v2.2.10
-	github.com/libdns/libdns v1.0.0-beta.1
+	github.com/libdns/libdns v1.0.0
 	github.com/mholt/acmez/v3 v3.1.2
 	github.com/miekg/dns v1.1.63
 	github.com/zeebo/blake3 v0.2.4
