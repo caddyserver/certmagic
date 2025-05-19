@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -346,7 +347,11 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls
 	}
 	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
 	if err != nil {
-		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
+		if errors.Is(err, ErrNoOCSPServerSpecified) {
+			cfg.Logger.Debug("stapling OCSP", zap.Error(err))
+		} else {
+			cfg.Logger.Warn("stapling OCSP", zap.Error(err))
+		}
 	}
 	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names})
 	cert.Tags = tags
@@ -394,7 +399,9 @@ func (cfg Config) makeCertificateWithOCSP(ctx context.Context, certPEMBlock, key
 		return cert, err
 	}
 	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
-	if err != nil {
+	if errors.Is(err, ErrNoOCSPServerSpecified) {
+		cfg.Logger.Debug("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
+	} else {
 		cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
 	}
 	return cert, nil

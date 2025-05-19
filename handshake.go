@@ -599,7 +599,11 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 		if err != nil {
 			// An error with OCSP stapling is not the end of the world, and in fact, is
 			// quite common considering not all certs have issuer URLs that support it.
-			logger.Warn("stapling OCSP", zap.Error(err))
+			if errors.Is(err, ErrNoOCSPServerSpecified) {
+				logger.Debug("stapling OCSP", zap.Error(err))
+			} else {
+				logger.Warn("stapling OCSP", zap.Error(err))
+			}
 		} else {
 			logger.Debug("successfully stapled new OCSP response",
 				zap.Int("ocsp_status", cert.ocsp.Status),
