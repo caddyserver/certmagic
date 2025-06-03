@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -26,9 +27,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mholt/acmez/v2"
-	"github.com/mholt/acmez/v2/acme"
+	"github.com/mholt/acmez/v3"
+	"github.com/mholt/acmez/v3/acme"
 	"go.uber.org/zap"
+	"go.uber.org/zap/exp/zapslog"
 )
 
 // acmeClient holds state necessary to perform ACME operations
@@ -276,7 +278,7 @@ func (iss *ACMEIssuer) newBasicACMEClient() (*acmez.Client, error) {
 			Directory:  caURL,
 			UserAgent:  buildUAString(),
 			HTTPClient: iss.httpClient,
-			Logger:     iss.Logger.Named("acme_client"),
+			Logger:     slog.New(zapslog.NewHandler(iss.Logger.Named("acme_client").Core())),
 		},
 	}, nil
 }

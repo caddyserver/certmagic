@@ -28,8 +28,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mholt/acmez/v2"
-	"github.com/mholt/acmez/v2/acme"
+	"github.com/mholt/acmez/v3"
+	"github.com/mholt/acmez/v3/acme"
 	"go.uber.org/zap"
 )
 
@@ -48,7 +48,9 @@ type ACMEIssuer struct {
 	// TestCA is the endpoint of the directory for
 	// an ACME CA to use to test domain validation,
 	// but any certs obtained from this CA are
-	// discarded
+	// discarded; it should perform real and valid
+	// ACME verifications, but probably should not
+	// issue real, publicly-trusted certificates
 	TestCA string
 
 	// The email address to use when creating or
@@ -68,6 +70,15 @@ type ACMEIssuer struct {
 	// An optional external account to associate
 	// with this ACME account
 	ExternalAccount *acme.EAB
+
+	// Optionally select an ACME profile offered
+	// by the ACME server. The list of supported
+	// profile names can be obtained from the ACME
+	// server's directory endpoint. For details:
+	// https://datatracker.ietf.org/doc/draft-aaron-acme-profiles/
+	//
+	// (EXPERIMENTAL: Subject to change.)
+	Profile string
 
 	// Optionally specify the validity period of
 	// the certificate(s) here as offsets from the
@@ -282,7 +293,7 @@ func NewACMEIssuer(cfg *Config, template ACMEIssuer) *ACMEIssuer {
 }
 
 // IssuerKey returns the unique issuer key for the
-// confgured CA endpoint.
+// configured CA endpoint.
 func (am *ACMEIssuer) IssuerKey() string {
 	return am.issuerKey(am.CA)
 }
@@ -450,6 +461,7 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 	if am.NotAfter != 0 {
 		params.NotAfter = time.Now().Add(am.NotAfter)
 	}
+	params.Profile = am.Profile
 
 	// Notify the ACME server we are replacing a certificate (if the caller says we are),
 	// only if the following conditions are met:
@@ -482,7 +494,7 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 					zap.String("account_id", client.account.Location),
 					zap.Strings("account_contact", client.account.Contact),
 					zap.String("key_location", am.storageKeyUserPrivateKey(client.acmeClient.Directory, am.getEmail())),
-					zap.Object("problem", prob))
+					zap.Any("problem", prob))
 
 				// the account we have no longer exists on the CA, so we need to create a new one;
 				// we could use the same key pair, but this is a good opportunity to rotate keys

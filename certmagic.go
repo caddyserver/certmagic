@@ -28,7 +28,7 @@
 // you use this lower-level API, you'll have to be sure to solve the HTTP
 // and TLS-ALPN challenges yourself (unless you disabled them or use the
 // DNS challenge) by using the provided Config.GetCertificate function
-// in your tls.Config and/or Config.HTTPChallangeHandler in your HTTP
+// in your tls.Config and/or Config.HTTPChallengeHandler in your HTTP
 // handler.
 //
 // See the package's README for more instruction.
@@ -261,14 +261,15 @@ func ManageAsync(ctx context.Context, domainNames []string) error {
 // containing the names passed into those functions if
 // no DecisionFunc is set. This ensures some degree of
 // control by default to avoid certificate operations for
-// aribtrary domain names. To override this whitelist,
+// arbitrary domain names. To override this whitelist,
 // manually specify a DecisionFunc. To impose rate limits,
 // specify your own DecisionFunc.
 type OnDemandConfig struct {
 	// If set, this function will be called to determine
 	// whether a certificate can be obtained or renewed
 	// for the given name. If an error is returned, the
-	// request will be denied.
+	// request will be denied. IDNs will be given as
+	// punycode.
 	DecisionFunc func(ctx context.Context, name string) error
 
 	// Sources for getting new, unmanaged certificates.

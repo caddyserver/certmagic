@@ -35,8 +35,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mholt/acmez/v2"
-	"github.com/mholt/acmez/v2/acme"
+	"github.com/mholt/acmez/v3"
+	"github.com/mholt/acmez/v3/acme"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ocsp"
 	"golang.org/x/net/idna"
@@ -874,7 +874,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			// are compliant, so their CSR requirements just needlessly add friction, complexity,
 			// and inefficiency for clients. CommonName has been deprecated for 25+ years.
 			useCSR := csr
-			if _, ok := issuer.(*ZeroSSLIssuer); ok {
+			if issuer.IssuerKey() == "zerossl" {
 				useCSR, err = cfg.generateCSR(privateKey, []string{name}, true)
 				if err != nil {
 					return err
@@ -991,7 +991,6 @@ func (cfg *Config) generateCSR(privateKey crypto.PrivateKey, sans []string, useC
 
 	for _, name := range sans {
 		// identifiers should be converted to punycode before going into the CSR
-		// (convert IDNs to ASCII according to RFC 5280 section 7)
 		normalizedName, err := idna.ToASCII(name)
 		if err != nil {
 			return nil, fmt.Errorf("converting identifier '%s' to ASCII: %v", name, err)

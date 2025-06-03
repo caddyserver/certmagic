@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/caddyserver/zerossl"
-	"github.com/mholt/acmez/v2"
-	"github.com/mholt/acmez/v2/acme"
+	"github.com/mholt/acmez/v3"
+	"github.com/mholt/acmez/v3/acme"
 	"go.uber.org/zap"
 )
 
@@ -181,7 +181,7 @@ func (iss *ZeroSSLIssuer) Issue(ctx context.Context, csr *x509.CertificateReques
 
 	switch cert.Status {
 	case "pending_validation":
-		logger.Info("validations succeeded; waiting for certificate to be issued")
+		logger.Info("validations initiated; waiting for certificate to be issued")
 
 		cert, err = iss.waitForCertToBeIssued(ctx, client, cert)
 		if err != nil {
@@ -258,7 +258,7 @@ func (iss *ZeroSSLIssuer) IssuerKey() string { return zerosslIssuerKey }
 // Revoke revokes the given certificate. Only do this if there is a security or trust
 // concern with the certificate.
 func (iss *ZeroSSLIssuer) Revoke(ctx context.Context, cert CertificateResource, reason int) error {
-	r := zerossl.UnspecifiedReason
+	var r zerossl.RevocationReason
 	switch reason {
 	case acme.ReasonKeyCompromise:
 		r = zerossl.KeyCompromise
@@ -268,6 +268,8 @@ func (iss *ZeroSSLIssuer) Revoke(ctx context.Context, cert CertificateResource, 
 		r = zerossl.Superseded
 	case acme.ReasonCessationOfOperation:
 		r = zerossl.CessationOfOperation
+	case acme.ReasonUnspecified:
+		r = zerossl.UnspecifiedReason
 	default:
 		return fmt.Errorf("unsupported reason: %d", reason)
 	}

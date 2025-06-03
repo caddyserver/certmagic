@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -26,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mholt/acmez/v2/acme"
+	"github.com/mholt/acmez/v3/acme"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ocsp"
 )
@@ -87,6 +88,14 @@ func (cert Certificate) NeedsRenewal(cfg *Config) bool {
 // call it again to see if the cert in storage still needs renewal -- you probably don't want
 // to log the second time for checking the cert in storage which is mainly for synchronization.
 func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo, emitLogs bool) bool {
+	// though this should never happen, safeguard to avoid panics which happened before (since patched; but just in case)
+	if leaf == nil {
+		if emitLogs {
+			cfg.Logger.Error("cannot check if nil leaf cert needs renewal")
+		}
+		return false
+	}
+
 	expiration := expiresAt(leaf)
 
 	var logger *zap.Logger
@@ -108,7 +117,7 @@ func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo
 		// (notice that we don't strictly require an ARI window to also exist; we presume
 		// that if a time has been selected, a window does or did exist, even if it didn't
 		// get stored/encoded for some reason - but also: this allows administrators to
-		// manually or explicitly schedule a renewal time indepedently of ARI which could
+		// manually or explicitly schedule a renewal time independently of ARI which could
 		// be useful)
 		selectedTime := ari.SelectedTime
 
@@ -145,7 +154,7 @@ func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo
 			// possibility of a bug in ARI compromising a site's uptime: we should always always
 			// always give heed to actual validity period
 			if currentlyInRenewalWindow(leaf.NotBefore, expiration, 1.0/20.0) {
-				logger.Warn("certificate is in emergency renewal window; superceding ARI",
+				logger.Warn("certificate is in emergency renewal window; superseding ARI",
 					zap.Duration("remaining", time.Until(expiration)),
 					zap.Time("renewal_cutoff", cutoff))
 				return true
@@ -186,6 +195,14 @@ func (cert Certificate) Expired() bool {
 		return false
 	}
 	return time.Now().After(expiresAt(cert.Leaf))
+}
+
+// Lifetime returns the duration of the certificate's validity.
+func (cert Certificate) Lifetime() time.Duration {
+	if cert.Leaf == nil || cert.Leaf.NotAfter.IsZero() {
+		return 0
+	}
+	return expiresAt(cert.Leaf).Sub(cert.Leaf.NotBefore)
 }
 
 // currentlyInRenewalWindow returns true if the current time is within
@@ -330,7 +347,11 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls
 	}
 	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
 	if err != nil {
-		cfg.Logger.Warn("stapling OCSP", zap.Error(err))
+		if errors.Is(err, ErrNoOCSPServerSpecified) {
+			cfg.Logger.Debug("stapling OCSP", zap.Error(err))
+		} else {
+			cfg.Logger.Warn("stapling OCSP", zap.Error(err))
+		}
 	}
 	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names})
 	cert.Tags = tags
@@ -378,7 +399,9 @@ func (cfg Config) makeCertificateWithOCSP(ctx context.Context, certPEMBlock, key
 		return cert, err
 	}
 	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
-	if err != nil {
+	if errors.Is(err, ErrNoOCSPServerSpecified) {
+		cfg.Logger.Debug("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
+	} else {
 		cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
 	}
 	return cert, nil
