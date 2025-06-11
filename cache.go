@@ -247,7 +247,7 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 		rnd := weakrand.Intn(cacheSize)
 		i := 0
 		for _, randomCert := range certCache.cache {
-			if i == rnd {
+			if i >= rnd && randomCert.managed { // don't evict manually-loaded certs
 				certCache.logger.Debug("cache full; evicting random certificate",
 					zap.Strings("removing_subjects", randomCert.Names),
 					zap.String("removing_hash", randomCert.hash),
