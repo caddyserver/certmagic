@@ -111,7 +111,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 		}
 
 		// the list of names on this cert should never be empty... programmer error?
-		if cert.Names == nil || len(cert.Names) == 0 {
+		if len(cert.Names) == 0 {
 			log.Warn("certificate has no names; removing from cache", zap.String("cert_key", certKey))
 			deleteQueue = append(deleteQueue, cert)
 			continue

@@ -375,6 +375,37 @@ func (cfg *Config) CacheUnmanagedCertificatePEMBytes(ctx context.Context, certBy
 	return cert.hash, nil
 }
 
+// CacheUnmanagedCertificatePEMBytesAsReplacement is the same as CacheUnmanagedCertificatePEMBytes,
+// but it also removes any other loaded certificates for the SANs on the certificate being cached.
+// This has the effect of using this certificate exclusively and immediately for its SANs. The SANs
+// for which the certificate should apply may optionally be passed in as well. By default, a cert
+// is used for any of its SANs.
+//
+// This method is safe for concurrent use.
+//
+// EXPERIMENTAL: Subject to change/removal.
+func (cfg *Config) CacheUnmanagedCertificatePEMBytesAsReplacement(ctx context.Context, certBytes, keyBytes []byte, tags, sans []string) (string, error) {
+	cert, err := cfg.makeCertificateWithOCSP(ctx, certBytes, keyBytes)
+	if err != nil {
+		return "", err
+	}
+	cert.Tags = tags
+	if len(sans) > 0 {
+		cert.Names = sans
+	}
+	cfg.certCache.mu.Lock()
+	for _, san := range cert.Names {
+		existingCerts := cfg.certCache.getAllMatchingCerts(san)
+		for _, existingCert := range existingCerts {
+			cfg.certCache.removeCertificate(existingCert)
+		}
+	}
+	cfg.certCache.unsyncedCacheCertificate(cert)
+	cfg.certCache.mu.Unlock()
+	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names, "replacement": true})
+	return cert.hash, nil
+}
+
 // makeCertificateFromDiskWithOCSP makes a Certificate by loading the
 // certificate and key files. It fills out all the fields in
 // the certificate except for the Managed and OnDemand flags.
