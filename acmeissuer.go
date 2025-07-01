@@ -340,7 +340,7 @@ func (iss *ACMEIssuer) isAgreed() bool {
 // IP certificates via ACME are defined in RFC 8738.
 func (am *ACMEIssuer) PreCheck(ctx context.Context, names []string, interactive bool) error {
 	publicCAsAndIPCerts := map[string]bool{ // map of public CAs to whether they support IP certificates (last updated: Q1 2024)
-		"api.letsencrypt.org": false, // https://community.letsencrypt.org/t/certificate-for-static-ip/84/2?u=mholt
+		"api.letsencrypt.org": true, // https://letsencrypt.org/2025/07/01/issuing-our-first-ip-address-certificate/
 		"acme.zerossl.com":    false, // only supported via their API, not ACME endpoint
 		"api.pki.goog":        true,  // https://pki.goog/faq/#faq-IPCerts
 		"api.buypass.com":     false, // https://community.buypass.com/t/h7hm76w/buypass-support-for-rfc-8738
