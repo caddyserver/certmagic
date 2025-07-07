@@ -113,7 +113,7 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 - Cross-platform support! Mac, Windows, Linux, BSD, Android...
 - Scales to hundreds of thousands of names/certificates per instance
 - Use in conjunction with your own certificates
-- Full support for [draft-ietf-acme-ari](https://datatracker.ietf.org/doc/draft-ietf-acme-ari/) (ACME Renewal Information; ARI) extension
+- Full support for [RFC 9773](https://datatracker.ietf.org/doc/html/rfc9773) (ACME Renewal Information; ARI) extension
 
 
 ## Requirements
