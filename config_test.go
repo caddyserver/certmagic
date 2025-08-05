@@ -21,7 +21,9 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/caddyserver/certmagic/internal/testutil"
 	"github.com/mholt/acmez/v3/acme"
 )
 
@@ -74,6 +76,72 @@ func TestSaveCertResource(t *testing.T) {
 	if !reflect.DeepEqual(cert, siteData) {
 		t.Errorf("Expected '%+v' to match '%+v'\n%s\n%s", cert.IssuerData, siteData.IssuerData, string(cert.IssuerData), string(siteData.IssuerData))
 	}
+}
+
+type mockStorageWithLease struct {
+	*FileStorage
+	renewCalled  bool
+	renewError   error
+	lastLockKey  string
+	lastDuration time.Duration
+}
+
+func (m *mockStorageWithLease) RenewLockLease(ctx context.Context, lockKey string, leaseDuration time.Duration) error {
+	m.renewCalled = true
+	m.lastLockKey = lockKey
+	m.lastDuration = leaseDuration
+	return m.renewError
+}
+
+func TestRenewLockLeaseDuration(t *testing.T) {
+	ctx := context.Background()
+	tmpDir, err := os.MkdirTemp(os.TempDir(), "certmagic-test*")
+	testutil.RequireNoError(t, err, "allocating tmp dir")
+	defer os.RemoveAll(tmpDir)
+
+	mockStorage := &mockStorageWithLease{
+		FileStorage: &FileStorage{Path: tmpDir},
+	}
+
+	// Test attempt 0
+	renewLockLease(ctx, mockStorage, "test-lock", 0)
+	expected := retryIntervals[0] + DefaultACME.CertObtainTimeout
+	testutil.RequireEqual(t, expected, mockStorage.lastDuration)
+
+	// Test attempt beyond array bounds
+	renewLockLease(ctx, mockStorage, "test-lock", 999)
+	expected = maxRetryDuration + DefaultACME.CertObtainTimeout
+	testutil.RequireEqual(t, expected, mockStorage.lastDuration)
+}
+
+// Test that lease renewal works when storage supports it
+func TestRenewLockLeaseWithInterface(t *testing.T) {
+	ctx := context.Background()
+	tmpDir, err := os.MkdirTemp(os.TempDir(), "certmagic-test*")
+	testutil.RequireNoError(t, err, "allocating tmp dir")
+	defer os.RemoveAll(tmpDir)
+
+	mockStorage := &mockStorageWithLease{
+		FileStorage: &FileStorage{Path: tmpDir},
+	}
+
+	err = renewLockLease(ctx, mockStorage, "test-lock", 0)
+	testutil.RequireNoError(t, err)
+
+	testutil.RequireEqual(t, true, mockStorage.renewCalled)
+}
+
+// Test that no error occurs when storage doesn't support lease renewal
+func TestRenewLockLeaseWithoutInterface(t *testing.T) {
+	ctx := context.Background()
+	tmpDir, err := os.MkdirTemp(os.TempDir(), "certmagic-test*")
+	testutil.RequireNoError(t, err, "allocating tmp dir")
+	defer os.RemoveAll(tmpDir)
+
+	storage := &FileStorage{Path: tmpDir}
+
+	err = renewLockLease(ctx, storage, "test-lock", 0)
+	testutil.RequireNoError(t, err)
 }
 
 func mustJSON(val any) []byte {
