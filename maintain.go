@@ -125,12 +125,6 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 				zap.Error(err))
 			continue
 		}
-		if cfg == nil {
-			// this is bad if this happens, probably a programmer error (oops)
-			log.Error("no configuration associated with certificate; unable to manage",
-				zap.Strings("identifiers", cert.Names))
-			continue
-		}
 		if cfg.OnDemand != nil {
 			continue
 		}

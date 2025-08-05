@@ -365,6 +365,10 @@ func (certCache *Cache) getConfig(cert Certificate) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg == nil {
+		// this is bad if this happens, probably a programmer error (oops)
+		return nil, fmt.Errorf("no configuration associated with certificate: %v;", cert.Names)
+	}
 	if cfg.certCache == nil {
 		return nil, fmt.Errorf("config returned for certificate %v has nil cache; expected %p (this one)",
 			cert.Names, certCache)
