@@ -104,12 +104,13 @@ func TestRenewLockLeaseDuration(t *testing.T) {
 	}
 
 	// Test attempt 0
-	renewLockLease(ctx, mockStorage, "test-lock", 0)
+	cfg := &Config{Logger: defaultTestLogger}
+	cfg.renewLockLease(ctx, mockStorage, "test-lock", 0)
 	expected := retryIntervals[0] + DefaultACME.CertObtainTimeout
 	testutil.RequireEqual(t, expected, mockStorage.lastDuration)
 
 	// Test attempt beyond array bounds
-	renewLockLease(ctx, mockStorage, "test-lock", 999)
+	cfg.renewLockLease(ctx, mockStorage, "test-lock", 999)
 	expected = maxRetryDuration + DefaultACME.CertObtainTimeout
 	testutil.RequireEqual(t, expected, mockStorage.lastDuration)
 }
@@ -125,7 +126,8 @@ func TestRenewLockLeaseWithInterface(t *testing.T) {
 		FileStorage: &FileStorage{Path: tmpDir},
 	}
 
-	err = renewLockLease(ctx, mockStorage, "test-lock", 0)
+	cfg := &Config{Logger: defaultTestLogger}
+	err = cfg.renewLockLease(ctx, mockStorage, "test-lock", 0)
 	testutil.RequireNoError(t, err)
 
 	testutil.RequireEqual(t, true, mockStorage.renewCalled)
@@ -140,7 +142,8 @@ func TestRenewLockLeaseWithoutInterface(t *testing.T) {
 
 	storage := &FileStorage{Path: tmpDir}
 
-	err = renewLockLease(ctx, storage, "test-lock", 0)
+	cfg := &Config{Logger: defaultTestLogger}
+	err = cfg.renewLockLease(ctx, storage, "test-lock", 0)
 	testutil.RequireNoError(t, err)
 }
 

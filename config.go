@@ -494,7 +494,7 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 // backend supports it. The lease duration is calculated based on the retry attempt
 // number and includes the certificate obtain timeout. This prevents locks from
 // expiring during long-running certificate operations with retries.
-func renewLockLease(ctx context.Context, storage Storage, lockKey string, attempt int) error {
+func (cfg *Config) renewLockLease(ctx context.Context, storage Storage, lockKey string, attempt int) error {
 	l, ok := storage.(LockLeaseRenewer)
 	if !ok {
 		return nil
@@ -505,6 +505,8 @@ func renewLockLease(ctx context.Context, storage Storage, lockKey string, attemp
 		leaseDuration = retryIntervals[attempt]
 	}
 	leaseDuration = leaseDuration + DefaultACME.CertObtainTimeout
+	log := cfg.Logger.Named("renewLockLease")
+	log.Debug("renewing lock lease", zap.String("lockKey", lockKey), zap.Int("attempt", attempt))
 
 	err := l.RenewLockLease(ctx, lockKey, leaseDuration)
 	if err == nil {
@@ -574,7 +576,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 		// renew lease on the lock if the certificate store supports it
 		attempt, ok := ctx.Value(AttemptsCtxKey).(*int)
 		if ok {
-			err = renewLockLease(ctx, cfg.Storage, lockKey, *attempt)
+			err = cfg.renewLockLease(ctx, cfg.Storage, lockKey, *attempt)
 			if err != nil {
 				return fmt.Errorf("unable to renew lock lease '%s': %v", lockKey, err)
 			}
@@ -843,7 +845,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		// prevents the lock from being acquired by another process/instance while we're renewing
 		attempt, ok := ctx.Value(AttemptsCtxKey).(*int)
 		if ok {
-			err = renewLockLease(ctx, cfg.Storage, lockKey, *attempt)
+			err = cfg.renewLockLease(ctx, cfg.Storage, lockKey, *attempt)
 			if err != nil {
 				return fmt.Errorf("unable to renew lock lease '%s': %v", lockKey, err)
 			}
