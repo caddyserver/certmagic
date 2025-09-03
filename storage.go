@@ -149,6 +149,16 @@ type Locker interface {
 	Unlock(ctx context.Context, name string) error
 }
 
+// LockLeaseRenewer is an optional interface that can be implemented by a Storage
+// implementation to support renewing the lease on a lock. This is useful for
+// long-running operations that need to be synchronized across a cluster.
+type LockLeaseRenewer interface {
+	// RenewLockLease renews the lease on the lock for the given lockKey for the
+	// given leaseDuration. This is used to prevent the lock from being acquired
+	// by another process.
+	RenewLockLease(ctx context.Context, lockKey string, leaseDuration time.Duration) error
+}
+
 // KeyInfo holds information about a key in storage.
 // Key and IsTerminal are required; Modified and Size
 // are optional if the storage implementation is not
