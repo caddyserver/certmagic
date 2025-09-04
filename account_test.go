@@ -210,7 +210,7 @@ func TestSaveAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error saving account: %v", err)
 	}
-	_, err = am.getAccount(ctx, am.CA, email)
+	_, err = am.loadOrCreateAccount(ctx, am.CA, email)
 	if err != nil {
 		t.Errorf("Cannot access account data, error: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestGetAccountDoesNotAlreadyExist(t *testing.T) {
 	}
 	am.config = testConfig
 
-	account, err := am.getAccount(ctx, am.CA, "account_does_not_exist@foobar.com")
+	account, err := am.loadOrCreateAccount(ctx, am.CA, "account_does_not_exist@foobar.com")
 	if err != nil {
 		t.Fatalf("Error getting account: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestGetAccountAlreadyExists(t *testing.T) {
 	}
 
 	// Expect to load account from disk
-	loadedAccount, err := am.getAccount(ctx, am.CA, email)
+	loadedAccount, err := am.loadOrCreateAccount(ctx, am.CA, email)
 	if err != nil {
 		t.Fatalf("Error getting account: %v", err)
 	}

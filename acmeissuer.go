@@ -93,6 +93,15 @@ type ACMEIssuer struct {
 	// Disable all TLS-ALPN challenges
 	DisableTLSALPNChallenge bool
 
+	// Disable distributed solving; avoids writing
+	// challenge info to storage backend and will
+	// only use data in memory to solve the HTTP and
+	// TLS-ALPN challenges; will still attempt to
+	// solve distributed HTTP challenges blindly by
+	// using available account and challenge token
+	// as read from request URI
+	DisableDistributedSolvers bool
+
 	// The host (ONLY the host, not port) to listen
 	// on if necessary to start a listener to solve
 	// an ACME challenge
@@ -340,7 +349,7 @@ func (iss *ACMEIssuer) isAgreed() bool {
 // IP certificates via ACME are defined in RFC 8738.
 func (am *ACMEIssuer) PreCheck(ctx context.Context, names []string, interactive bool) error {
 	publicCAsAndIPCerts := map[string]bool{ // map of public CAs to whether they support IP certificates (last updated: Q1 2024)
-		"api.letsencrypt.org": true, // https://letsencrypt.org/2025/07/01/issuing-our-first-ip-address-certificate/
+		"api.letsencrypt.org": true,  // https://letsencrypt.org/2025/07/01/issuing-our-first-ip-address-certificate/
 		"acme.zerossl.com":    false, // only supported via their API, not ACME endpoint
 		"api.pki.goog":        true,  // https://pki.goog/faq/#faq-IPCerts
 		"api.buypass.com":     false, // https://community.buypass.com/t/h7hm76w/buypass-support-for-rfc-8738

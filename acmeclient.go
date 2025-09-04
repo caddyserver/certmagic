@@ -55,23 +55,7 @@ func (iss *ACMEIssuer) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 	// we try loading the account from storage before a potential
 	// lock, and after obtaining the lock as well, to ensure we don't
 	// repeat work done by another instance or goroutine
-	getAccount := func() (acme.Account, error) {
-		// look up or create the ACME account
-		var account acme.Account
-		if iss.AccountKeyPEM != "" {
-			iss.Logger.Info("using configured ACME account")
-			account, err = iss.GetAccount(ctx, []byte(iss.AccountKeyPEM))
-		} else {
-			account, err = iss.getAccount(ctx, client.Directory, iss.getEmail())
-		}
-		if err != nil {
-			return acme.Account{}, fmt.Errorf("getting ACME account: %v", err)
-		}
-		return account, nil
-	}
-
-	// first try getting the account
-	account, err := getAccount()
+	account, err := iss.getAccountToUse(ctx, client.Directory)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +79,7 @@ func (iss *ACMEIssuer) newACMEClientWithAccount(ctx context.Context, useTestCA, 
 		}()
 
 		// if we're not the only one waiting for this account, then by this point it should already be registered and in storage; reload it
-		account, err = getAccount()
+		account, err = iss.getAccountToUse(ctx, client.Directory)
 		if err != nil {
 			return nil, err
 		}
@@ -207,26 +191,34 @@ func (iss *ACMEIssuer) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 	if iss.DNS01Solver == nil {
 		// enable HTTP-01 challenge
 		if !iss.DisableHTTPChallenge {
-			client.ChallengeSolvers[acme.ChallengeTypeHTTP01] = distributedSolver{
-				storage:                iss.config.Storage,
-				storageKeyIssuerPrefix: iss.storageKeyCAPrefix(client.Directory),
-				solver: &httpSolver{
-					handler: iss.HTTPChallengeHandler(http.NewServeMux()),
-					address: net.JoinHostPort(iss.ListenHost, strconv.Itoa(iss.getHTTPPort())),
-				},
+			var solver acmez.Solver = &httpSolver{
+				handler: iss.HTTPChallengeHandler(http.NewServeMux()),
+				address: net.JoinHostPort(iss.ListenHost, strconv.Itoa(iss.getHTTPPort())),
 			}
+			if !iss.DisableDistributedSolvers {
+				solver = distributedSolver{
+					storage:                iss.config.Storage,
+					storageKeyIssuerPrefix: iss.storageKeyCAPrefix(client.Directory),
+					solver:                 solver,
+				}
+			}
+			client.ChallengeSolvers[acme.ChallengeTypeHTTP01] = solver
 		}
 
 		// enable TLS-ALPN-01 challenge
 		if !iss.DisableTLSALPNChallenge {
-			client.ChallengeSolvers[acme.ChallengeTypeTLSALPN01] = distributedSolver{
-				storage:                iss.config.Storage,
-				storageKeyIssuerPrefix: iss.storageKeyCAPrefix(client.Directory),
-				solver: &tlsALPNSolver{
-					config:  iss.config,
-					address: net.JoinHostPort(iss.ListenHost, strconv.Itoa(iss.getTLSALPNPort())),
-				},
+			var solver acmez.Solver = &tlsALPNSolver{
+				config:  iss.config,
+				address: net.JoinHostPort(iss.ListenHost, strconv.Itoa(iss.getTLSALPNPort())),
 			}
+			if !iss.DisableDistributedSolvers {
+				solver = distributedSolver{
+					storage:                iss.config.Storage,
+					storageKeyIssuerPrefix: iss.storageKeyCAPrefix(client.Directory),
+					solver:                 solver,
+				}
+			}
+			client.ChallengeSolvers[acme.ChallengeTypeTLSALPN01] = solver
 		}
 	} else {
 		// use DNS challenge exclusively
