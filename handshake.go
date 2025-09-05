@@ -853,7 +853,7 @@ func (cfg *Config) getCertFromAnyCertManager(ctx context.Context, hello *tls.Cli
 // solving). True is returned if the challenge is being solved distributed (there
 // is no semantic difference with distributed solving; it is mainly for logging).
 func (cfg *Config) getTLSALPNChallengeCert(clientHello *tls.ClientHelloInfo) (*tls.Certificate, bool, error) {
-	chalData, distributed, err := cfg.getChallengeInfo(clientHello.Context(), clientHello.ServerName)
+	chalData, distributed, err := cfg.getACMEChallengeInfo(clientHello.Context(), clientHello.ServerName, true)
 	if err != nil {
 		return nil, distributed, err
 	}

@@ -1158,20 +1158,29 @@ func (cfg *Config) TLSConfig() *tls.Config {
 	}
 }
 
-// getChallengeInfo loads the challenge info from either the internal challenge memory
+// getACMEChallengeInfo loads the challenge info from either the internal challenge memory
 // or the external storage (implying distributed solving). The second return value
 // indicates whether challenge info was loaded from external storage. If true, the
 // challenge is being solved in a distributed fashion; if false, from internal memory.
 // If no matching challenge information can be found, an error is returned.
-func (cfg *Config) getChallengeInfo(ctx context.Context, identifier string) (Challenge, bool, error) {
+func (cfg *Config) getACMEChallengeInfo(ctx context.Context, identifier string, allowDistributed bool) (Challenge, bool, error) {
 	// first, check if our process initiated this challenge; if so, just return it
 	chalData, ok := GetACMEChallenge(identifier)
 	if ok {
 		return chalData, false, nil
 	}
 
+	// if distributed solving is disabled, and we don't have it in memory, return an error
+	if !allowDistributed {
+		return Challenge{}, false, fmt.Errorf("distributed solving disabled and no challenge information found internally for identifier: %s", identifier)
+	}
+
 	// otherwise, perhaps another instance in the cluster initiated it; check
-	// the configured storage to retrieve challenge data
+	// the configured storage to retrieve challenge data (requires storage)
+
+	if cfg.Storage == nil {
+		return Challenge{}, false, errors.New("challenge was not initiated internally and no storage is configured for distributed solving")
+	}
 
 	var chalInfo acme.Challenge
 	var chalInfoBytes []byte
