@@ -609,6 +609,7 @@ func SubjectIsInternal(subj string) bool {
 		strings.HasSuffix(subj, ".local") ||
 		strings.HasSuffix(subj, ".internal") ||
 		strings.HasSuffix(subj, ".home.arpa") ||
+		strings.HasSuffix(subj, ".test") ||
 		isInternalIP(subj)
 }
 
