@@ -345,12 +345,14 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls
 			zap.Time("not_after", cert.Leaf.NotAfter),
 			zap.Strings("sans", cert.Names))
 	}
-	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
-	if err != nil {
-		if errors.Is(err, ErrNoOCSPServerSpecified) {
-			cfg.Logger.Debug("stapling OCSP", zap.Error(err))
-		} else {
-			cfg.Logger.Warn("stapling OCSP", zap.Error(err))
+	if !cfg.OCSP.DisableStapling {
+		err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
+		if err != nil {
+			if errors.Is(err, ErrNoOCSPServerSpecified) {
+				cfg.Logger.Debug("stapling OCSP", zap.Error(err))
+			} else {
+				cfg.Logger.Warn("stapling OCSP", zap.Error(err))
+			}
 		}
 	}
 	cfg.emit(ctx, "cached_unmanaged_cert", map[string]any{"sans": cert.Names})
@@ -429,11 +431,13 @@ func (cfg Config) makeCertificateWithOCSP(ctx context.Context, certPEMBlock, key
 	if err != nil {
 		return cert, err
 	}
-	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
-	if errors.Is(err, ErrNoOCSPServerSpecified) {
-		cfg.Logger.Debug("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
-	} else {
-		cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
+	if !cfg.OCSP.DisableStapling {
+		err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
+		if errors.Is(err, ErrNoOCSPServerSpecified) {
+			cfg.Logger.Debug("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
+		} else {
+			cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
+		}
 	}
 	return cert, nil
 }
