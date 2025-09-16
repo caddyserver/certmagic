@@ -490,7 +490,7 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 
 	// do this in a loop because there's an error case that may necessitate a retry, but not more than once
 	var certChains []acme.Certificate
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		am.Logger.Info("using ACME account",
 			zap.String("account_id", params.Account.Location),
 			zap.Strings("account_contact", params.Account.Contact))
@@ -523,10 +523,10 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 			}
 			return nil, usingTestCA, fmt.Errorf("%v %w (ca=%s)", nameSet, err, client.acmeClient.Directory)
 		}
-		if len(certChains) == 0 {
-			return nil, usingTestCA, fmt.Errorf("no certificate chains")
-		}
 		break
+	}
+	if len(certChains) == 0 {
+		return nil, usingTestCA, fmt.Errorf("no certificate chains")
 	}
 
 	preferredChain := am.selectPreferredChain(certChains)
