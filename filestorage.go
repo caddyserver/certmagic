@@ -168,9 +168,10 @@ func (s *FileStorage) Filename(key string) string {
 	return filepath.Join(s.Path, filepath.FromSlash(key))
 }
 
-// Lock obtains a lock named by the given name. It blocks
-// until the lock can be obtained or an error is returned.
-func (s *FileStorage) Lock(ctx context.Context, name string) error {
+// obtainLock will attempt to obtain a lock for the given name up to the
+// number of attempts given.
+// if attempts is negative then it will try forever.
+func (s *FileStorage) obtainLock(ctx context.Context, name string, attempts int) (bool, error) {
 	filename := s.lockFilename(name)
 
 	// sometimes the lockfiles read as empty (size 0) - this is either a stale lock or it
@@ -179,14 +180,26 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 	var emptyCount int
 
 	for {
+		// if attempts is negative then we should allow the loop
+		// to retry until the context is done, otherwise we decrement
+		// the remaining attempts if there are any here to ensure we
+		// don't miss it due to continue statements throughout the loop
+		switch {
+		case attempts == 0:
+			return false, nil
+
+		case attempts > 0:
+			attempts--
+		}
+
 		err := createLockfile(filename)
 		if err == nil {
 			// got the lock, yay
-			return nil
+			return true, nil
 		}
 		if !os.IsExist(err) {
 			// unexpected error
-			return fmt.Errorf("creating lock file: %v", err)
+			return false, fmt.Errorf("creating lock file: %v", err)
 		}
 
 		// lock file already exists
@@ -204,7 +217,7 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 					select {
 					case <-time.After(250 * time.Millisecond):
 					case <-ctx.Done():
-						return ctx.Err()
+						return false, ctx.Err()
 					}
 					continue
 				} else {
@@ -215,7 +228,7 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 					defaultLogger.Sugar().Infof("[%s] %s: Empty lockfile (%v) - likely previous process crashed or storage medium failure; treating as stale", s, filename, err2)
 				}
 			} else if err2 != nil {
-				return fmt.Errorf("decoding lockfile contents: %w", err2)
+				return false, fmt.Errorf("decoding lockfile contents: %w", err2)
 			}
 		}
 
@@ -226,7 +239,7 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 
 		case err != nil:
 			// unexpected error
-			return fmt.Errorf("accessing lock file: %v", err)
+			return false, fmt.Errorf("accessing lock file: %v", err)
 
 		case fileLockIsStale(meta):
 			// lock file is stale - delete it and try again to obtain lock
@@ -237,7 +250,7 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 			defaultLogger.Sugar().Infof("[%s] Lock for '%s' is stale (created: %s, last update: %s); removing then retrying: %s", s, name, meta.Created, meta.Updated, filename)
 			if err = os.Remove(filename); err != nil { // hopefully we can replace the lock file quickly!
 				if !errors.Is(err, fs.ErrNotExist) {
-					return fmt.Errorf("unable to delete stale lockfile; deadlocked: %w", err)
+					return false, fmt.Errorf("unable to delete stale lockfile; deadlocked: %w", err)
 				}
 			}
 			continue
@@ -249,10 +262,28 @@ func (s *FileStorage) Lock(ctx context.Context, name string) error {
 			select {
 			case <-time.After(fileLockPollInterval):
 			case <-ctx.Done():
-				return ctx.Err()
+				return false, ctx.Err()
 			}
 		}
 	}
+}
+
+// Lock obtains a lock named by the given name. It blocks
+// until the lock can be obtained or an error is returned.
+func (s *FileStorage) Lock(ctx context.Context, name string) error {
+	ok, err := s.obtainLock(ctx, name, -1)
+	if !ok && err == nil {
+		return errors.New("unable to obtain lock")
+	}
+
+	return err
+}
+
+// TryLock attempts to obtain a lock named by the given name.
+// If the lock was obtained it will return true, otherwise it will
+// return false along with any errors that may have occurred.
+func (s *FileStorage) TryLock(ctx context.Context, name string) (bool, error) {
+	return s.obtainLock(ctx, name, 2)
 }
 
 // Unlock releases the lock for name.

@@ -16,6 +16,7 @@ package certmagic
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"regexp"
 	"strings"
@@ -145,6 +146,22 @@ type Locker interface {
 	// after a successful call to Lock, and only after the critical
 	// section is finished, even if it errored or timed out. Unlock
 	// cleans up any resources allocated during Lock. Unlock should
+	// only return an error if the lock was unable to be released.
+	Unlock(ctx context.Context, name string) error
+}
+
+type TryLocker interface {
+	// TryLock attempts to acquire the lock for name, and returns a
+	// boolean that reports whether the lock was successfully aquired
+	// or not along with any errors that may have occurred.
+	//
+	// Implementations should honor context cancellation.
+	TryLock(ctx context.Context, name string) (bool, error)
+
+	// Unlock releases named lock. This method must ONLY be called
+	// after a successful call to TryLock, and only after the critical
+	// section is finished, even if it errored or timed out. Unlock
+	// cleans up any resources allocated during TryLock. Unlock should
 	// only return an error if the lock was unable to be released.
 	Unlock(ctx context.Context, name string) error
 }
@@ -296,6 +313,21 @@ func acquireLock(ctx context.Context, storage Storage, lockKey string) error {
 		locksMu.Unlock()
 	}
 	return err
+}
+
+func tryAcquireLock(ctx context.Context, storage Storage, lockKey string) (bool, error) {
+	locker, ok := storage.(TryLocker)
+	if !ok {
+		return false, fmt.Errorf("%T does not implement TryLocker", storage)
+	}
+
+	ok, err := locker.TryLock(ctx, lockKey)
+	if ok && err == nil {
+		locksMu.Lock()
+		locks[lockKey] = storage
+		locksMu.Unlock()
+	}
+	return ok, err
 }
 
 func releaseLock(ctx context.Context, storage Storage, lockKey string) error {
