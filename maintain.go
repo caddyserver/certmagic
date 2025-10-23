@@ -475,7 +475,6 @@ func (cfg *Config) updateARI(ctx context.Context, cert Certificate, logger *zap.
 		}
 		if !ok {
 			logger.Debug("attempted to obtain ARI lock but it was already taken")
-
 			return cert, false, nil
 		}
 	} else if err := acquireLock(ctx, cfg.Storage, lockName); err != nil {
