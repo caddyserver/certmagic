@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"os"
 	"strings"
@@ -128,7 +128,7 @@ func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo
 		if selectedTime.IsZero() &&
 			(!ari.SuggestedWindow.Start.IsZero() && !ari.SuggestedWindow.End.IsZero()) {
 			start, end := ari.SuggestedWindow.Start.Unix()+1, ari.SuggestedWindow.End.Unix()
-			selectedTime = time.Unix(rand.Int63n(end-start)+start, 0).UTC()
+			selectedTime = time.Unix(rand.Int64N(end-start)+start, 0).UTC()
 			logger.Warn("no renewal time had been selected with ARI; chose an ephemeral one for now",
 				zap.Time("ephemeral_selected_time", selectedTime))
 		}
