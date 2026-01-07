@@ -16,7 +16,7 @@ package certmagic
 
 import (
 	"fmt"
-	weakrand "math/rand"
+	weakrand "math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -244,7 +244,7 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 		// map with less code, that is a heavily skewed eviction
 		// strategy; generating random numbers is cheap and
 		// ensures a much better distribution.
-		rnd := weakrand.Intn(cacheSize)
+		rnd := weakrand.IntN(cacheSize)
 		i := 0
 		for _, randomCert := range certCache.cache {
 			if i >= rnd && randomCert.managed { // don't evict manually-loaded certs

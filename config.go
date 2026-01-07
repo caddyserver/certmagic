@@ -28,7 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	weakrand "math/rand"
+	weakrand "math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -1236,7 +1236,7 @@ func (cfg *Config) checkStorage(ctx context.Context) error {
 	}
 	key := fmt.Sprintf("rw_test_%d", weakrand.Int())
 	contents := make([]byte, 1024*10) // size sufficient for one or two ACME resources
-	_, err := weakrand.Read(contents)
+	_, err := rand.Read(contents)
 	if err != nil {
 		return err
 	}
