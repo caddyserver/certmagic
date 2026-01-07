@@ -858,7 +858,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		}
 
 		// check if renew is still needed - might have been renewed while waiting for lock
-		timeLeft, leaf, needsRenew := cfg.managedCertNeedsRenewal(certRes, false)
+		timeLeft, replacesCert, needsRenew := cfg.managedCertNeedsRenewal(certRes, false)
 		if !needsRenew {
 			if force {
 				log.Info("certificate does not need to be renewed, but renewal is being forced",
@@ -939,11 +939,11 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			// client tell the server we are replacing a certificate (but doing
 			// this on the wrong CA, or when the CA doesn't recognize the certID,
 			// can fail the order) -- TODO: change this check to whether we're using the same ACME account, not CA
-			if !cfg.DisableARI {
+			if replacesCert != nil {
 				if acmeData, err := certRes.getACMEData(); err == nil && acmeData.CA != "" {
 					if acmeIss, ok := issuer.(*ACMEIssuer); ok {
 						if acmeIss.CA == acmeData.CA {
-							ctx = context.WithValue(ctx, ctxKeyARIReplaces, leaf)
+							ctx = context.WithValue(ctx, ctxKeyARIReplaces, replacesCert)
 						}
 					}
 				}
@@ -1311,21 +1311,26 @@ func (cfg *Config) lockKey(op, domainName string) string {
 
 // managedCertNeedsRenewal returns true if certRes is expiring soon or already expired,
 // or if the process of decoding the cert and checking its expiration returned an error.
-// If there wasn't an error, the leaf cert is also returned, so it can be reused if
-// necessary, since we are parsing the PEM bundle anyway.
+// The leaf cert is only returned if the ARI suggested window is not in the past.
 func (cfg *Config) managedCertNeedsRenewal(certRes CertificateResource, emitLogs bool) (time.Duration, *x509.Certificate, bool) {
 	certChain, err := parseCertsFromPEMBundle(certRes.CertificatePEM)
 	if err != nil || len(certChain) == 0 {
 		return 0, nil, true
 	}
+	var replacesCert *x509.Certificate
 	var ari acme.RenewalInfo
 	if !cfg.DisableARI {
 		if ariPtr, err := certRes.getARI(); err == nil && ariPtr != nil {
 			ari = *ariPtr
+
+			// only indicate replacement if the ARI suggested window is not in the past.
+			if time.Now().Before(ari.SuggestedWindow.End) {
+				replacesCert = certChain[0]
+			}
 		}
 	}
 	remaining := time.Until(expiresAt(certChain[0]))
-	return remaining, certChain[0], cfg.certNeedsRenewal(certChain[0], ari, emitLogs)
+	return remaining, replacesCert, cfg.certNeedsRenewal(certChain[0], ari, emitLogs)
 }
 
 func (cfg *Config) emit(ctx context.Context, eventName string, data map[string]any) error {
