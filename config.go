@@ -1249,7 +1249,7 @@ func (cfg *Config) checkStorage(ctx context.Context) error {
 		contents[i+6] = byte(v >> 48)
 		contents[i+7] = byte(v >> 56)
 	}
-	err = cfg.Storage.Store(ctx, key, contents)
+	err := cfg.Storage.Store(ctx, key, contents)
 	if err != nil {
 		return err
 	}
