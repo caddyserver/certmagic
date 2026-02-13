@@ -28,7 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	weakrand "math/rand"
+	weakrand "math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -1236,11 +1236,20 @@ func (cfg *Config) checkStorage(ctx context.Context) error {
 	}
 	key := fmt.Sprintf("rw_test_%d", weakrand.Int())
 	contents := make([]byte, 1024*10) // size sufficient for one or two ACME resources
-	_, err := weakrand.Read(contents)
-	if err != nil {
-		return err
+	// This is how ChaCha8.Read works, without handling the case where the slice length is not a multiple of 8.
+	// This also avoids the use of a mutex and an import.
+	for i := 0; i < len(contents); i += 8 {
+		v := weakrand.Uint64()
+		contents[i] = byte(v)
+		contents[i+1] = byte(v >> 8)
+		contents[i+2] = byte(v >> 16)
+		contents[i+3] = byte(v >> 24)
+		contents[i+4] = byte(v >> 32)
+		contents[i+5] = byte(v >> 40)
+		contents[i+6] = byte(v >> 48)
+		contents[i+7] = byte(v >> 56)
 	}
-	err = cfg.Storage.Store(ctx, key, contents)
+	err := cfg.Storage.Store(ctx, key, contents)
 	if err != nil {
 		return err
 	}
