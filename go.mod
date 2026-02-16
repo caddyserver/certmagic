@@ -3,7 +3,7 @@ module github.com/caddyserver/certmagic
 go 1.24.0
 
 require (
-	github.com/caddyserver/zerossl v0.1.4
+	github.com/caddyserver/zerossl v0.1.5
 	github.com/klauspost/cpuid/v2 v2.3.0
 	github.com/libdns/libdns v1.1.1
 	github.com/mholt/acmez/v3 v3.1.4
