@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io/fs"
+	"os"
 	"sort"
 	"strings"
 
@@ -370,3 +371,45 @@ const (
 	RSA4096 = KeyType("rsa4096")
 	RSA8192 = KeyType("rsa8192")
 )
+
+// FileKeyGenerator reads a pre-existing private key from a file
+// instead of generating a new random one.
+type FileKeyGenerator struct {
+	// KeyFilename is the path to the PEM-encoded private key file.
+	KeyFilename string
+}
+
+// GenerateKey reads the private key from the file, parses the PEM block,
+// and returns the underlying crypto.PrivateKey expected by CertMagic.
+func (fkg FileKeyGenerator) GenerateKey() (crypto.PrivateKey, error) {
+	if fkg.KeyFilename == "" {
+		return nil, errors.New("no key filename specified")
+	}
+
+	keyData, err := os.ReadFile(fkg.KeyFilename)
+	if err != nil {
+		return nil, fmt.Errorf("reading private key file %s: %v", fkg.KeyFilename, err)
+	}
+
+	block, _ := pem.Decode(keyData)
+	if block == nil {
+		return nil, fmt.Errorf("failed to find a valid PEM block in the key file: %s", fkg.KeyFilename)
+	}
+
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		switch key := key.(type) {
+		case *rsa.PrivateKey, *ecdsa.PrivateKey, ed25519.PrivateKey:
+			return key, nil
+		default:
+			return nil, fmt.Errorf("found unknown private key type in PKCS#8 wrapping: %T", key)
+		}
+	}
+	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+
+	return nil, errors.New("failed to parse private key: unsupported or invalid format")
+}
