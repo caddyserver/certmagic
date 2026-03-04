@@ -270,7 +270,13 @@ func (iss *ACMEIssuer) newBasicACMEClient() (*acmez.Client, error) {
 			Directory:  caURL,
 			UserAgent:  buildUAString(),
 			HTTPClient: iss.httpClient,
-			Logger:     slog.New(zapslog.NewHandler(iss.Logger.Named("acme_client").Core())),
+			Logger: slog.New(zapslog.NewHandler(
+				iss.Logger.Core(),
+				zapslog.WithName(iss.Logger.Name()+".acme_client"),
+				// the default enables traces at ERROR level, this disables
+				// them by setting it to a level higher than any other level
+				zapslog.AddStacktraceAt(slog.Level(127)),
+			)),
 		},
 	}, nil
 }
