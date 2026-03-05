@@ -435,7 +435,7 @@ func (cfg Config) makeCertificateWithOCSP(ctx context.Context, certPEMBlock, key
 		err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
 		if errors.Is(err, ErrNoOCSPServerSpecified) {
 			cfg.Logger.Debug("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
-		} else {
+		} else if err != nil {
 			cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
 		}
 	}
