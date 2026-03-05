@@ -486,33 +486,26 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 		cert.Certificate.Leaf = leaf
 	}
 
-	// for convenience, we do want to assemble all the
-	// subjects on the certificate into one list
-	if leaf.Subject.CommonName != "" { // TODO: CommonName is deprecated
-		cert.Names = []string{strings.ToLower(leaf.Subject.CommonName)}
-	}
+	// for convenience, we do want to assemble all the subjects on the certificate
+	// into one list (except for CommonName, which has been deprecated for ~30 years,
+	// and becomes problematic in several instances, e.g. #356)
 	for _, name := range leaf.DNSNames {
-		if name != leaf.Subject.CommonName { // TODO: CommonName is deprecated
-			cert.Names = append(cert.Names, strings.ToLower(name))
-		}
+		cert.Names = append(cert.Names, strings.ToLower(name))
 	}
 	for _, ip := range leaf.IPAddresses {
-		if ipStr := ip.String(); ipStr != leaf.Subject.CommonName { // TODO: CommonName is deprecated
-			cert.Names = append(cert.Names, strings.ToLower(ipStr))
-		}
+		cert.Names = append(cert.Names, strings.ToLower(ip.String()))
 	}
 	for _, email := range leaf.EmailAddresses {
-		if email != leaf.Subject.CommonName { // TODO: CommonName is deprecated
-			cert.Names = append(cert.Names, strings.ToLower(email))
-		}
+		cert.Names = append(cert.Names, strings.ToLower(email))
 	}
 	for _, u := range leaf.URIs {
-		if u.String() != leaf.Subject.CommonName { // TODO: CommonName is deprecated
-			cert.Names = append(cert.Names, u.String())
-		}
+		cert.Names = append(cert.Names, u.String())
 	}
 	if len(cert.Names) == 0 {
-		return fmt.Errorf("certificate has no names")
+		if leaf.Subject.CommonName != "" {
+			return fmt.Errorf("certificate only has CommonName, which is not supported (deprecated in year 2000)")
+		}
+		return fmt.Errorf("certificate has no SANs")
 	}
 
 	cert.hash = hashCertificateChain(cert.Certificate.Certificate)
