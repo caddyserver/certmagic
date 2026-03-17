@@ -53,7 +53,7 @@ func stapleOCSP(ctx context.Context, ocspConfig OCSPConfig, storage Storage, cer
 		// we need a PEM encoding only for some function calls below
 		bundle := new(bytes.Buffer)
 		for _, derBytes := range cert.Certificate.Certificate {
-			pem.Encode(bundle, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+			_ = pem.Encode(bundle, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
 		}
 		pemBundle = bundle.Bytes()
 	}

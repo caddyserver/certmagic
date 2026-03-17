@@ -302,7 +302,7 @@ func TestGetAccountAlreadyExistsSkipsBroken(t *testing.T) {
 	email := "me@foobar.com"
 
 	// Create a "corrupted" account
-	am.config.Storage.Store(ctx, am.storageKeyUserReg(am.CA, "notmeatall@foobar.com"), []byte("this is not a valid account"))
+	_ = am.config.Storage.Store(ctx, am.storageKeyUserReg(am.CA, "notmeatall@foobar.com"), []byte("this is not a valid account"))
 
 	// Create the actual account
 	account, err := am.newAccount(email)
