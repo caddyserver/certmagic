@@ -382,11 +382,23 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 			continue
 		}
 
-		// TODO: consider doing this in a goroutine if async, to utilize multiple cores while loading certs
 		// otherwise, begin management immediately
-		err := cfg.manageOne(ctx, domainName, async)
-		if err != nil {
-			return err
+		if async {
+			// don't block loading, since stapling OCSP uses the network and could block all other certs
+			// from being managed... (kind of tricky to make it truly async any lower-level than this)
+			go func(subject string) {
+				err := cfg.manageOne(ctx, subject, async)
+				if err != nil {
+					cfg.Logger.Error("initiating certificate management",
+						zap.String("subject", subject),
+						zap.Error(err))
+				}
+			}(domainName)
+		} else {
+			err := cfg.manageOne(ctx, domainName, async)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
