@@ -1131,10 +1131,10 @@ func (cfg *Config) RevokeCert(ctx context.Context, domain string, reason int, in
 	return nil
 }
 
-// TLSConfig is an opinionated method that returns a recommended, modern
-// TLS configuration that can be used to configure TLS listeners. Aside
-// from safe, modern defaults, this method sets two critical fields on the
-// TLS config which are required to enable automatic certificate
+// TLSConfig returns a recommended, modern TLS configuration that can be used
+// to configure TLS listeners. Aside from using the safe, modern defaults
+// implemented by the Go standard library, this method sets two critical fields
+// on the TLS config which are required to enable automatic certificate
 // management: GetCertificate and NextProtos.
 //
 // The GetCertificate field is necessary to get certificates from memory
@@ -1158,15 +1158,6 @@ func (cfg *Config) TLSConfig() *tls.Config {
 		// these two fields necessary for TLS-ALPN challenge
 		GetCertificate: cfg.GetCertificate,
 		NextProtos:     []string{acmez.ACMETLS1Protocol},
-
-		// the rest recommended for modern TLS servers
-		MinVersion: tls.VersionTLS12,
-		CurvePreferences: []tls.CurveID{
-			tls.X25519,
-			tls.CurveP256,
-		},
-		CipherSuites:             preferredDefaultCipherSuites(),
-		PreferServerCipherSuites: true,
 	}
 }
 
