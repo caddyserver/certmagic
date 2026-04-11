@@ -189,6 +189,37 @@ func TestSubjectQualifiesForPublicCert(t *testing.T) {
 	}
 }
 
+func TestHostOnly(t *testing.T) {
+	for i, test := range []struct {
+		input  string
+		expect string
+	}{
+		// hostname without port
+		{"example.com", "example.com"},
+		// hostname with port
+		{"example.com:443", "example.com"},
+		// IPv4 without port
+		{"1.2.3.4", "1.2.3.4"},
+		// IPv4 with port
+		{"1.2.3.4:80", "1.2.3.4"},
+		// IPv6 without port and without brackets
+		{"::1", "::1"},
+		// IPv6 with port (brackets required by RFC 7230)
+		{"[::1]:80", "::1"},
+		// IPv6 without port but with brackets (Go's HTTP server format for host-only)
+		{"[::1]", "::1"},
+		// full IPv6 without port but with brackets
+		{"[2001:db8::1]", "2001:db8::1"},
+		// full IPv6 with port
+		{"[2001:db8::1]:8080", "2001:db8::1"},
+	} {
+		actual := hostOnly(test.input)
+		if actual != test.expect {
+			t.Errorf("Test %d: hostOnly(%q) = %q, want %q", i, test.input, actual, test.expect)
+		}
+	}
+}
+
 func TestMatchWildcard(t *testing.T) {
 	for i, test := range []struct {
 		subject, wildcard string
@@ -217,6 +248,10 @@ func TestMatchWildcard(t *testing.T) {
 		{"1.2.3.4.5.6", "*.*.*.*.*.*", true},
 		{"0.1.2.3.4.5.6", "*.*.*.*.*.*", false},
 		{"1.2.3.4", "1.2.3.*", false}, // https://tools.ietf.org/html/rfc2818#section-3.1
+		// Bracketed IPv6 subjects (from HTTP Host headers) must match bare IPv6 wildcards.
+		{"[::1]", "::1", true},
+		{"[2001:db8::1]", "2001:db8::1", true},
+		{"[::1]", "::2", false},
 	} {
 		actual := MatchWildcard(test.subject, test.wildcard)
 		if actual != test.expect {
