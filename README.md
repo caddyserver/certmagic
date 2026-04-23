@@ -1,5 +1,10 @@
 <p align="center">
-	<a href="https://pkg.go.dev/github.com/caddyserver/certmagic?tab=doc"><img src="https://user-images.githubusercontent.com/1128849/49704830-49d37200-fbd5-11e8-8385-767e0cd033c3.png" alt="CertMagic" width="550"></a>
+	<a href="https://pkg.go.dev/github.com/caddyserver/certmagic?tab=doc">
+		<picture>
+			<source media="(prefers-color-scheme: dark)" srcset="docs/banner/certmagic-banner-dark.png">
+			<img src="docs/banner/certmagic-banner.png" alt="CertMagic" width="550">
+		</picture>
+	</a>
 </p>
 <h3 align="center">Easy and Powerful TLS Automation</h3>
 <p align="center">The same library used by the <a href="https://caddyserver.com">Caddy Web Server</a></p>
