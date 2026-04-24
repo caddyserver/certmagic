@@ -111,7 +111,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 		}
 
 		// the list of names on this cert should never be empty... programmer error?
-		if cert.Names == nil || len(cert.Names) == 0 {
+		if len(cert.Names) == 0 {
 			log.Warn("certificate has no names; removing from cache", zap.String("cert_key", certKey))
 			deleteQueue = append(deleteQueue, cert)
 			continue
@@ -123,12 +123,6 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 			log.Error("unable to get configuration to manage certificate; unable to renew",
 				zap.Strings("identifiers", cert.Names),
 				zap.Error(err))
-			continue
-		}
-		if cfg == nil {
-			// this is bad if this happens, probably a programmer error (oops)
-			log.Error("no configuration associated with certificate; unable to manage",
-				zap.Strings("identifiers", cert.Names))
 			continue
 		}
 		if cfg.OnDemand != nil {
@@ -474,7 +468,16 @@ func (cfg *Config) updateARI(ctx context.Context, cert Certificate, logger *zap.
 
 	// synchronize ARI fetching; see #297
 	lockName := "ari_" + cert.ari.UniqueIdentifier
-	if err := acquireLock(ctx, cfg.Storage, lockName); err != nil {
+	if _, ok := cfg.Storage.(TryLocker); ok {
+		ok, err := tryAcquireLock(ctx, cfg.Storage, lockName)
+		if err != nil {
+			return cert, false, fmt.Errorf("unable to obtain ARI lock: %v", err)
+		}
+		if !ok {
+			logger.Debug("attempted to obtain ARI lock but it was already taken")
+			return cert, false, nil
+		}
+	} else if err := acquireLock(ctx, cfg.Storage, lockName); err != nil {
 		return cert, false, fmt.Errorf("unable to obtain ARI lock: %v", err)
 	}
 	defer func() {

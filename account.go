@@ -36,9 +36,27 @@ import (
 	"go.uber.org/zap"
 )
 
-// getAccount either loads or creates a new account, depending on if
+// getAccountToUse will either load or create an account based on the configuration of the issuer.
+// It will try to get one from storage if one exists, and if not, it will create one, all the while
+// honoring the configured account key PEM (if any) to restrict which account is used.
+func (iss *ACMEIssuer) getAccountToUse(ctx context.Context, directory string) (acme.Account, error) {
+	var account acme.Account
+	var err error
+	if iss.AccountKeyPEM != "" {
+		iss.Logger.Info("using configured ACME account")
+		account, err = iss.GetAccount(ctx, []byte(iss.AccountKeyPEM))
+	} else {
+		account, err = iss.loadOrCreateAccount(ctx, directory, iss.getEmail())
+	}
+	if err != nil {
+		return acme.Account{}, fmt.Errorf("getting ACME account: %v", err)
+	}
+	return account, nil
+}
+
+// loadOrCreateAccount either loads or creates a new account, depending on if
 // an account can be found in storage for the given CA + email combo.
-func (am *ACMEIssuer) getAccount(ctx context.Context, ca, email string) (acme.Account, error) {
+func (am *ACMEIssuer) loadOrCreateAccount(ctx context.Context, ca, email string) (acme.Account, error) {
 	acct, err := am.loadAccount(ctx, ca, email)
 	if errors.Is(err, fs.ErrNotExist) {
 		am.Logger.Info("creating new account because no account for configured email is known to us",
@@ -407,7 +425,7 @@ func (am *ACMEIssuer) mostRecentAccountEmail(ctx context.Context, caURL string) 
 		return "", false
 	}
 
-	account, err := am.getAccount(ctx, caURL, path.Base(accountList[0]))
+	account, err := am.loadOrCreateAccount(ctx, caURL, path.Base(accountList[0]))
 	if err != nil {
 		return "", false
 	}

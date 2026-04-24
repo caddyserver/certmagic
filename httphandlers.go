@@ -15,6 +15,7 @@
 package certmagic
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -72,16 +73,102 @@ func (am *ACMEIssuer) distributedHTTPChallengeSolver(w http.ResponseWriter, r *h
 		return false
 	}
 	host := hostOnly(r.Host)
-	chalInfo, distributed, err := am.config.getChallengeInfo(r.Context(), host)
+	chalInfo, distributed, err := am.config.getACMEChallengeInfo(r.Context(), host, !am.DisableDistributedSolvers)
 	if err != nil {
+		if am.DisableDistributedSolvers {
+			// Distributed solvers are disabled, so the only way an error can be returned is if
+			// this instance didn't initiate the challenge (or if the process exited after, but
+			// either way, we don't have the challenge info). Assuming this is a legitimate
+			// challenge request, we may still be able to solve it if we can present the correct
+			// account thumbprint with the token, since the token is given to us in the URL path.
+			//
+			// NOTE: About doing this, RFC 8555 section 8.3 says:
+			//
+			// 	Note that because the token appears both in the request sent by the
+			// 	ACME server and in the key authorization in the response, it is
+			// 	possible to build clients that copy the token from request to
+			// 	response.  Clients should avoid this behavior because it can lead to
+			// 	cross-site scripting vulnerabilities; instead, clients should be
+			// 	explicitly configured on a per-challenge basis.  A client that does
+			// 	copy tokens from requests to responses MUST validate that the token
+			// 	in the request matches the token syntax above (e.g., that it includes
+			// 	only characters from the base64url alphabet).
+			//
+			// Also, since we're just blindly solving a challenge, we're unable to mitigate DNS
+			// rebinding attacks, because we don't know what host to expect in the URL. So this
+			// is not ideal, but we do at least validate the copied token is in the base64url set.
+			if strings.HasPrefix(r.URL.Path, acmeHTTPChallengeBasePath) &&
+				strings.Count(r.URL.Path, "/") == 3 &&
+				r.Method == http.MethodGet {
+				tokenStart := strings.LastIndex(r.URL.Path, "/") + 1
+				token := r.URL.Path[tokenStart:]
+				if allBase64URL(token) {
+					if err := am.solveHTTPChallengeBlindly(w, r); err != nil {
+						am.Logger.Error("solving http-01 challenge blindly",
+							zap.String("identifier", host),
+							zap.Error(err))
+					}
+					return true
+				}
+			}
+		}
+
+		// couldn't get challenge info even with distributed solver
 		am.Logger.Warn("looking up info for HTTP challenge",
-			zap.String("host", host),
+			zap.String("uri", r.RequestURI),
+			zap.String("identifier", host),
 			zap.String("remote_addr", r.RemoteAddr),
 			zap.String("user_agent", r.Header.Get("User-Agent")),
 			zap.Error(err))
 		return false
 	}
+
 	return solveHTTPChallenge(am.Logger, w, r, chalInfo.Challenge, distributed)
+}
+
+// solveHTTPChallengeBlindly will try to respond correctly with an http-01 challenge response.
+// The request must be an http-01 challenge request. We cannot know for sure the ACME CA that
+// is requesting this, so we have to guess as we load the account to use for a thumbprint as
+// part of the response body. It is a no-op if the last component of the URL path contains
+// characters outside of the base64url alphabet.
+func (am *ACMEIssuer) solveHTTPChallengeBlindly(w http.ResponseWriter, r *http.Request) error {
+	tokenStart := strings.LastIndex(r.URL.Path, "/") + 1
+	token := r.URL.Path[tokenStart:]
+	if allBase64URL(token) {
+		acct, err := am.getAccountToUse(r.Context(), am.CA) // assume production CA, I guess
+		if err != nil {
+			return fmt.Errorf("getting an account to use: %v", err)
+		}
+		thumbprint, err := acct.Thumbprint()
+		if err != nil {
+			return fmt.Errorf("could not encode account thumbprint: %v", err)
+		}
+		w.Header().Add("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(token + "." + thumbprint))
+		r.Close = true
+		am.Logger.Info("served key authentication",
+			zap.String("identifier", hostOnly(r.Host)),
+			zap.String("challenge", "http-01"),
+			zap.String("remote", r.RemoteAddr),
+			zap.Bool("distributed", false),
+			zap.Bool("blind", true),
+			zap.String("ca", am.CA))
+	}
+	return nil
+}
+
+// allBase64URL returns true if all characters of s are in the base64url alphabet.
+func allBase64URL(s string) bool {
+	for _, c := range s {
+		if (c >= 'A' && c <= 'Z') ||
+			(c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') ||
+			c == '-' || c == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // solveHTTPChallenge solves the HTTP challenge using the given challenge information.

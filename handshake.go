@@ -298,9 +298,9 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	// domain, avoid pounding manager or storage thousands of times simultaneously. We use a similar sync
 	// strategy for obtaining certificate during handshake.
 	certLoadWaitChansMu.Lock()
-	wait, ok := certLoadWaitChans[name]
+	waiter, ok := certLoadWaitChans[name]
 	if ok {
-		// another goroutine is already loading the cert; just wait and we'll get it from the in-memory cache
+		// another goroutine is already loading the cert; just wait
 		certLoadWaitChansMu.Unlock()
 
 		timeout := time.NewTimer(2 * time.Minute)
@@ -310,33 +310,44 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 		case <-ctx.Done():
 			timeout.Stop()
 			return Certificate{}, ctx.Err()
-		case <-wait:
+		case <-waiter.done:
 			timeout.Stop()
 		}
 
-		return cfg.getCertDuringHandshake(ctx, hello, false)
-	} else {
-		// no other goroutine is currently trying to load this cert
-		wait = make(chan struct{})
-		certLoadWaitChans[name] = wait
-		certLoadWaitChansMu.Unlock()
+		// If the leader got a result from an external cert manager, use it
+		// directly — these certs are not added to the cache, so a recursive
+		// cache lookup would miss. For cached certs (on-demand, managed),
+		// the waiter result will be empty and we fall through to the
+		// original recursive lookup.
+		if !waiter.cert.Empty() || waiter.err != nil {
+			return waiter.cert, waiter.err
+		}
 
-		// unblock others and clean up when we're done
-		defer func() {
-			certLoadWaitChansMu.Lock()
-			close(wait)
-			delete(certLoadWaitChans, name)
-			certLoadWaitChansMu.Unlock()
-		}()
+		return cfg.getCertDuringHandshake(ctx, hello, false)
 	}
+
+	// no other goroutine is currently trying to load this cert
+	waiter = &certLoadWaiter{done: make(chan struct{})}
+	certLoadWaitChans[name] = waiter
+	certLoadWaitChansMu.Unlock()
+
+	// unblock others and clean up when we're done
+	defer func() {
+		certLoadWaitChansMu.Lock()
+		close(waiter.done)
+		delete(certLoadWaitChans, name)
+		certLoadWaitChansMu.Unlock()
+	}()
 
 	// If an external Manager is configured, try to get it from them.
 	// Only continue to use our own logic if it returns empty+nil.
 	externalCert, err := cfg.getCertFromAnyCertManager(ctx, hello, logger)
 	if err != nil {
+		waiter.err = err
 		return Certificate{}, err
 	}
 	if !externalCert.Empty() {
+		waiter.cert = externalCert
 		return externalCert, nil
 	}
 
@@ -599,7 +610,11 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 		if err != nil {
 			// An error with OCSP stapling is not the end of the world, and in fact, is
 			// quite common considering not all certs have issuer URLs that support it.
-			logger.Warn("stapling OCSP", zap.Error(err))
+			if errors.Is(err, ErrNoOCSPServerSpecified) {
+				logger.Debug("stapling OCSP", zap.Error(err))
+			} else {
+				logger.Warn("stapling OCSP", zap.Error(err))
+			}
 		} else {
 			logger.Debug("successfully stapled new OCSP response",
 				zap.Int("ocsp_status", cert.ocsp.Status),
@@ -849,7 +864,7 @@ func (cfg *Config) getCertFromAnyCertManager(ctx context.Context, hello *tls.Cli
 // solving). True is returned if the challenge is being solved distributed (there
 // is no semantic difference with distributed solving; it is mainly for logging).
 func (cfg *Config) getTLSALPNChallengeCert(clientHello *tls.ClientHelloInfo) (*tls.Certificate, bool, error) {
-	chalData, distributed, err := cfg.getChallengeInfo(clientHello.Context(), clientHello.ServerName)
+	chalData, distributed, err := cfg.getACMEChallengeInfo(clientHello.Context(), clientHello.ServerName, true)
 	if err != nil {
 		return nil, distributed, err
 	}
@@ -942,9 +957,19 @@ var (
 	obtainCertWaitChansMu sync.Mutex
 )
 
+// certLoadWaiter coordinates concurrent certificate loading for the same name.
+// The leader populates the result and closes the channel; waiters read the result
+// after the channel is closed. This allows externally-managed certificates (which
+// are not cached) to be shared directly with waiting goroutines.
+type certLoadWaiter struct {
+	done chan struct{}
+	cert Certificate
+	err  error
+}
+
 // TODO: this lockset should probably be per-cache
 var (
-	certLoadWaitChans   = make(map[string]chan struct{})
+	certLoadWaitChans   = make(map[string]*certLoadWaiter)
 	certLoadWaitChansMu sync.Mutex
 )
 
