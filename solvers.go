@@ -768,6 +768,8 @@ func dialTCPSocket(addr string) error {
 // GetACMEChallenge returns an active ACME challenge for the given identifier,
 // or false if no active challenge for that identifier is known.
 func GetACMEChallenge(identifier string) (Challenge, bool) {
+	// Strip brackets from IPv6 addresses (e.g. "[::1]" from HTTP Host headers).
+	identifier = hostOnly(identifier)
 	activeChallengesMu.Lock()
 	chalData, ok := activeChallenges[identifier]
 	activeChallengesMu.Unlock()

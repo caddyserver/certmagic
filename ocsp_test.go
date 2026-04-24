@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/ocsp"
@@ -151,6 +154,69 @@ func TestStapleOCSP(t *testing.T) {
 			t.Errorf("expected error %q but got %q", expected, err)
 		}
 	})
+}
+
+func TestValidateOCSPResponder(t *testing.T) {
+	issuer := mustMakeCertificate(t, caCert, caKey).Leaf
+
+	tests := []struct {
+		name    string
+		resp    *ocsp.Response
+		wantErr string
+	}{
+		{
+			name: "issuer signed response with no embedded cert",
+			resp: &ocsp.Response{Certificate: nil},
+		},
+		{
+			name: "embedded responder cert is issuer cert",
+			resp: &ocsp.Response{Certificate: issuer},
+		},
+		{
+			name: "delegated responder with OCSP signing eku",
+			resp: &ocsp.Response{Certificate: &x509.Certificate{
+				Subject: pkix.Name{CommonName: "Delegated OCSP Responder"},
+				ExtKeyUsage: []x509.ExtKeyUsage{
+					x509.ExtKeyUsageServerAuth,
+					x509.ExtKeyUsageOCSPSigning,
+				},
+			}},
+		},
+		{
+			name: "delegated responder without OCSP signing eku",
+			resp: &ocsp.Response{Certificate: &x509.Certificate{
+				Subject:     pkix.Name{CommonName: "Not Authorized"},
+				ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			}},
+			wantErr: "does not carry id-kp-OCSPSigning",
+		},
+		{
+			name: "delegated responder with empty eku",
+			resp: &ocsp.Response{Certificate: &x509.Certificate{
+				Subject: pkix.Name{CommonName: "No EKU"},
+			}},
+			wantErr: "does not carry id-kp-OCSPSigning",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateOCSPResponder(tc.resp, issuer)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got %q", tc.wantErr, err.Error())
+			}
+		})
+	}
 }
 
 func mustMakeCertificate(t *testing.T, cert, key string) Certificate {

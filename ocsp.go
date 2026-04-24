@@ -53,7 +53,7 @@ func stapleOCSP(ctx context.Context, ocspConfig OCSPConfig, storage Storage, cer
 		// we need a PEM encoding only for some function calls below
 		bundle := new(bytes.Buffer)
 		for _, derBytes := range cert.Certificate.Certificate {
-			pem.Encode(bundle, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+			_ = pem.Encode(bundle, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
 		}
 		pemBundle = bundle.Bytes()
 	}
@@ -235,6 +235,10 @@ func getOCSPForCert(ocspConfig OCSPConfig, bundle []byte) ([]byte, *ocsp.Respons
 		return nil, nil, fmt.Errorf("parsing OCSP response: %v", err)
 	}
 
+	if err := validateOCSPResponder(ocspRes, issuerCert); err != nil {
+		return nil, nil, fmt.Errorf("OCSP responder authorization check failed: %v", err)
+	}
+
 	return ocspResBytes, ocspRes, nil
 }
 
@@ -252,4 +256,27 @@ func freshOCSP(resp *ocsp.Response) bool {
 	// start checking OCSP staple about halfway through validity period for good measure
 	refreshTime := resp.ThisUpdate.Add(nextUpdate.Sub(resp.ThisUpdate) / 2)
 	return time.Now().Before(refreshTime)
+}
+
+// validateOCSPResponder enforces RFC 6960 §4.2.2.2: "Systems or applications that
+// rely on OCSP responses MUST be capable of detecting and enforcing the use of the
+// id-kp-OCSPSigning value." An issuer-signed response (where the embedded Certificate
+// field is nil, meaning the issuer signed directly) is always acceptable.
+func validateOCSPResponder(ocspResp *ocsp.Response, issuerCert *x509.Certificate) error {
+	respCert := ocspResp.Certificate
+
+	// if response was signed directly by the issuer, or embedded responder cert IS the issuer, accept
+	if respCert == nil || respCert.Equal(issuerCert) {
+		// Response was signed directly by the issuer — always valid.
+		return nil
+	}
+
+	// RFC 6960 §4.2.2.2 requires id-kp-OCSPSigning for delegated responders
+	for _, eku := range respCert.ExtKeyUsage {
+		if eku == x509.ExtKeyUsageOCSPSigning {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("OCSP responder certificate (subject: %s) is not the issuer and does not carry id-kp-OCSPSigning", respCert.Subject)
 }

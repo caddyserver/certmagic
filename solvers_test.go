@@ -155,3 +155,25 @@ func Test_challengeKey(t *testing.T) {
 		})
 	}
 }
+
+func TestGetACMEChallenge_IPv6Brackets(t *testing.T) {
+	// Store a challenge under a bare IPv6 identifier (as CertMagic does internally).
+	bare := "::1"
+	activeChallengesMu.Lock()
+	activeChallenges[bare] = Challenge{}
+	activeChallengesMu.Unlock()
+	defer func() {
+		activeChallengesMu.Lock()
+		delete(activeChallenges, bare)
+		activeChallengesMu.Unlock()
+	}()
+
+	// Lookup with bracketed IPv6 (as received from Go's HTTP server via r.Host).
+	if _, ok := GetACMEChallenge("[::1]"); !ok {
+		t.Error("GetACMEChallenge(\"[::1]\") should find challenge stored under \"::1\"")
+	}
+	// Lookup with bare IPv6 should still work.
+	if _, ok := GetACMEChallenge("::1"); !ok {
+		t.Error("GetACMEChallenge(\"::1\") should find challenge stored under \"::1\"")
+	}
+}
