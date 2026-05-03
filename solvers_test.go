@@ -15,8 +15,11 @@
 package certmagic
 
 import (
+	"net"
+	"strconv"
 	"testing"
 
+	"github.com/caddyserver/certmagic/internal/filedescriptor"
 	"github.com/mholt/acmez/v3/acme"
 )
 
@@ -175,5 +178,54 @@ func TestGetACMEChallenge_IPv6Brackets(t *testing.T) {
 	// Lookup with bare IPv6 should still work.
 	if _, ok := GetACMEChallenge("::1"); !ok {
 		t.Error("GetACMEChallenge(\"::1\") should find challenge stored under \"::1\"")
+	}
+}
+
+func TestTryListen(t *testing.T) {
+	// Make sure that a regular TCP address still works.
+	regularLn, err := robustTryListen("127.0.0.1:8080")
+	if err != nil {
+		t.Fatalf("robustTryListen with regular address: %v", err)
+	}
+	regularLn.Close()
+
+	// The rest of the tests only make sense on Unix-like systems
+	if !filedescriptor.IsUnix {
+		t.Skip("file descriptor tests only work on Unix-like systems")
+	}
+
+	// Create a new file descriptor containing a TCP listening socket
+	fdLn, err := net.Listen("tcp", "127.0.0.1:8080")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+	defer fdLn.Close()
+
+	// Get the pseudo-address of the file descriptor.
+	fd, err := fdLn.(*net.TCPListener).File()
+	if err != nil {
+		t.Fatalf("TCPListener.File: %v", err)
+	}
+	correctName := "fd/" + strconv.FormatUint(uint64(fd.Fd()), 10)
+
+	// Make sure that we can listen on the file descriptor.
+	correctLn, err := robustTryListen(correctName)
+	if err != nil {
+		t.Fatalf("robustTryListen: %v", err)
+	}
+	correctLn.Close()
+
+	// Make sure that it still works when we add a port number.
+	correctLn, err = robustTryListen(correctName + ":80")
+	if err != nil {
+		t.Fatalf("robustTryListen with port: %v", err)
+	}
+	correctLn.Close()
+
+	// Make up a fake file descriptor that shouldn't exist.
+	fakeName := "fd/123456"
+	_, err = robustTryListen(fakeName)
+	if err == nil {
+		t.Fatalf("robustTryListen(%q) should have failed", fakeName)
 	}
 }

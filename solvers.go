@@ -22,13 +22,16 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"path"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/caddyserver/certmagic/internal/filedescriptor"
 	"github.com/libdns/libdns"
 	"github.com/mholt/acmez/v3"
 	"github.com/mholt/acmez/v3/acme"
@@ -708,6 +711,7 @@ func getSolverInfo(address string) *solverInfo {
 // which is useful for our challenge servers, where we assume
 // that whatever is already listening can solve the challenges.
 func robustTryListen(addr string) (net.Listener, error) {
+
 	var listenErr error
 	for i := 0; i < 2; i++ {
 		// doesn't hurt to sleep briefly before the second
@@ -718,17 +722,56 @@ func robustTryListen(addr string) (net.Listener, error) {
 
 		// if we can bind the socket right away, great!
 		var ln net.Listener
-		ln, listenErr = net.Listen("tcp", addr)
-		if listenErr == nil {
-			return ln, nil
-		}
 
-		// if it failed just because the socket is already in use, we
-		// have no choice but to assume that whatever is using the socket
-		// can answer the challenge already, so we ignore the error
-		connectErr := dialTCPSocket(addr)
-		if connectErr == nil {
-			return nil, nil
+		// First, try to parse the address as a file descriptor. When testing
+		// with Caddy, the address contains a port number (even though that
+		// doesn't really make sense for a file descriptor), so remove that too.
+		fd, err := strconv.ParseUint(strings.Split(strings.TrimPrefix(addr, "fd/"), ":")[0], 0, strconv.IntSize)
+		if err == nil {
+			// os.NewFile takes ownership of the file descriptor, so if
+			// something else is using the file descriptor, this would be bad
+			// since it means that closing the os.File would also close the
+			// underlying file descriptor out from under the other user. So
+			// instead we'll duplicate the file descriptor here, then we can
+			// safely do whatever we want with it.
+			fd, listenErr := filedescriptor.Dup(int(fd))
+			if listenErr != nil {
+				continue
+			}
+
+			// net.FileListener internally duplicates the file descriptor, so we
+			// can unconditionally close the "file" after creating the listener.
+			file := os.NewFile(uintptr(fd), addr)
+			defer file.Close()
+
+			// net.FileListener will return an error if the file descriptor is
+			// not a stream socket, so we don't need to check ourselves. But the
+			// socket could be a Unix socket, so we still need to check for that
+			// and raise an error if so.
+			ln, listenErr = net.FileListener(file)
+			if listenErr == nil {
+				return ln, nil
+			}
+
+			if ln.Addr().Network() != "tcp" {
+				ln.Close()
+				return nil, fmt.Errorf("file descriptor %d is not a TCP socket", fd)
+			}
+
+			return ln, nil
+		} else {
+			ln, listenErr = net.Listen("tcp", addr)
+			if listenErr == nil {
+				return ln, nil
+			}
+
+			// if it failed just because the socket is already in use, we
+			// have no choice but to assume that whatever is using the socket
+			// can answer the challenge already, so we ignore the error
+			connectErr := dialTCPSocket(addr)
+			if connectErr == nil {
+				return nil, nil
+			}
 		}
 
 		// Hmm, we couldn't connect to the socket, so something else must
