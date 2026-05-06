@@ -4,14 +4,20 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ocsp"
 )
@@ -219,6 +225,126 @@ func TestValidateOCSPResponder(t *testing.T) {
 	}
 }
 
+func TestStapleOCSPDelegatedResponderAuthorization(t *testing.T) {
+	now := time.Now().Add(-1 * time.Hour)
+
+	issuerCert, issuerKey, issuerPEM := mustIssueTestCertificate(t, &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test issuer"},
+		NotBefore:             now,
+		NotAfter:              now.Add(48 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}, nil, nil)
+
+	issuedCert, issuedKey, issuedPEM := mustIssueTestCertificate(t, &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "victim.example"},
+		DNSNames:     []string{"victim.example"},
+		NotBefore:    now,
+		NotAfter:     now.Add(30 * 24 * time.Hour),
+		OCSPServer:   []string{"http://ocsp.example.test"},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}, issuerCert, issuerKey)
+
+	issuedKeyPEM, err := PEMEncodePrivateKey(issuedKey)
+	if err != nil {
+		t.Fatalf("encoding issued certificate key: %v", err)
+	}
+	bundle := append(append([]byte{}, issuedPEM...), issuerPEM...)
+
+	tests := []struct {
+		name                 string
+		responderSerial      int64
+		responderCommonName  string
+		responderExtKeyUsage []x509.ExtKeyUsage
+		wantErr              string
+		wantStaple           bool
+	}{
+		{
+			name:                "authorized OCSP responder is stapled",
+			responderSerial:     3,
+			responderCommonName: "authorized-responder.example",
+			responderExtKeyUsage: []x509.ExtKeyUsage{
+				x509.ExtKeyUsageOCSPSigning,
+			},
+			wantStaple: true,
+		},
+		{
+			name:                 "same issuer server auth responder is rejected",
+			responderSerial:      4,
+			responderCommonName:  "server-auth-responder.example",
+			responderExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			wantErr:              "does not carry id-kp-OCSPSigning",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			responderCert, responderKey, _ := mustIssueTestCertificate(t, &x509.Certificate{
+				SerialNumber: big.NewInt(tc.responderSerial),
+				Subject:      pkix.Name{CommonName: tc.responderCommonName},
+				DNSNames:     []string{tc.responderCommonName},
+				NotBefore:    now,
+				NotAfter:     now.Add(30 * 24 * time.Hour),
+				KeyUsage:     x509.KeyUsageDigitalSignature,
+				ExtKeyUsage:  tc.responderExtKeyUsage,
+			}, issuerCert, issuerKey)
+
+			responseBytes, err := ocsp.CreateResponse(issuerCert, responderCert, ocsp.Response{
+				Status:       ocsp.Good,
+				SerialNumber: issuedCert.SerialNumber,
+				ThisUpdate:   time.Now().Add(-5 * time.Minute).UTC(),
+				NextUpdate:   time.Now().Add(2 * time.Hour).UTC(),
+				Certificate:  responderCert,
+			}, responderKey)
+			if err != nil {
+				t.Fatalf("creating OCSP response: %v", err)
+			}
+
+			responder := startOCSPResponder(t, map[string][]byte{
+				issuedCert.SerialNumber.String(): responseBytes,
+			})
+			defer responder.Close()
+
+			cert, err := makeCertificate(issuedPEM, issuedKeyPEM)
+			if err != nil {
+				t.Fatalf("making issued certificate: %v", err)
+			}
+
+			config := OCSPConfig{
+				ResponderOverrides: map[string]string{
+					"http://ocsp.example.test": responder.URL,
+				},
+			}
+			storage := &FileStorage{Path: t.TempDir()}
+
+			err = stapleOCSP(context.Background(), config, storage, &cert, bundle)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected error containing %q, got %q", tc.wantErr, err.Error())
+				}
+				if cert.Certificate.OCSPStaple != nil {
+					t.Fatal("unexpected OCSP staple for unauthorized responder")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantStaple && !bytes.Equal(cert.Certificate.OCSPStaple, responseBytes) {
+				t.Fatal("expected OCSP response to be stapled")
+			}
+		})
+	}
+}
+
 func mustMakeCertificate(t *testing.T, cert, key string) Certificate {
 	t.Helper()
 	c, err := makeCertificate([]byte(cert), []byte(key))
@@ -245,4 +371,32 @@ func startOCSPResponder(
 		w.Write(responses[request.SerialNumber.String()])
 	}
 	return httptest.NewServer(http.HandlerFunc(h))
+}
+
+func mustIssueTestCertificate(
+	t *testing.T,
+	tmpl, parent *x509.Certificate,
+	parentKey crypto.Signer,
+) (*x509.Certificate, crypto.Signer, []byte) {
+	t.Helper()
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating private key: %v", err)
+	}
+	if parent == nil {
+		parent = tmpl
+		parentKey = priv
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, parent, priv.Public(), parentKey)
+	if err != nil {
+		t.Fatalf("creating certificate: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parsing certificate: %v", err)
+	}
+
+	return cert, priv, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
