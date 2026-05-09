@@ -15,11 +15,14 @@
 package certmagic
 
 import (
+	"context"
 	"net"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/caddyserver/certmagic/internal/filedescriptor"
+	"github.com/libdns/libdns"
 	"github.com/mholt/acmez/v3/acme"
 )
 
@@ -157,6 +160,63 @@ func Test_challengeKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDNSManagerCleanUpRecordPreservesProviderData(t *testing.T) {
+	provider := &providerDataDeleteProvider{t: t}
+	manager := DNSManager{
+		DNSProvider:        provider,
+		PropagationTimeout: time.Second,
+	}
+
+	err := manager.cleanUpRecord(context.Background(), zoneRecord{
+		zone: "example.com.",
+		record: libdns.TXT{
+			Name: "_acme-challenge",
+			Text: "token",
+			TTL:  time.Minute,
+			ProviderData: map[string]string{
+				"id": "123",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("cleanup failed: %v", err)
+	}
+	if !provider.deleted {
+		t.Fatal("expected DeleteRecords to be called")
+	}
+}
+
+type providerDataDeleteProvider struct {
+	t       *testing.T
+	deleted bool
+}
+
+func (p *providerDataDeleteProvider) AppendRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	return records, nil
+}
+
+func (p *providerDataDeleteProvider) DeleteRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	p.deleted = true
+	if zone != "example.com." {
+		p.t.Fatalf("expected zone example.com., got %q", zone)
+	}
+	if len(records) != 1 {
+		p.t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	txt, ok := records[0].(libdns.TXT)
+	if !ok {
+		p.t.Fatalf("expected libdns.TXT with provider data, got %T", records[0])
+	}
+	pd, ok := txt.ProviderData.(map[string]string)
+	if !ok {
+		p.t.Fatalf("expected ProviderData map, got %T", txt.ProviderData)
+	}
+	if pd["id"] != "123" {
+		p.t.Fatalf("expected provider ID 123, got %q", pd["id"])
+	}
+	return records, nil
 }
 
 func TestGetACMEChallenge_IPv6Brackets(t *testing.T) {

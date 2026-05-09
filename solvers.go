@@ -410,7 +410,7 @@ func (m *DNSManager) createRecord(ctx context.Context, dnsName, recordType, reco
 		return zoneRecord{}, fmt.Errorf("expected one record, got %d: %v", len(results), results)
 	}
 
-	return zoneRecord{zone, results[0].RR()}, nil
+	return zoneRecord{zone, results[0]}, nil
 }
 
 // wait blocks until the TXT record created in Present() appears in
@@ -445,12 +445,13 @@ func (m *DNSManager) wait(ctx context.Context, zrec zoneRecord) error {
 	checkAuthoritativeServers := len(m.Resolvers) == 0
 	resolvers := RecursiveNameservers(m.Resolvers)
 
+	rr := zrec.record.RR()
 	recType := dns.TypeTXT
-	if zrec.record.RR().Type == "CNAME" {
+	if rr.Type == "CNAME" {
 		recType = dns.TypeCNAME
 	}
 
-	absName := libdns.AbsoluteName(zrec.record.Name, zrec.zone)
+	absName := libdns.AbsoluteName(rr.Name, zrec.zone)
 
 	var err error
 	start := time.Now()
@@ -463,14 +464,14 @@ func (m *DNSManager) wait(ctx context.Context, zrec zoneRecord) error {
 
 		logger.Debug("checking DNS propagation",
 			zap.String("fqdn", absName),
-			zap.String("record_type", zrec.record.Type),
-			zap.String("expected_data", zrec.record.Data),
+			zap.String("record_type", rr.Type),
+			zap.String("expected_data", rr.Data),
 			zap.Strings("resolvers", resolvers))
 
 		var ready bool
-		ready, err = checkDNSPropagation(ctx, logger, absName, recType, zrec.record.Data, checkAuthoritativeServers, resolvers)
+		ready, err = checkDNSPropagation(ctx, logger, absName, recType, rr.Data, checkAuthoritativeServers, resolvers)
 		if err != nil {
-			return fmt.Errorf("checking DNS propagation of %q (relative=%s zone=%s resolvers=%v): %w", absName, zrec.record.Name, zrec.zone, resolvers, err)
+			return fmt.Errorf("checking DNS propagation of %q (relative=%s zone=%s resolvers=%v): %w", absName, rr.Name, zrec.zone, resolvers, err)
 		}
 		if ready {
 			return nil
@@ -482,7 +483,7 @@ func (m *DNSManager) wait(ctx context.Context, zrec zoneRecord) error {
 
 type zoneRecord struct {
 	zone   string
-	record libdns.RR
+	record libdns.Record
 }
 
 // CleanUp deletes the DNS TXT record created in Present().
@@ -506,11 +507,12 @@ func (m *DNSManager) cleanUpRecord(_ context.Context, zrec zoneRecord) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	rr := zrec.record.RR()
 	logger.Debug("deleting DNS record",
 		zap.String("zone", zrec.zone),
-		zap.String("record_name", zrec.record.Name),
-		zap.String("record_type", zrec.record.Type),
-		zap.String("record_data", zrec.record.Data))
+		zap.String("record_name", rr.Name),
+		zap.String("record_type", rr.Type),
+		zap.String("record_data", rr.Data))
 
 	_, err := m.DNSProvider.DeleteRecords(ctx, zrec.zone, []libdns.Record{zrec.record})
 	if err != nil {
@@ -552,7 +554,8 @@ func (s *DNSManager) getDNSPresentMemory(dnsName, recType, value string) (dnsPre
 	var memory dnsPresentMemory
 	var found bool
 	for _, mem := range s.records[dnsName] {
-		if mem.zoneRec.record.Type == recType && mem.zoneRec.record.Data == value {
+		rr := mem.zoneRec.record.RR()
+		if rr.Type == recType && rr.Data == value {
 			memory = mem
 			found = true
 			break
@@ -570,7 +573,7 @@ func (s *DNSManager) deleteDNSPresentMemory(dnsName, keyAuth string) {
 	defer s.recordsMu.Unlock()
 
 	for i, mem := range s.records[dnsName] {
-		if mem.zoneRec.record.Data == keyAuth {
+		if mem.zoneRec.record.RR().Data == keyAuth {
 			s.records[dnsName] = append(s.records[dnsName][:i], s.records[dnsName][i+1:]...)
 			return
 		}
