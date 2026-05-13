@@ -16,6 +16,7 @@ package certmagic
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net"
 	"testing"
 )
@@ -78,6 +79,10 @@ func TestGetCertificate(t *testing.T) {
 	// When cache is NOT empty but there's no SNI
 	if _, err := cfg.GetCertificate(helloNoSNI); err == nil {
 		t.Errorf("Expected TLS allert when no SNI and no DefaultServerName, but got: %v", err)
+	} else {
+		if !errors.Is(err, ErrCertNotAvailable) {
+			t.Errorf("Expected ErrCertNotAvailable, got: %v", err)
+		}
 	}
 
 	// When no certificate matches, raise an alert

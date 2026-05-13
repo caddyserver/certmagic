@@ -31,6 +31,13 @@ import (
 	"golang.org/x/net/idna"
 )
 
+var (
+	// ErrCertNotAvailable is returned when no certificates are available for given name.
+	ErrCertNotAvailable = errors.New("no certificates available")
+	// ErrCertTimeout is returned when obtaining a certificate times out.
+	ErrCertTimeout = errors.New("certificate timeout")
+)
+
 // GetCertificate gets a certificate to satisfy clientHello. In getting
 // the certificate, it abides the rules and settings defined in the Config
 // that matches clientHello.ServerName. It tries to get certificates in
@@ -238,7 +245,7 @@ func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificat
 		return choices[0], nil
 	}
 	if len(choices) == 0 {
-		return Certificate{}, fmt.Errorf("no certificates available")
+		return Certificate{}, ErrCertNotAvailable
 	}
 
 	// Slow path: There are choices, so we need to check each of them.
@@ -306,7 +313,7 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 		timeout := time.NewTimer(2 * time.Minute)
 		select {
 		case <-timeout.C:
-			return Certificate{}, fmt.Errorf("timed out waiting to load certificate for %s", name)
+			return Certificate{}, fmt.Errorf("%w: timed out waiting to load certificate for %s", ErrCertTimeout, name)
 		case <-ctx.Done():
 			timeout.Stop()
 			return Certificate{}, ctx.Err()
@@ -412,7 +419,7 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 		zap.Bool("load_or_obtain_if_necessary", loadOrObtainIfNecessary),
 		zap.Bool("on_demand", cfg.OnDemand != nil))
 
-	return Certificate{}, fmt.Errorf("no certificate available for '%s'", name)
+	return Certificate{}, fmt.Errorf("%w: name: %s", ErrCertNotAvailable, name)
 }
 
 // loadCertFromStorage loads the certificate for name from storage and maintains it
@@ -487,7 +494,7 @@ func (cfg *Config) checkIfCertShouldBeObtained(ctx context.Context, name string,
 		}
 		if len(cfg.OnDemand.hostAllowlist) > 0 {
 			if _, ok := cfg.OnDemand.hostAllowlist[name]; !ok {
-				return fmt.Errorf("certificate for '%s' is not managed", name)
+				return fmt.Errorf("%w: certificate for '%s' is not managed", ErrCertNotAvailable, name)
 			}
 		}
 	}
@@ -522,7 +529,7 @@ func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.Cli
 		timeout := time.NewTimer(2 * time.Minute)
 		select {
 		case <-timeout.C:
-			return Certificate{}, fmt.Errorf("timed out waiting to obtain certificate for %s", name)
+			return Certificate{}, fmt.Errorf("%w: timed out waiting to obtain certificate for %s", ErrCertTimeout, name)
 		case <-wait:
 			timeout.Stop()
 		}
