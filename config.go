@@ -28,7 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	weakrand "math/rand"
+	weakrand "math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -382,11 +382,23 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 			continue
 		}
 
-		// TODO: consider doing this in a goroutine if async, to utilize multiple cores while loading certs
 		// otherwise, begin management immediately
-		err := cfg.manageOne(ctx, domainName, async)
-		if err != nil {
-			return err
+		if async {
+			// don't block loading, since stapling OCSP uses the network and could block all other certs
+			// from being managed... (kind of tricky to make it truly async any lower-level than this)
+			go func(subject string) {
+				err := cfg.manageOne(ctx, subject, async)
+				if err != nil {
+					cfg.Logger.Error("initiating certificate management",
+						zap.String("subject", subject),
+						zap.Error(err))
+				}
+			}(domainName)
+		} else {
+			err := cfg.manageOne(ctx, domainName, async)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1120,10 +1132,10 @@ func (cfg *Config) RevokeCert(ctx context.Context, domain string, reason int, in
 	return nil
 }
 
-// TLSConfig is an opinionated method that returns a recommended, modern
-// TLS configuration that can be used to configure TLS listeners. Aside
-// from safe, modern defaults, this method sets two critical fields on the
-// TLS config which are required to enable automatic certificate
+// TLSConfig returns a recommended, modern TLS configuration that can be used
+// to configure TLS listeners. Aside from using the safe, modern defaults
+// implemented by the Go standard library, this method sets two critical fields
+// on the TLS config which are required to enable automatic certificate
 // management: GetCertificate and NextProtos.
 //
 // The GetCertificate field is necessary to get certificates from memory
@@ -1147,15 +1159,6 @@ func (cfg *Config) TLSConfig() *tls.Config {
 		// these two fields necessary for TLS-ALPN challenge
 		GetCertificate: cfg.GetCertificate,
 		NextProtos:     []string{acmez.ACMETLS1Protocol},
-
-		// the rest recommended for modern TLS servers
-		MinVersion: tls.VersionTLS12,
-		CurvePreferences: []tls.CurveID{
-			tls.X25519,
-			tls.CurveP256,
-		},
-		CipherSuites:             preferredDefaultCipherSuites(),
-		PreferServerCipherSuites: true,
 	}
 }
 
@@ -1237,11 +1240,20 @@ func (cfg *Config) checkStorage(ctx context.Context) error {
 	}
 	key := fmt.Sprintf("rw_test_%d", weakrand.Int())
 	contents := make([]byte, 1024*10) // size sufficient for one or two ACME resources
-	_, err := weakrand.Read(contents)
-	if err != nil {
-		return err
+	// This is how ChaCha8.Read works, without handling the case where the slice length is not a multiple of 8.
+	// This also avoids the use of a mutex and an import.
+	for i := 0; i < len(contents); i += 8 {
+		v := weakrand.Uint64()
+		contents[i] = byte(v)
+		contents[i+1] = byte(v >> 8)
+		contents[i+2] = byte(v >> 16)
+		contents[i+3] = byte(v >> 24)
+		contents[i+4] = byte(v >> 32)
+		contents[i+5] = byte(v >> 40)
+		contents[i+6] = byte(v >> 48)
+		contents[i+7] = byte(v >> 56)
 	}
-	err = cfg.Storage.Store(ctx, key, contents)
+	err := cfg.Storage.Store(ctx, key, contents)
 	if err != nil {
 		return err
 	}

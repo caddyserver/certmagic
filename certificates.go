@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"os"
 	"strings"
@@ -128,7 +128,7 @@ func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo
 		if selectedTime.IsZero() &&
 			(!ari.SuggestedWindow.Start.IsZero() && !ari.SuggestedWindow.End.IsZero()) {
 			start, end := ari.SuggestedWindow.Start.Unix()+1, ari.SuggestedWindow.End.Unix()
-			selectedTime = time.Unix(rand.Int63n(end-start)+start, 0).UTC()
+			selectedTime = time.Unix(rand.Int64N(end-start)+start, 0).UTC()
 			logger.Warn("no renewal time had been selected with ARI; chose an ephemeral one for now",
 				zap.Time("ephemeral_selected_time", selectedTime))
 		}
@@ -435,7 +435,7 @@ func (cfg Config) makeCertificateWithOCSP(ctx context.Context, certPEMBlock, key
 		err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
 		if errors.Is(err, ErrNoOCSPServerSpecified) {
 			cfg.Logger.Debug("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
-		} else {
+		} else if err != nil {
 			cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
 		}
 	}
@@ -651,6 +651,11 @@ func isInternalIP(addr string) bool {
 func hostOnly(hostport string) string {
 	host, _, err := net.SplitHostPort(hostport)
 	if err != nil {
+		// May be a bare IPv6 address in brackets without a port (e.g. "[::1]").
+		// net.SplitHostPort requires a port when brackets are present, so strip them.
+		if len(hostport) > 1 && hostport[0] == '[' && hostport[len(hostport)-1] == ']' {
+			return hostport[1 : len(hostport)-1]
+		}
 		return hostport // OK; probably had no port to begin with
 	}
 	return host
@@ -665,6 +670,8 @@ func hostOnly(hostport string) string {
 // It uses DNS wildcard matching logic and is case-insensitive.
 // https://tools.ietf.org/html/rfc2818#section-3.1
 func MatchWildcard(subject, wildcard string) bool {
+	// Strip brackets from IPv6 addresses (e.g. "[::1]" from HTTP Host headers).
+	subject = hostOnly(subject)
 	subject, wildcard = strings.ToLower(subject), strings.ToLower(wildcard)
 	if subject == wildcard {
 		return true
