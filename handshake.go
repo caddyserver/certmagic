@@ -269,7 +269,7 @@ func DefaultCertificateSelector(hello *tls.ClientHelloInfo, choices []Certificat
 // An error will be returned if and only if no certificate is available.
 //
 // This function is safe for concurrent use.
-func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.ClientHelloInfo, loadOrObtainIfNecessary bool) (Certificate, error) {
+func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.ClientHelloInfo, loadOrObtainIfNecessary bool) (retCert Certificate, retErr error) {
 	logger := logWithRemote(cfg.Logger.Named("handshake"), hello)
 
 	// First check our in-memory cache to see if we've already loaded it
@@ -314,11 +314,9 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 			timeout.Stop()
 		}
 
-		// If the leader got a result from an external cert manager, use it
-		// directly — these certs are not added to the cache, so a recursive
-		// cache lookup would miss. For cached certs (on-demand, managed),
-		// the waiter result will be empty and we fall through to the
-		// original recursive lookup.
+		// Use the leader's outcome directly; fall back to the recursive
+		// cache lookup only if it finished with neither a cert nor an
+		// error.
 		if !waiter.cert.Empty() || waiter.err != nil {
 			return waiter.cert, waiter.err
 		}
@@ -334,6 +332,12 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	// unblock others and clean up when we're done
 	defer func() {
 		certLoadWaitChansMu.Lock()
+		// Propagate our outcome to waiters so they don't recursively
+		// re-enter the wait queue and pile up; don't overwrite a result
+		// already set by the external-manager path.
+		if waiter.cert.Empty() && waiter.err == nil {
+			waiter.cert, waiter.err = retCert, retErr
+		}
 		close(waiter.done)
 		delete(certLoadWaitChans, name)
 		certLoadWaitChansMu.Unlock()
