@@ -106,12 +106,14 @@ func (cfg *Config) GetCertificateWithContext(ctx context.Context, clientHello *t
 // If a match is found, matched will be true. If no matches are found, matched
 // will be false and a "default" certificate will be returned with defaulted
 // set to true. If defaulted is false, then no certificates were available.
+// If matched or defaulted is true, matchedName is the cache lookup name that
+// selected the certificate.
 //
 // The logic in this function is adapted from the Go standard library,
 // which is by the Go Authors.
 //
 // This function is safe for concurrent use.
-func (cfg *Config) getCertificateFromCache(hello *tls.ClientHelloInfo) (cert Certificate, matched, defaulted bool) {
+func (cfg *Config) getCertificateFromCache(hello *tls.ClientHelloInfo) (cert Certificate, matched, defaulted bool, matchedName string) {
 	name := normalizedName(hello.ServerName)
 
 	if name == "" {
@@ -120,6 +122,7 @@ func (cfg *Config) getCertificateFromCache(hello *tls.ClientHelloInfo) (cert Cer
 			addr := localIPFromConn(hello.Conn)
 			cert, matched = cfg.selectCert(hello, addr)
 			if matched {
+				matchedName = addr
 				return
 			}
 		}
@@ -129,6 +132,7 @@ func (cfg *Config) getCertificateFromCache(hello *tls.ClientHelloInfo) (cert Cer
 			normDefault := normalizedName(cfg.DefaultServerName)
 			cert, defaulted = cfg.selectCert(hello, normDefault)
 			if defaulted {
+				matchedName = normDefault
 				return
 			}
 		}
@@ -136,6 +140,7 @@ func (cfg *Config) getCertificateFromCache(hello *tls.ClientHelloInfo) (cert Cer
 		// if SNI is specified, try an exact match first
 		cert, matched = cfg.selectCert(hello, name)
 		if matched {
+			matchedName = name
 			return
 		}
 
@@ -147,6 +152,7 @@ func (cfg *Config) getCertificateFromCache(hello *tls.ClientHelloInfo) (cert Cer
 			candidate := strings.Join(labels, ".")
 			cert, matched = cfg.selectCert(hello, candidate)
 			if matched {
+				matchedName = candidate
 				return
 			}
 		}
@@ -162,6 +168,7 @@ func (cfg *Config) getCertificateFromCache(hello *tls.ClientHelloInfo) (cert Cer
 		normFallback := normalizedName(cfg.FallbackServerName)
 		cert, defaulted = cfg.selectCert(hello, normFallback)
 		if defaulted {
+			matchedName = normFallback
 			return
 		}
 	}
@@ -273,7 +280,8 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 	logger := logWithRemote(cfg.Logger.Named("handshake"), hello)
 
 	// First check our in-memory cache to see if we've already loaded it
-	cert, matched, defaulted := cfg.getCertificateFromCache(hello)
+	cert, matched, defaulted, matchedName := cfg.getCertificateFromCache(hello)
+	var loadExactFromStorage bool
 	if matched {
 		logger.Debug("matched certificate in cache",
 			zap.Strings("subjects", cert.Names),
@@ -281,12 +289,24 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 			zap.Time("expiration", expiresAt(cert.Leaf)),
 			zap.String("hash", cert.hash))
 		if cert.managed && cfg.OnDemand != nil && loadOrObtainIfNecessary {
-			// On-demand certificates are maintained in the background, but
-			// maintenance is triggered by handshakes instead of by a timer
-			// as in maintain.go.
-			return cfg.optionalMaintenance(ctx, cfg.Logger.Named("on_demand"), cert, hello)
+			serverName := normalizedName(hello.ServerName)
+			if cert.Expired() && matchedName != serverName && strings.Contains(matchedName, "*") {
+				logger.Debug("cached wildcard certificate is expired; trying exact certificate for SNI",
+					zap.String("server_name", serverName),
+					zap.String("matched_identifier", matchedName),
+					zap.Strings("subjects", cert.Names),
+					zap.Time("expiration", expiresAt(cert.Leaf)))
+				loadExactFromStorage = true
+			} else {
+				// On-demand certificates are maintained in the background, but
+				// maintenance is triggered by handshakes instead of by a timer
+				// as in maintain.go.
+				return cfg.optionalMaintenance(ctx, cfg.Logger.Named("on_demand"), cert, hello)
+			}
 		}
-		return cert, nil
+		if !loadExactFromStorage {
+			return cert, nil
+		}
 	}
 
 	name, err := cfg.getNameFromClientHello(hello)
@@ -383,7 +403,7 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 
 	if loadDynamically && loadOrObtainIfNecessary {
 		// Check to see if we have one on disk
-		loadedCert, err := cfg.loadCertFromStorage(ctx, logger, hello)
+		loadedCert, err := cfg.loadCertFromStorage(ctx, logger, hello, loadExactFromStorage)
 		if err == nil {
 			return loadedCert, nil
 		}
@@ -420,14 +440,16 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 }
 
 // loadCertFromStorage loads the certificate for name from storage and maintains it
-// (as this is only called with on-demand TLS enabled).
-func (cfg *Config) loadCertFromStorage(ctx context.Context, logger *zap.Logger, hello *tls.ClientHelloInfo) (Certificate, error) {
+// (as this is only called with on-demand TLS enabled). If exactOnly is true, it
+// does not fall back to loading a wildcard certificate when the exact name is not
+// in storage.
+func (cfg *Config) loadCertFromStorage(ctx context.Context, logger *zap.Logger, hello *tls.ClientHelloInfo, exactOnly bool) (Certificate, error) {
 	name, err := cfg.getNameFromClientHello(hello)
 	if err != nil {
 		return Certificate{}, err
 	}
 	loadedCert, err := cfg.CacheManagedCertificate(ctx, name)
-	if errors.Is(err, fs.ErrNotExist) {
+	if errors.Is(err, fs.ErrNotExist) && !exactOnly {
 		// If no exact match, try a wildcard variant, which is something we can still use
 		labels := strings.Split(name, ".")
 		labels[0] = "*"
@@ -563,7 +585,7 @@ func (cfg *Config) obtainOnDemandCertificate(ctx context.Context, hello *tls.Cli
 	err = cfg.ObtainCertAsync(ctx, name)
 	if err == nil {
 		// load from storage while others wait to make the op as atomic as possible
-		cert, err = cfg.loadCertFromStorage(ctx, log, hello)
+		cert, err = cfg.loadCertFromStorage(ctx, log, hello, false)
 		if err != nil {
 			log.Error("loading newly-obtained certificate from storage", zap.String("server_name", name), zap.Error(err))
 		}
