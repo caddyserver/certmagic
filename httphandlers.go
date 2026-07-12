@@ -15,6 +15,7 @@
 package certmagic
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -114,7 +115,11 @@ func (am *ACMEIssuer) distributedHTTPChallengeSolver(w http.ResponseWriter, r *h
 		}
 
 		// couldn't get challenge info even with distributed solver
-		am.Logger.Warn("looking up info for HTTP challenge",
+		log := am.Logger.Warn
+		if errors.Is(err, errNoACMEChallengeInfo) {
+			log = am.Logger.Debug
+		}
+		log("looking up info for HTTP challenge",
 			zap.String("uri", r.RequestURI),
 			zap.String("identifier", host),
 			zap.String("remote_addr", r.RemoteAddr),
