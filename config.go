@@ -1206,7 +1206,7 @@ func (cfg *Config) getACMEChallengeInfo(ctx context.Context, identifier string, 
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		return Challenge{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)
+		return Challenge{}, false, fmt.Errorf("opening distributed challenge token file %s: %w", tokenKey, err)
 	}
 	if !challengeFound {
 		return Challenge{}, false, fmt.Errorf("%w: no information found to solve challenge for identifier: %s", errNoACMEChallengeInfo, identifier)

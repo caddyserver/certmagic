@@ -78,9 +78,10 @@ func TestHTTPChallengeHandlerNoOp(t *testing.T) {
 
 func TestHTTPChallengeLookupLogLevel(t *testing.T) {
 	tests := []struct {
-		name      string
-		storage   Storage
-		wantLevel zapcore.Level
+		name          string
+		storage       Storage
+		cancelRequest bool
+		wantLevel     zapcore.Level
 	}{
 		{
 			name:      "no active challenge",
@@ -92,6 +93,23 @@ func TestHTTPChallengeLookupLogLevel(t *testing.T) {
 			storage: loadResultStorage{
 				Storage: &memoryStorage{},
 				data:    []byte{},
+			},
+			wantLevel: zap.WarnLevel,
+		},
+		{
+			name: "request canceled",
+			storage: loadResultStorage{
+				Storage: &memoryStorage{},
+				err:     context.Canceled,
+			},
+			cancelRequest: true,
+			wantLevel:     zap.DebugLevel,
+		},
+		{
+			name: "storage operation canceled",
+			storage: loadResultStorage{
+				Storage: &memoryStorage{},
+				err:     context.Canceled,
 			},
 			wantLevel: zap.WarnLevel,
 		},
@@ -123,6 +141,11 @@ func TestHTTPChallengeLookupLogLevel(t *testing.T) {
 				"http://example.com/.well-known/acme-challenge/token",
 				nil,
 			)
+			if tt.cancelRequest {
+				ctx, cancel := context.WithCancel(req.Context())
+				cancel()
+				req = req.WithContext(ctx)
+			}
 			if am.HandleHTTPChallenge(httptest.NewRecorder(), req) {
 				t.Fatal("expected challenge request not to be handled")
 			}
