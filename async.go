@@ -134,14 +134,13 @@ func doWithRetry(ctx context.Context, log *zap.Logger, f func(context.Context) e
 					zap.Duration("retrying_in", retryIntervals[intervalIndex]),
 					zap.Duration("elapsed", time.Since(start)),
 					zap.Duration("max_duration", maxRetryDuration))
-
 			} else {
 				log.Error("final attempt; giving up",
 					zap.Error(err),
 					zap.Int("attempt", attempts),
 					zap.Duration("elapsed", time.Since(start)),
 					zap.Duration("max_duration", maxRetryDuration))
-				return nil
+				return err
 			}
 		}
 	}
