@@ -81,6 +81,44 @@ func TestCacheCertificate(t *testing.T) {
 	}
 }
 
+func TestCertificateNeedsRenewalConcurrentCacheOptions(t *testing.T) {
+	noop := func(Certificate) (*Config, error) { return new(Config), nil }
+	certCache := NewCache(CacheOptions{GetConfigForCert: noop})
+	defer certCache.Stop()
+
+	cfg := &Config{
+		Logger:    defaultTestLogger,
+		certCache: certCache,
+	}
+
+	cert := Certificate{
+		Certificate: tls.Certificate{
+			Leaf: &x509.Certificate{
+				NotBefore: time.Now().Add(-24 * time.Hour),
+				NotAfter:  time.Now().Add(24 * time.Hour),
+			},
+		},
+	}
+
+	done := make(chan struct{})
+
+	go func() {
+		for i := 0; i < 10000; i++ {
+			certCache.SetOptions(CacheOptions{
+				GetConfigForCert:   noop,
+				RenewCheckInterval: time.Duration(i+1) * time.Second,
+			})
+		}
+		close(done)
+	}()
+
+	for i := 0; i < 10000; i++ {
+		cert.NeedsRenewal(cfg)
+	}
+
+	<-done
+}
+
 func TestSubjectQualifiesForCert(t *testing.T) {
 	for i, test := range []struct {
 		host   string

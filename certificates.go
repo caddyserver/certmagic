@@ -96,6 +96,10 @@ func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo
 		return false
 	}
 
+	cfg.certCache.optionsMu.RLock()
+	renewCheckInterval := cfg.certCache.options.RenewCheckInterval
+	cfg.certCache.optionsMu.RUnlock()
+
 	expiration := expiresAt(leaf)
 
 	var logger *zap.Logger
@@ -105,7 +109,7 @@ func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo
 			zap.Time("expiration", expiration),
 			zap.String("ari_cert_id", ari.UniqueIdentifier),
 			zap.Timep("next_ari_update", ari.RetryAfter),
-			zap.Duration("renew_check_interval", cfg.certCache.options.RenewCheckInterval),
+			zap.Duration("renew_check_interval", renewCheckInterval),
 			zap.Time("window_start", ari.SuggestedWindow.Start),
 			zap.Time("window_end", ari.SuggestedWindow.End))
 	} else {
@@ -139,7 +143,7 @@ func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo
 			// time OR just before it if the next waking time would be after it; this
 			// cutoff can actually be before the start of the renewal window, but the spec
 			// author says that's OK: https://github.com/aarongable/draft-acme-ari/issues/71
-			cutoff := ari.SelectedTime.Add(-cfg.certCache.options.RenewCheckInterval)
+			cutoff := ari.SelectedTime.Add(-renewCheckInterval)
 			if time.Now().After(cutoff) {
 				logger.Info("certificate needs renewal based on ARI window",
 					zap.Time("selected_time", selectedTime),
@@ -176,7 +180,7 @@ func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo
 	// routine to check for renewals, to accommodate both exceptionally long and short
 	// cert lifetimes
 	if currentlyInRenewalWindow(leaf.NotBefore, expiration, 1.0/50.0) ||
-		time.Until(expiration) < cfg.certCache.options.RenewCheckInterval*5 {
+		time.Until(expiration) < renewCheckInterval*5 {
 		logger.Warn("certificate is in emergency renewal window; expiration imminent",
 			zap.Duration("remaining", time.Until(expiration)))
 		return true
