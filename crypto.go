@@ -34,6 +34,7 @@ import (
 	"strings"
 
 	"github.com/klauspost/cpuid/v2"
+	"github.com/mholt/acmez/v3/acme"
 	"github.com/zeebo/blake3"
 	"go.uber.org/zap"
 	"golang.org/x/net/idna"
@@ -173,7 +174,9 @@ func (cfg *Config) saveCertResource(ctx context.Context, issuer Issuer, cert Cer
 // loadCertResourceAnyIssuer loads and returns the certificate resource from any
 // of the configured issuers. If multiple are found (e.g. if there are 3 issuers
 // configured, and all 3 have a resource matching certNamesKey), then the newest
-// (latest NotBefore date) resource will be chosen.
+// (latest NotBefore date) resource will be chosen. If LoadFirstUsableCert is
+// set, the issuers after the first one holding a resource that does not need
+// renewal are not read.
 func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey string) (CertificateResource, error) {
 	// we can save some extra decoding steps if there's only one issuer, since
 	// we don't need to compare potentially multiple available resources to
@@ -213,6 +216,21 @@ func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey s
 			issuer:              issuer,
 			decoded:             certs[0],
 		})
+
+		// this issuer is preferred over the ones after it, so if its
+		// certificate is one we would serve as-is, reading theirs can only
+		// cost round-trips to find certificates we would not use
+		if cfg.LoadFirstUsableCert {
+			var ari acme.RenewalInfo
+			if !cfg.DisableARI {
+				if ariPtr, err := certRes.getARI(); err == nil && ariPtr != nil {
+					ari = *ariPtr
+				}
+			}
+			if !cfg.certNeedsRenewal(certs[0], ari, false) {
+				break
+			}
+		}
 	}
 	if len(certResources) == 0 {
 		if lastErr == nil {
