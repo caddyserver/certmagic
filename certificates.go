@@ -254,6 +254,15 @@ func expiresAt(cert *x509.Certificate) time.Time {
 func (cfg *Config) CacheManagedCertificate(ctx context.Context, domain string) (Certificate, error) {
 	domain = cfg.transformSubject(ctx, nil, domain)
 	cert, err := cfg.loadManagedCertificate(ctx, domain, cfg.cachedStorage())
+	if cfg.LocalCache != nil && errors.Is(err, errUnusableCert) {
+		// the local cache may hold a torn write, such as a renewed certificate
+		// next to the key it replaced; loading from storage replaces the local
+		// copies with ones that belong together
+		cfg.Logger.Warn("certificate assets from local cache are unusable; reloading from storage",
+			zap.String("identifier", domain),
+			zap.Error(err))
+		cert, err = cfg.loadManagedCertificate(ctx, domain, cfg.groundTruthStorage())
+	}
 	if err != nil {
 		return cert, err
 	}
@@ -294,7 +303,8 @@ func (cfg *Config) loadManagedCertificate(ctx context.Context, domain string, st
 	}
 	cert, err := cfg.makeCertificateWithOCSP(ctx, certRes.CertificatePEM, certRes.PrivateKeyPEM)
 	if err != nil {
-		return cert, err
+		// the assets were all there, they just don't make a certificate
+		return cert, fmt.Errorf("%w: %w", errUnusableCert, err)
 	}
 	cert.managed = true
 	cert.issuerKey = certRes.issuerKey

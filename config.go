@@ -147,6 +147,12 @@ type Config struct {
 	// Writes and deletions go to Storage first, then to the local
 	// cache. Since it is only a cache, it may be cleared at any time.
 	//
+	// A certificate's files are not written atomically as a group,
+	// so a write that fails partway through can leave the local
+	// cache with a renewed certificate beside the key it replaced.
+	// A certificate the local cache cannot supply a usable pair for
+	// is reloaded from Storage, which replaces the local copies.
+	//
 	// Beware that this stores private keys on every instance that
 	// serves them, so the local cache should be at least as secure
 	// as Storage.

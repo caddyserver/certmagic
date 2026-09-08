@@ -33,10 +33,14 @@ func testLocalCacheConfig(t *testing.T) (*Config, *ACMEIssuer, *recordingStorage
 	storage := &recordingStorage{Storage: &FileStorage{Path: t.TempDir()}}
 	localCache := &FileStorage{Path: t.TempDir()}
 	cfg := &Config{
-		Issuers:   []Issuer{am},
-		Storage:   storage,
-		Logger:    defaultTestLogger,
-		certCache: new(Cache),
+		Issuers: []Issuer{am},
+		Storage: storage,
+		Logger:  defaultTestLogger,
+		certCache: &Cache{
+			cache:      make(map[string]Certificate),
+			cacheIndex: make(map[string][]string),
+			logger:     defaultTestLogger,
+		},
 	}
 	am.config = cfg
 	return cfg, am, storage, localCache
@@ -50,6 +54,66 @@ func testCertResource(issuer Issuer, domain string) CertificateResource {
 		IssuerData:     mustJSON(acme.Certificate{URL: "https://example.com/cert"}),
 		issuerKey:      issuer.IssuerKey(),
 	}
+}
+
+// testIssuedCertResource is like testCertResource, but with a real
+// self-signed certificate and its matching private key, for tests that
+// need the two to actually pair up.
+func testIssuedCertResource(t *testing.T, issuer Issuer, domain string, notBefore time.Time) CertificateResource {
+	t.Helper()
+	_, key, certPEM := mustIssueTestCertificate(t, &x509.Certificate{
+		SerialNumber:          big.NewInt(notBefore.Unix()),
+		Subject:               pkix.Name{CommonName: domain},
+		DNSNames:              []string{domain},
+		NotBefore:             notBefore,
+		NotAfter:              notBefore.Add(90 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}, nil, nil)
+	keyPEM, err := PEMEncodePrivateKey(key)
+	if err != nil {
+		t.Fatalf("Expected no error encoding private key, got: %v", err)
+	}
+	res := testCertResource(issuer, domain)
+	res.CertificatePEM = certPEM
+	res.PrivateKeyPEM = keyPEM
+	return res
+}
+
+// simulateTornWrite leaves cfg's local cache the way a save that failed
+// partway through would: storage has a renewed certificate and its key, while
+// the local cache has the renewed certificate next to the key it replaced. It
+// returns the renewed resource.
+func simulateTornWrite(t *testing.T, cfg *Config, issuer Issuer, localCache Storage, domain string) CertificateResource {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now()
+
+	// the certificate this instance has been serving, in both tiers
+	err := cfg.saveCertResource(ctx, issuer, testIssuedCertResource(t, issuer, domain, now.Add(-60*24*time.Hour)))
+	if err != nil {
+		t.Fatalf("Expected no error saving cert resource, got: %v", err)
+	}
+
+	// as if another instance renewed it, which only reaches storage
+	renewed := testIssuedCertResource(t, issuer, domain, now)
+	localCacheOnly := cfg.LocalCache
+	cfg.LocalCache = nil
+	err = cfg.saveCertResource(ctx, issuer, renewed)
+	cfg.LocalCache = localCacheOnly
+	if err != nil {
+		t.Fatalf("Expected no error saving renewed cert resource, got: %v", err)
+	}
+
+	// and this instance picked up the renewed certificate, but not its key
+	err = localCache.Store(ctx, StorageKeys.SiteCert(issuer.IssuerKey(), domain), renewed.CertificatePEM)
+	if err != nil {
+		t.Fatalf("Expected no error storing renewed certificate locally, got: %v", err)
+	}
+
+	return renewed
 }
 
 func TestLocalCache(t *testing.T) {
@@ -108,6 +172,76 @@ func TestLocalCache(t *testing.T) {
 	}
 	if localCache.Exists(ctx, certKey) {
 		t.Errorf("Expected %s to be gone from the local cache", certKey)
+	}
+}
+
+func TestLocalCacheTornWrite(t *testing.T) {
+	ctx := context.Background()
+	const domain = "example.com"
+
+	cfg, am, storage, localCache := testLocalCacheConfig(t)
+	cfg.LocalCache = localCache
+	cfg.OCSP = OCSPConfig{DisableStapling: true}
+	renewed := simulateTornWrite(t, cfg, am, localCache, domain)
+
+	// the local certificate and key don't match, so loading them has to
+	// fall back to ground truth storage instead of failing the handshake
+	cert, err := cfg.CacheManagedCertificate(ctx, domain)
+	if err != nil {
+		t.Fatalf("Expected no error caching managed certificate, got: %v", err)
+	}
+	expected, err := makeCertificate(renewed.CertificatePEM, renewed.PrivateKeyPEM)
+	if err != nil {
+		t.Fatalf("Expected no error making the renewed certificate, got: %v", err)
+	}
+	if !bytes.Equal(cert.Leaf.Raw, expected.Leaf.Raw) {
+		t.Error("Expected the renewed certificate to be loaded")
+	}
+
+	// and the local cache is now the renewed certificate and its own key,
+	// so the next load doesn't need storage at all
+	for key, want := range map[string][]byte{
+		StorageKeys.SiteCert(am.IssuerKey(), domain):       renewed.CertificatePEM,
+		StorageKeys.SitePrivateKey(am.IssuerKey(), domain): renewed.PrivateKeyPEM,
+	} {
+		cached, err := localCache.Load(ctx, key)
+		if err != nil {
+			t.Fatalf("Expected no error loading %s from local cache, got: %v", key, err)
+		}
+		if !bytes.Equal(cached, want) {
+			t.Errorf("Expected %s in the local cache to be the renewed one", key)
+		}
+	}
+	storage.calls = nil
+	if _, err = cfg.CacheManagedCertificate(ctx, domain); err != nil {
+		t.Fatalf("Expected no error caching managed certificate, got: %v", err)
+	}
+	if len(storage.calls) > 0 {
+		t.Errorf("Expected no storage calls after recovery, got: %v", storage.calls)
+	}
+}
+
+func TestLocalCacheUnknownDomainLoadedOnce(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, _, storage, localCache := testLocalCacheConfig(t)
+	cfg.LocalCache = localCache
+
+	// a certificate the local cache doesn't have is looked up in storage
+	// anyway, so a certificate that isn't there either is not torn and
+	// must not be looked up a second time; on-demand TLS asks about
+	// domains with no certificate all the time
+	if _, err := cfg.CacheManagedCertificate(ctx, "not-in-storage.example.com"); err == nil {
+		t.Fatal("Expected an error caching an unknown certificate, got none")
+	}
+	loads := 0
+	for _, call := range storage.calls {
+		if call.name == "Load" {
+			loads++
+		}
+	}
+	if loads != 1 {
+		t.Errorf("Expected a single load, got %d: %v", loads, storage.calls)
 	}
 }
 

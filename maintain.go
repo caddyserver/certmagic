@@ -934,11 +934,12 @@ func (cfg *Config) moveCompromisedPrivateKey(ctx context.Context, cert Certifica
 	err = cfg.Storage.Store(ctx, compromisedPrivKeyStorageKey, privKeyPEM)
 	if err != nil {
 		// better safe than sorry: as a last resort, try deleting the key so it won't be reused
-		cfg.Storage.Delete(ctx, privKeyStorageKey)
+		cfg.groundTruthStorage().Delete(ctx, privKeyStorageKey)
 		return err
 	}
 
-	err = cfg.Storage.Delete(ctx, privKeyStorageKey)
+	// delete through the cert storage so the local cache lets go of it too
+	err = cfg.groundTruthStorage().Delete(ctx, privKeyStorageKey)
 	if err != nil {
 		return err
 	}

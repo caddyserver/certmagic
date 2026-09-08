@@ -55,6 +55,14 @@ func (cfg *Config) certStorage(readLocal bool) Storage {
 	}
 }
 
+// errUnusableCert means a certificate's assets were all loaded but do not make
+// a usable certificate: they don't parse, or the certificate and private key
+// don't belong together. Read through a LocalCache, that is what a write torn
+// between its files looks like, so reading them from Storage instead is worth
+// one try; other errors -- assets that are absent, or storage that is
+// unavailable -- say nothing about the local cache.
+var errUnusableCert = errors.New("unusable certificate")
+
 // localCacheStorage is a Storage that keeps a node-local copy of the items
 // it reads from and writes to the embedded, authoritative Storage. Only
 // Load, Store, and Delete are cached; everything else -- notably Exists,
