@@ -108,6 +108,34 @@ type Config struct {
 	// turn until one succeeds.
 	Issuers []Issuer
 
+	// By default, loading a certificate reads the certificate resource of
+	// every configured issuer and serves the newest of them, since any issuer
+	// may hold the most recent certificate for a name. That costs a storage
+	// round-trip per issuer on every load, including for issuers that have
+	// never issued for that name -- the usual case for an issuer configured
+	// only for failover.
+	//
+	// If LoadFirstUsableCert is true, a load stops reading issuers once one
+	// of them has a usable certificate, meaning one that does not need
+	// renewal. The newest of the resources it did read is still the one
+	// returned; only issuers that could not have supplied a certificate to
+	// serve are skipped.
+	//
+	// Nothing is skipped before a usable certificate is found: issuers that
+	// hold no certificate, or hold one that is due for renewal, are read and
+	// compared as usual, so a certificate obtained during failover is still
+	// found, and the newest still wins when none of them is usable.
+	//
+	// Issuers are documented to be in order of preference, which is what
+	// makes the certificate found first the right one to settle for. Note
+	// that an IssuerPolicy of UseFirstRandomIssuer gives up that order, so
+	// which issuer a load settles on is then arbitrary.
+	//
+	// This is worth setting when Storage is remote and the in-memory cache
+	// cannot hold every certificate being served, so that the round-trip
+	// skipped is one a TLS handshake would have waited for.
+	LoadFirstUsableCert bool
+
 	// How to select which issuer to use.
 	// Default: UseFirstIssuer (subject to change).
 	IssuerPolicy IssuerPolicy
