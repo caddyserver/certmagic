@@ -253,7 +253,16 @@ func expiresAt(cert *x509.Certificate) time.Time {
 // This method is safe for concurrent use.
 func (cfg *Config) CacheManagedCertificate(ctx context.Context, domain string) (Certificate, error) {
 	domain = cfg.transformSubject(ctx, nil, domain)
-	cert, err := cfg.loadManagedCertificate(ctx, domain)
+	cert, err := cfg.loadManagedCertificate(ctx, domain, cfg.cachedStorage())
+	if cfg.LocalCache != nil && errors.Is(err, errUnusableCert) {
+		// the local cache may hold a torn write, such as a renewed certificate
+		// next to the key it replaced; loading from storage replaces the local
+		// copies with ones that belong together
+		cfg.Logger.Warn("certificate assets from local cache are unusable; reloading from storage",
+			zap.String("identifier", domain),
+			zap.Error(err))
+		cert, err = cfg.loadManagedCertificate(ctx, domain, cfg.groundTruthStorage())
+	}
 	if err != nil {
 		return cert, err
 	}
@@ -262,17 +271,40 @@ func (cfg *Config) CacheManagedCertificate(ctx context.Context, domain string) (
 	return cert, nil
 }
 
+// WarmLocalCache copies the certificate assets for domain from Storage into
+// the LocalCache, so that a later handshake needing that certificate can load
+// it without reaching Storage; assets already in the local cache are left
+// alone. Unlike CacheManagedCertificate, the certificate is not put into the
+// in-memory cache, and no certificate operations are performed: this only
+// warms the local cache.
+//
+// It is an error to call this without a LocalCache configured, since there
+// would be nothing to warm. Callers warming many domains should limit their
+// concurrency.
+//
+// EXPERIMENTAL: Subject to change or removal.
+func (cfg *Config) WarmLocalCache(ctx context.Context, domain string) error {
+	if cfg.LocalCache == nil {
+		return fmt.Errorf("no local cache configured; nothing to warm")
+	}
+	domain = cfg.transformSubject(ctx, nil, domain)
+	_, err := cfg.loadCertResourceAnyIssuer(ctx, domain, cfg.cachedStorage())
+	return err
+}
+
 // loadManagedCertificate loads the managed certificate for domain from any
 // of the configured issuers' storage locations, but it does not add it to
-// the cache. It just loads from storage and returns it.
-func (cfg *Config) loadManagedCertificate(ctx context.Context, domain string) (Certificate, error) {
-	certRes, err := cfg.loadCertResourceAnyIssuer(ctx, domain)
+// the cache. It just loads from the given storage and returns it: see
+// cachedStorage and groundTruthStorage.
+func (cfg *Config) loadManagedCertificate(ctx context.Context, domain string, storage Storage) (Certificate, error) {
+	certRes, err := cfg.loadCertResourceAnyIssuer(ctx, domain, storage)
 	if err != nil {
 		return Certificate{}, err
 	}
 	cert, err := cfg.makeCertificateWithOCSP(ctx, certRes.CertificatePEM, certRes.PrivateKeyPEM)
 	if err != nil {
-		return cert, err
+		// the assets were all there, they just don't make a certificate
+		return cert, fmt.Errorf("%w: %w", errUnusableCert, err)
 	}
 	cert.managed = true
 	cert.issuerKey = certRes.issuerKey
@@ -346,7 +378,7 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, tlsCert tls
 			zap.Strings("sans", cert.Names))
 	}
 	if !cfg.OCSP.DisableStapling {
-		err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
+		err = stapleOCSP(ctx, cfg.OCSP, cfg.cachedStorage(), &cert, nil)
 		if err != nil {
 			if errors.Is(err, ErrNoOCSPServerSpecified) {
 				cfg.Logger.Debug("stapling OCSP", zap.Error(err))
@@ -432,7 +464,7 @@ func (cfg Config) makeCertificateWithOCSP(ctx context.Context, certPEMBlock, key
 		return cert, err
 	}
 	if !cfg.OCSP.DisableStapling {
-		err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
+		err = stapleOCSP(ctx, cfg.OCSP, cfg.cachedStorage(), &cert, certPEMBlock)
 		if errors.Is(err, ErrNoOCSPServerSpecified) {
 			cfg.Logger.Debug("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
 		} else if err != nil {
@@ -531,7 +563,9 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 // meantime, and it would be a good idea to simply load the cert
 // into our cache rather than repeating the renewal process again.
 func (cfg *Config) managedCertInStorageNeedsRenewal(ctx context.Context, cert Certificate) (bool, error) {
-	certRes, err := cfg.loadCertResourceAnyIssuer(ctx, cert.Names[0])
+	// this decides whether we renew, so it must observe what the rest of
+	// the cluster sees, not a possibly-stale local cache
+	certRes, err := cfg.loadCertResourceAnyIssuer(ctx, cert.Names[0], cfg.groundTruthStorage())
 	if err != nil {
 		return false, err
 	}
@@ -546,7 +580,9 @@ func (cfg *Config) managedCertInStorageNeedsRenewal(ctx context.Context, cert Ce
 // already in storage. It returns the newly-loaded certificate if successful.
 func (cfg *Config) reloadManagedCertificate(ctx context.Context, oldCert Certificate) (Certificate, error) {
 	cfg.Logger.Info("reloading managed certificate", zap.Strings("identifiers", oldCert.Names))
-	newCert, err := cfg.loadManagedCertificate(ctx, oldCert.Names[0])
+	// the point of reloading is usually to pick up a renewal from another
+	// instance, so read storage rather than the local cache
+	newCert, err := cfg.loadManagedCertificate(ctx, oldCert.Names[0], cfg.groundTruthStorage())
 	if err != nil {
 		return Certificate{}, fmt.Errorf("loading managed certificate for %v from storage: %v", oldCert.Names, err)
 	}

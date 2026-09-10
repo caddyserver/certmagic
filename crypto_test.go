@@ -25,13 +25,9 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"math/big"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/mholt/acmez/v3/acme"
 )
 
 func TestEncodeDecodeRSAPrivateKey(t *testing.T) {
@@ -132,34 +128,6 @@ func testTwoIssuerConfig(t *testing.T) (*Config, *ACMEIssuer, *ACMEIssuer, *reco
 	return cfg, preferred, fallback, storage
 }
 
-// testIssuedCertResource returns a certificate for domain from issuer, valid
-// for 90 days from notBefore.
-func testIssuedCertResource(t *testing.T, issuer Issuer, domain string, notBefore time.Time) CertificateResource {
-	t.Helper()
-	_, key, certPEM := mustIssueTestCertificate(t, &x509.Certificate{
-		SerialNumber:          big.NewInt(notBefore.Unix()),
-		Subject:               pkix.Name{CommonName: domain},
-		DNSNames:              []string{domain},
-		NotBefore:             notBefore,
-		NotAfter:              notBefore.Add(90 * 24 * time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-	}, nil, nil)
-	keyPEM, err := PEMEncodePrivateKey(key)
-	if err != nil {
-		t.Fatalf("Expected no error encoding private key, got: %v", err)
-	}
-	return CertificateResource{
-		SANs:           []string{domain},
-		CertificatePEM: certPEM,
-		PrivateKeyPEM:  keyPEM,
-		IssuerData:     mustJSON(acme.Certificate{URL: "https://example.com/cert"}),
-		issuerKey:      issuer.IssuerKey(),
-	}
-}
-
 // saveTestCertResource stores a certificate for domain from issuer, valid for
 // 90 days from notBefore.
 func saveTestCertResource(t *testing.T, cfg *Config, issuer Issuer, domain string, notBefore time.Time) {
@@ -195,7 +163,7 @@ func TestLoadCertResourceAnyIssuerPrefersNewestByDefault(t *testing.T) {
 	saveTestCertResource(t, cfg, fallback, domain, now)
 
 	storage.calls = nil
-	certRes, err := cfg.loadCertResourceAnyIssuer(context.Background(), domain)
+	certRes, err := cfg.loadCertResourceAnyIssuer(context.Background(), domain, cfg.Storage)
 	if err != nil {
 		t.Fatalf("Expected no error loading cert resource, got: %v", err)
 	}
@@ -220,7 +188,7 @@ func TestLoadFirstUsableCertSkipsLaterIssuers(t *testing.T) {
 	saveTestCertResource(t, cfg, fallback, domain, now)
 
 	storage.calls = nil
-	certRes, err := cfg.loadCertResourceAnyIssuer(context.Background(), domain)
+	certRes, err := cfg.loadCertResourceAnyIssuer(context.Background(), domain, cfg.Storage)
 	if err != nil {
 		t.Fatalf("Expected no error loading cert resource, got: %v", err)
 	}
@@ -246,7 +214,7 @@ func TestLoadFirstUsableCertLooksPastCertNeedingRenewal(t *testing.T) {
 	saveTestCertResource(t, cfg, fallback, domain, now)
 
 	storage.calls = nil
-	certRes, err := cfg.loadCertResourceAnyIssuer(context.Background(), domain)
+	certRes, err := cfg.loadCertResourceAnyIssuer(context.Background(), domain, cfg.Storage)
 	if err != nil {
 		t.Fatalf("Expected no error loading cert resource, got: %v", err)
 	}
@@ -265,7 +233,7 @@ func TestLoadFirstUsableCertFindsFailoverCert(t *testing.T) {
 
 	saveTestCertResource(t, cfg, fallback, domain, time.Now())
 
-	certRes, err := cfg.loadCertResourceAnyIssuer(context.Background(), domain)
+	certRes, err := cfg.loadCertResourceAnyIssuer(context.Background(), domain, cfg.Storage)
 	if err != nil {
 		t.Fatalf("Expected no error loading cert resource, got: %v", err)
 	}

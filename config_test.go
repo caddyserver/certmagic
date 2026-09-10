@@ -66,7 +66,7 @@ func TestSaveCertResource(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	siteData, err := testConfig.loadCertResource(ctx, am, domain)
+	siteData, err := testConfig.loadCertResource(ctx, am, domain, testConfig.groundTruthStorage())
 	if err != nil {
 		t.Fatalf("Expected no error reading site, got: %v", err)
 	}

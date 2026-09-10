@@ -168,7 +168,7 @@ func (cfg *Config) saveCertResource(ctx context.Context, issuer Issuer, cert Cer
 		},
 	}
 
-	return storeTx(ctx, cfg.Storage, all)
+	return storeTx(ctx, cfg.groundTruthStorage(), all)
 }
 
 // loadCertResourceAnyIssuer loads and returns the certificate resource from any
@@ -176,13 +176,13 @@ func (cfg *Config) saveCertResource(ctx context.Context, issuer Issuer, cert Cer
 // configured, and all 3 have a resource matching certNamesKey), then the newest
 // (latest NotBefore date) resource will be chosen. If LoadFirstUsableCert is
 // set, the issuers after the first one holding a resource that does not need
-// renewal are not read.
-func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey string) (CertificateResource, error) {
-	// we can save some extra decoding steps if there's only one issuer, since
+// renewal are not read. Callers pass the storage to load from: see
+// cachedStorage and groundTruthStorage.
+func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey string, storage Storage) (CertificateResource, error) {	// we can save some extra decoding steps if there's only one issuer, since
 	// we don't need to compare potentially multiple available resources to
 	// select the best one, when there's only one choice anyway
 	if len(cfg.Issuers) == 1 {
-		return cfg.loadCertResource(ctx, cfg.Issuers[0], certNamesKey)
+		return cfg.loadCertResource(ctx, cfg.Issuers[0], certNamesKey, storage)
 	}
 
 	type decodedCertResource struct {
@@ -196,7 +196,7 @@ func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey s
 	// load and decode all certificate resources found with the
 	// configured issuers so we can sort by newest
 	for _, issuer := range cfg.Issuers {
-		certRes, err := cfg.loadCertResource(ctx, issuer, certNamesKey)
+		certRes, err := cfg.loadCertResource(ctx, issuer, certNamesKey, storage)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				// not a problem, but we need to remember the error
@@ -254,8 +254,9 @@ func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey s
 	return certResources[0].CertificateResource, nil
 }
 
-// loadCertResource loads a certificate resource from the given issuer's storage location.
-func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certNamesKey string) (CertificateResource, error) {
+// loadCertResource loads a certificate resource from the given issuer's storage
+// location, using the given storage: see cachedStorage and groundTruthStorage.
+func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certNamesKey string, storage Storage) (CertificateResource, error) {
 	certRes := CertificateResource{issuerKey: issuer.IssuerKey()}
 
 	// don't use the Lookup profile because we might be loading a wildcard cert which is rejected by the Lookup profile
@@ -264,17 +265,17 @@ func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certName
 		return CertificateResource{}, fmt.Errorf("converting '%s' to ASCII: %v", certNamesKey, err)
 	}
 
-	keyBytes, err := cfg.Storage.Load(ctx, StorageKeys.SitePrivateKey(certRes.issuerKey, normalizedName))
+	keyBytes, err := storage.Load(ctx, StorageKeys.SitePrivateKey(certRes.issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err
 	}
 	certRes.PrivateKeyPEM = keyBytes
-	certBytes, err := cfg.Storage.Load(ctx, StorageKeys.SiteCert(certRes.issuerKey, normalizedName))
+	certBytes, err := storage.Load(ctx, StorageKeys.SiteCert(certRes.issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err
 	}
 	certRes.CertificatePEM = certBytes
-	metaBytes, err := cfg.Storage.Load(ctx, StorageKeys.SiteMeta(certRes.issuerKey, normalizedName))
+	metaBytes, err := storage.Load(ctx, StorageKeys.SiteMeta(certRes.issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err
 	}

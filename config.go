@@ -70,6 +70,16 @@ type Config struct {
 	// ignore returned errors.
 	OnEvent func(ctx context.Context, event string, data map[string]any) error
 
+	// An optional callback reporting whether an event
+	// is worth emitting. Returning false skips the
+	// OnEvent call entirely, so it must account for
+	// everything OnEvent does -- logging, metrics --
+	// not only subscribed handlers, and must never
+	// answer no for an event something would observe.
+	// If unset, every event is emitted. Called during
+	// handshakes and concurrently; keep it fast.
+	ShouldEmitFunc func(event string) bool
+
 	// DefaultServerName specifies a server name
 	// to use when choosing a certificate if the
 	// ClientHello's ServerName field is empty.
@@ -158,6 +168,35 @@ type Config struct {
 	// The storage to access when storing or loading
 	// TLS assets. Default is the local file system.
 	Storage Storage
+
+	// LocalCache is an optional, node-local Storage (for example a
+	// FileStorage on a local disk) used as a read-through cache in
+	// front of Storage for a certificate's assets: its certificate,
+	// private key, and metadata files, and its OCSP staple. This is
+	// useful when Storage is remote or high-latency, since assets are
+	// loaded from storage during handshakes whenever the in-memory
+	// cache does not have the certificate.
+	//
+	// Only reads that serve certificates are answered locally.
+	// Operations that coordinate with the rest of the cluster --
+	// renewals, issuance, and reloading a certificate that another
+	// instance renewed -- read Storage directly, and locking is never
+	// local; they all refresh the local cache with what they read.
+	// Writes and deletions go to Storage first, then to the local
+	// cache. Since it is only a cache, it may be cleared at any time.
+	//
+	// A certificate's files are not written atomically as a group,
+	// so a write that fails partway through can leave the local
+	// cache with a renewed certificate beside the key it replaced.
+	// A certificate the local cache cannot supply a usable pair for
+	// is reloaded from Storage, which replaces the local copies.
+	//
+	// Beware that this stores private keys on every instance that
+	// serves them, so the local cache should be at least as secure
+	// as Storage.
+	//
+	// EXPERIMENTAL: Subject to change or removal.
+	LocalCache Storage
 
 	// CertMagic will verify the storage configuration
 	// is acceptable before obtaining a certificate
@@ -287,6 +326,12 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	}
 	if cfg.OnEvent == nil {
 		cfg.OnEvent = Default.OnEvent
+		// the predicate is written for a specific handler, so it only
+		// comes along with the handler it belongs to; inheriting it onto
+		// a caller's own OnEvent could silence events it wants
+		if cfg.ShouldEmitFunc == nil {
+			cfg.ShouldEmitFunc = Default.ShouldEmitFunc
+		}
 	}
 	if cfg.KeySource == nil {
 		cfg.KeySource = Default.KeySource
@@ -299,6 +344,9 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	}
 	if cfg.Storage == nil {
 		cfg.Storage = Default.Storage
+	}
+	if cfg.LocalCache == nil {
+		cfg.LocalCache = Default.LocalCache
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = Default.Logger
@@ -380,7 +428,7 @@ func (cfg *Config) ClientCredentials(ctx context.Context, identifiers []string) 
 	}
 	var chains []tls.Certificate
 	for _, id := range identifiers {
-		certRes, err := cfg.loadCertResourceAnyIssuer(ctx, id)
+		certRes, err := cfg.loadCertResourceAnyIssuer(ctx, id, cfg.groundTruthStorage())
 		if err != nil {
 			return chains, err
 		}
@@ -891,8 +939,9 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			}
 		}
 
-		// prepare for renewal (load PEM cert, key, and meta)
-		certRes, err := cfg.loadCertResourceAnyIssuer(ctx, name)
+		// prepare for renewal (load PEM cert, key, and meta); we hold the lock,
+		// so read storage to see if another instance already renewed this
+		certRes, err := cfg.loadCertResourceAnyIssuer(ctx, name, cfg.groundTruthStorage())
 		if err != nil {
 			return err
 		}
@@ -1136,7 +1185,7 @@ func (cfg *Config) RevokeCert(ctx context.Context, domain string, reason int, in
 			return fmt.Errorf("issuer %d (%s) is not a Revoker", i, issuerKey)
 		}
 
-		certRes, err := cfg.loadCertResource(ctx, issuer, domain)
+		certRes, err := cfg.loadCertResource(ctx, issuer, domain, cfg.groundTruthStorage())
 		if err != nil {
 			return err
 		}
@@ -1331,19 +1380,20 @@ func (cfg *Config) storageHasCertResources(ctx context.Context, issuer Issuer, d
 // certificate, private key, and metadata file for domain from the
 // issuer with the given issuer key.
 func (cfg *Config) deleteSiteAssets(ctx context.Context, issuerKey, domain string) error {
-	err := cfg.Storage.Delete(ctx, StorageKeys.SiteCert(issuerKey, domain))
+	storage := cfg.groundTruthStorage()
+	err := storage.Delete(ctx, StorageKeys.SiteCert(issuerKey, domain))
 	if err != nil {
 		return fmt.Errorf("deleting certificate file: %v", err)
 	}
-	err = cfg.Storage.Delete(ctx, StorageKeys.SitePrivateKey(issuerKey, domain))
+	err = storage.Delete(ctx, StorageKeys.SitePrivateKey(issuerKey, domain))
 	if err != nil {
 		return fmt.Errorf("deleting private key: %v", err)
 	}
-	err = cfg.Storage.Delete(ctx, StorageKeys.SiteMeta(issuerKey, domain))
+	err = storage.Delete(ctx, StorageKeys.SiteMeta(issuerKey, domain))
 	if err != nil {
 		return fmt.Errorf("deleting metadata file: %v", err)
 	}
-	err = cfg.Storage.Delete(ctx, StorageKeys.CertsSitePrefix(issuerKey, domain))
+	err = storage.Delete(ctx, StorageKeys.CertsSitePrefix(issuerKey, domain))
 	if err != nil {
 		return fmt.Errorf("deleting site asset folder: %v", err)
 	}
@@ -1380,6 +1430,20 @@ func (cfg *Config) emit(ctx context.Context, eventName string, data map[string]a
 		return nil
 	}
 	return cfg.OnEvent(ctx, eventName, data)
+}
+
+// shouldEmit reports whether emitting the named event could reach
+// anything. Callers use it to avoid building an event's data when nothing
+// will see it; emit() cannot do that itself, since Go evaluates arguments
+// before it is entered. Only worth consulting on hot paths.
+func (cfg *Config) shouldEmit(eventName string) bool {
+	if cfg.OnEvent == nil {
+		return false
+	}
+	if cfg.ShouldEmitFunc == nil {
+		return true // no way to ask; assume it is
+	}
+	return cfg.ShouldEmitFunc(eventName)
 }
 
 // CertificateSelector is a type which can select a certificate to use given multiple choices.

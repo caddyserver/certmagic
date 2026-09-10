@@ -26,6 +26,43 @@ import (
 	"github.com/mholt/acmez/v3/acme"
 )
 
+type cleanupContextKey struct{}
+
+type cleanupContextSolver struct {
+	t         *testing.T
+	wantValue string
+	cleanedUp bool
+}
+
+func (*cleanupContextSolver) Present(context.Context, acme.Challenge) error { return nil }
+
+func (s *cleanupContextSolver) CleanUp(ctx context.Context, _ acme.Challenge) error {
+	s.cleanedUp = true
+	if err := ctx.Err(); err != nil {
+		s.t.Fatalf("cleanup context is canceled: %v", err)
+	}
+	if got := ctx.Value(cleanupContextKey{}); got != s.wantValue {
+		s.t.Fatalf("cleanup context value = %v, want %q", got, s.wantValue)
+	}
+	return nil
+}
+
+func TestSolverWrapperCleanUpUsesUncanceledContext(t *testing.T) {
+	const contextValue = "cleanup-value"
+
+	solver := &cleanupContextSolver{t: t, wantValue: contextValue}
+	wrapper := solverWrapper{Solver: solver}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), cleanupContextKey{}, contextValue))
+	cancel()
+
+	if err := wrapper.CleanUp(ctx, acme.Challenge{}); err != nil {
+		t.Fatalf("cleanup failed: %v", err)
+	}
+	if !solver.cleanedUp {
+		t.Fatal("expected wrapped solver cleanup to run")
+	}
+}
+
 func Test_challengeKey(t *testing.T) {
 	type args struct {
 		chal acme.Challenge
