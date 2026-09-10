@@ -873,6 +873,25 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 
 	name = cfg.transformSubject(ctx, log, name)
 
+	// If the certificate's resources are not in storage for any of the
+	// currently-configured issuers, there is nothing to renew: renewal reuses
+	// the stored certificate resource (to reuse the private key and to check
+	// whether renewal is still needed), so a missing resource can never be
+	// loaded and renewal would fail on every attempt until the certificate
+	// expires. This commonly happens when the issuer is changed (e.g. a
+	// different ACME CA) between config reloads while the previously-obtained
+	// certificate remains cached: the cached certificate belongs to an issuer
+	// that is no longer configured, so its resources live under a storage path
+	// that none of the current issuers will look at. In that case, obtain a
+	// fresh certificate from the currently-configured issuer(s) instead of
+	// retrying a renewal that can never succeed.
+	// See https://github.com/caddyserver/caddy/issues/6732
+	if !cfg.storageHasCertResourcesAnyIssuer(ctx, name) {
+		log.Info("certificate resources not found in storage for any configured issuer (issuer may have changed); obtaining a new certificate instead of renewing",
+			zap.String("identifier", name))
+		return cfg.obtainCert(ctx, name, interactive)
+	}
+
 	// ensure storage is writeable and readable
 	// TODO: this is not necessary every time; should only perform check once every so often for each storage, which may require some global state...
 	err := cfg.checkStorage(ctx)
