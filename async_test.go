@@ -199,3 +199,84 @@ func waitUntil(timeout time.Duration, cond func() bool) bool {
 	}
 	return cond()
 }
+
+// TestRenewalBackoffSchedule verifies the scheduling primitive that lets
+// queueRenewalTask pace retries itself instead of relying on a single
+// long-lived jm job sleeping between attempts (see caddyserver/caddy#7843:
+// after a transient DNS outage cleared, renewal did not happen again until
+// the process was restarted, because the in-flight job's own multi-hour
+// internal sleep -- not the periodic maintenance tick -- was governing
+// retries, and jm.Submit silently dropped every duplicate submission from
+// the maintenance tick in the meantime).
+//
+// It uses a fresh *renewalBackoff (not the shared package-level
+// renewalRetrySchedule) and a synthetic clock so it doesn't need to sleep
+// for real minutes/hours/days.
+func TestRenewalBackoffSchedule(t *testing.T) {
+	rb := &renewalBackoff{}
+	const name = "renew_example.com"
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// No recorded failures yet: always ready.
+	if !rb.readyFor(name) {
+		t.Fatal("expected a name with no recorded failure to be ready immediately")
+	}
+
+	// First failure: schedules the first retry interval out.
+	if exhausted := rb.recordFailure(name, now); exhausted {
+		t.Fatal("did not expect the retry budget to be exhausted after a single failure")
+	}
+	if rb.readyForAsOf(name, now) {
+		t.Fatal("expected name to not be ready for a retry immediately after recording a failure")
+	}
+
+	// Not ready right up until (but not including) the first retry interval.
+	almostThere := now.Add(retryIntervals[0] - time.Millisecond)
+	if rb.readyForAsOf(name, almostThere) {
+		t.Fatal("expected name to still not be ready just before its scheduled retry time")
+	}
+
+	// Ready once the first retry interval has elapsed.
+	dueTime := now.Add(retryIntervals[0])
+	if !rb.readyForAsOf(name, dueTime) {
+		t.Fatal("expected name to be ready once its scheduled retry time has passed")
+	}
+
+	// A second consecutive failure advances to the next (longer) interval,
+	// counted from when this second attempt happened.
+	if exhausted := rb.recordFailure(name, dueTime); exhausted {
+		t.Fatal("did not expect the retry budget to be exhausted after a second failure")
+	}
+	secondDue := dueTime.Add(retryIntervals[1])
+	if rb.readyForAsOf(name, secondDue.Add(-time.Millisecond)) {
+		t.Fatal("expected name to still be backing off before the second scheduled retry time")
+	}
+	if !rb.readyForAsOf(name, secondDue) {
+		t.Fatal("expected name to be ready once the second scheduled retry time has passed")
+	}
+
+	// clear() makes the name immediately ready again, as happens after a
+	// successful renewal.
+	rb.recordFailure(name, secondDue)
+	if rb.readyForAsOf(name, secondDue) {
+		t.Fatal("expected name to be backing off before calling clear")
+	}
+	rb.clear(name)
+	if !rb.readyForAsOf(name, secondDue) {
+		t.Fatal("expected name to be immediately ready after clear")
+	}
+
+	// Once the cumulative failure window reaches maxRetryDuration, the
+	// caller is told the budget is exhausted and the schedule resets, so a
+	// fresh maintenance tick is not throttled indefinitely (mirroring
+	// doWithRetry's own give-up-and-return behavior).
+	start := now
+	rb.recordFailure(name, start)
+	exhausted := rb.recordFailure(name, start.Add(maxRetryDuration))
+	if !exhausted {
+		t.Fatal("expected the retry budget to be reported exhausted once maxRetryDuration has elapsed")
+	}
+	if !rb.readyForAsOf(name, start.Add(maxRetryDuration)) {
+		t.Fatal("expected name to be immediately ready again after the retry budget was exhausted")
+	}
+}

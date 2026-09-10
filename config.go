@@ -823,16 +823,32 @@ func (cfg *Config) storageHasCertResourcesAnyIssuer(ctx context.Context, name st
 // cache with the new certificate. The certificate will not be renewed if it
 // is not close to expiring unless force is true.
 func (cfg *Config) RenewCertSync(ctx context.Context, name string, force bool) error {
-	return cfg.renewCert(ctx, name, force, true)
+	return cfg.renewCert(ctx, name, force, false, true)
 }
 
 // RenewCertAsync is the same as RenewCertSync(), except it runs in the
 // background; i.e. non-interactively, and with retries if it fails.
 func (cfg *Config) RenewCertAsync(ctx context.Context, name string, force bool) error {
-	return cfg.renewCert(ctx, name, force, false)
+	return cfg.renewCert(ctx, name, force, true, false)
 }
 
-func (cfg *Config) renewCert(ctx context.Context, name string, force, interactive bool) error {
+// renewCertOnce makes a single, non-interactive renewal attempt for name and
+// returns whatever error results, without looping through the retryIntervals
+// schedule internally. Unlike RenewCertSync, it never prompts on stdin
+// (interactive is always false for PreCheck/setEmail purposes), so it is safe
+// to call from a background goroutine. It still acquires/releases the same
+// storage lock as RenewCertSync/RenewCertAsync around the single attempt, so
+// cross-instance coordination is preserved.
+//
+// This exists for callers, such as the periodic maintenance loop, that
+// already have their own outer retry/backoff driver and therefore don't want
+// a single renewal job to camp on the jobManager dedup slot for its name for
+// up to maxRetryDuration; see queueRenewalTask.
+func (cfg *Config) renewCertOnce(ctx context.Context, name string, force bool) error {
+	return cfg.renewCert(ctx, name, force, false, false)
+}
+
+func (cfg *Config) renewCert(ctx context.Context, name string, force, retry, interactive bool) error {
 	if len(cfg.Issuers) == 0 {
 		return fmt.Errorf("no issuers configured; impossible to renew or check existing certificate in storage")
 	}
@@ -1050,10 +1066,10 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		return nil
 	}
 
-	if interactive {
-		err = f(ctx)
-	} else {
+	if retry {
 		err = doWithRetry(ctx, log, f)
+	} else {
+		err = f(ctx)
 	}
 
 	return err
