@@ -162,6 +162,8 @@ type Config struct {
 	// cache with a renewed certificate beside the key it replaced.
 	// A certificate the local cache cannot supply a usable pair for
 	// is reloaded from Storage, which replaces the local copies.
+	// So is one that is due for renewal, since the local cache does
+	// not learn of renewals done by other instances.
 	//
 	// Beware that this stores private keys on every instance that
 	// serves them, so the local cache should be at least as secure

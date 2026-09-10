@@ -123,8 +123,9 @@ func TestLocalCache(t *testing.T) {
 	cfg, am, storage, localCache := testLocalCacheConfig(t)
 	cfg.LocalCache = localCache
 	certKey := StorageKeys.SiteCert(am.IssuerKey(), domain)
+	saved := testIssuedCertResource(t, am, domain, time.Now())
 
-	err := cfg.saveCertResource(ctx, am, testCertResource(am, domain))
+	err := cfg.saveCertResource(ctx, am, saved)
 	if err != nil {
 		t.Fatalf("Expected no error saving cert resource, got: %v", err)
 	}
@@ -136,8 +137,8 @@ func TestLocalCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error loading cert resource, got: %v", err)
 	}
-	if string(certRes.CertificatePEM) != "certificate" {
-		t.Errorf("Expected 'certificate', got: %s", certRes.CertificatePEM)
+	if !bytes.Equal(certRes.CertificatePEM, saved.CertificatePEM) {
+		t.Error("Expected the saved certificate to be loaded")
 	}
 	if len(storage.calls) > 0 {
 		t.Errorf("Expected no storage calls, got: %v", storage.calls)
@@ -218,6 +219,58 @@ func TestLocalCacheTornWrite(t *testing.T) {
 	}
 	if len(storage.calls) > 0 {
 		t.Errorf("Expected no storage calls after recovery, got: %v", storage.calls)
+	}
+}
+
+func TestLocalCacheStaleCertRenewedByPeer(t *testing.T) {
+	ctx := context.Background()
+	const domain = "example.com"
+	now := time.Now()
+
+	cfg, preferred, storage, localCache := testLocalCacheConfig(t)
+	fallback := &ACMEIssuer{CA: "https://fallback.example.com/acme/directory"}
+	fallback.config = cfg
+	cfg.Issuers = []Issuer{preferred, fallback}
+	cfg.LocalCache = localCache
+	cfg.OCSP = OCSPConfig{DisableStapling: true}
+
+	// this instance has served the preferred issuer's certificate, now
+	// expired, and has a fallback certificate that is still fine
+	for issuer, issued := range map[Issuer]time.Time{preferred: now.Add(-100 * 24 * time.Hour), fallback: now.Add(-30 * 24 * time.Hour)} {
+		if err := cfg.saveCertResource(ctx, issuer, testIssuedCertResource(t, issuer, domain, issued)); err != nil {
+			t.Fatalf("Expected no error saving cert resource, got: %v", err)
+		}
+	}
+
+	// another instance renewed the preferred certificate, which only
+	// reaches storage; the fallback would mask that forever, since it
+	// never needs renewal itself and so never triggers a storage read
+	renewed := testIssuedCertResource(t, preferred, domain, now)
+	cfg.LocalCache = nil
+	if err := cfg.saveCertResource(ctx, preferred, renewed); err != nil {
+		t.Fatalf("Expected no error saving renewed cert resource, got: %v", err)
+	}
+	cfg.LocalCache = localCache
+
+	cert, err := cfg.CacheManagedCertificate(ctx, domain)
+	if err != nil {
+		t.Fatalf("Expected no error caching managed certificate, got: %v", err)
+	}
+	expected, err := makeCertificate(renewed.CertificatePEM, renewed.PrivateKeyPEM)
+	if err != nil {
+		t.Fatalf("Expected no error making the renewed certificate, got: %v", err)
+	}
+	if !bytes.Equal(cert.Leaf.Raw, expected.Leaf.Raw) {
+		t.Error("Expected the renewed certificate from the preferred issuer to be loaded")
+	}
+
+	// the local cache has caught up, so the next load stays local
+	storage.calls = nil
+	if _, err = cfg.CacheManagedCertificate(ctx, domain); err != nil {
+		t.Fatalf("Expected no error caching managed certificate, got: %v", err)
+	}
+	if len(storage.calls) > 0 {
+		t.Errorf("Expected no storage calls once the local cache caught up, got: %v", storage.calls)
 	}
 }
 
@@ -334,7 +387,7 @@ func TestWarmLocalCache(t *testing.T) {
 	cfg, am, storage, localCache := testLocalCacheConfig(t)
 
 	// no local cache yet, so this only writes to storage
-	err := cfg.saveCertResource(ctx, am, testCertResource(am, domain))
+	err := cfg.saveCertResource(ctx, am, testIssuedCertResource(t, am, domain, time.Now()))
 	if err != nil {
 		t.Fatalf("Expected no error saving cert resource, got: %v", err)
 	}
