@@ -43,22 +43,18 @@ import (
 // The private key must be one of *ecdsa.PrivateKey, *rsa.PrivateKey, or
 // *ed25519.PrivateKey.
 func PEMEncodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
-	var pemType string
 	var keyBytes []byte
 	switch key := key.(type) {
 	case *ecdsa.PrivateKey:
 		var err error
-		pemType = "EC"
 		keyBytes, err = x509.MarshalECPrivateKey(key)
 		if err != nil {
 			return nil, err
 		}
 	case *rsa.PrivateKey:
-		pemType = "RSA"
 		keyBytes = x509.MarshalPKCS1PrivateKey(key)
 	case ed25519.PrivateKey:
 		var err error
-		pemType = "ED25519"
 		keyBytes, err = x509.MarshalPKCS8PrivateKey(key)
 		if err != nil {
 			return nil, err
@@ -66,7 +62,7 @@ func PEMEncodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", key)
 	}
-	pemKey := pem.Block{Type: pemType + " PRIVATE KEY", Bytes: keyBytes}
+	pemKey := pem.Block{Type: "PRIVATE KEY", Bytes: keyBytes}
 	return pem.EncodeToMemory(&pemKey), nil
 }
 
