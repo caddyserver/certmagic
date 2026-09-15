@@ -318,7 +318,7 @@ func fileLockIsStale(meta lockMeta) bool {
 // identified by filename. A successfully created
 // lockfile should be removed with removeLockfile.
 func createLockfile(filename string) error {
-	err := atomicallyCreateFile(filename, true)
+	err := atomicallyCreateLockfile(filename)
 	if err != nil {
 		return err
 	}
@@ -361,73 +361,96 @@ func keepLockfileFresh(filename string) {
 // with the current timestamp. It returns true if the parent
 // loop can terminate (i.e. no more need to update the lock).
 func updateLockfileFreshness(filename string) (bool, error) {
-	f, err := os.OpenFile(filename, os.O_RDWR, 0644)
-	if os.IsNotExist(err) {
+	fileBytes, err := readFileLimit(filename, 2048)
+	if os.IsNotExist(err) { // this error is passed along through readFileLimit, so we can check for it here.
 		return true, nil // lock released
 	}
 	if err != nil {
 		return true, err
 	}
-	defer f.Close()
-
-	// read contents
-	metaBytes, err := io.ReadAll(io.LimitReader(f, 2048))
-	if err != nil {
-		return true, err
-	}
 	var meta lockMeta
-	if err := json.Unmarshal(metaBytes, &meta); err != nil {
+	if err := json.Unmarshal(fileBytes, &meta); err != nil {
 		// see issue #232: this can error if the file is empty,
 		// which happens sometimes when the disk is REALLY slow
 		return true, err
 	}
 
-	// truncate file and reset I/O offset to beginning
-	if err := f.Truncate(0); err != nil {
-		return true, err
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return true, err
-	}
-
 	// write updated timestamp
 	meta.Updated = time.Now()
-	if err = json.NewEncoder(f).Encode(meta); err != nil {
+	newBytes, err := json.Marshal(meta)
+	if err != nil {
 		return false, err
 	}
-
-	// sync to device; we suspect that sometimes file systems
-	// (particularly AWS EFS) don't do this on their own,
-	// leaving the file empty when we close it; see
-	// https://github.com/caddyserver/caddy/issues/3954
-	return false, f.Sync()
+	if err = atomicallyWriteFile(filename, newBytes); err != nil {
+		// if we fail to write the file, we should probably exit, so return true here?
+		return true, err
+	}
+	return false, nil
 }
 
-// atomicallyCreateFile atomically creates the file
+func readFileLimit(filename string, limit int) ([]byte, error) {
+	// open opens a file in RDONLY with mode 0. this is safe
+	fp, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer fp.Close()
+	limitReader := io.LimitReader(fp, int64(limit))
+	readBytes, err := io.ReadAll(limitReader)
+	if err != nil {
+		return nil, err
+	}
+	return readBytes, nil
+}
+
+// atomicallyCreateLockfile atomically creates the lock file
 // identified by filename if it doesn't already exist.
-func atomicallyCreateFile(filename string, writeLockInfo bool) error {
-	// no need to check this error, we only really care about the file creation error
-	_ = os.MkdirAll(filepath.Dir(filename), 0700)
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644)
+func atomicallyCreateLockfile(filename string) error {
+	now := time.Now()
+	meta := lockMeta{
+		Created: now,
+		Updated: now,
+	}
+	metaBytes, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if writeLockInfo {
-		now := time.Now()
-		meta := lockMeta{
-			Created: now,
-			Updated: now,
-		}
-		if err := json.NewEncoder(f).Encode(meta); err != nil {
-			return err
-		}
-		// see https://github.com/caddyserver/caddy/issues/3954
-		if err := f.Sync(); err != nil {
-			return err
-		}
+	return atomicallyWriteFile(filename, metaBytes)
+}
+
+// creates a file at filename with data in bytes atomically
+func atomicallyWriteFile(filename string, data []byte) error {
+	// no need to check this error, we only really care about the file creation error
+	_ = os.MkdirAll(filepath.Dir(filename), 0700)
+	// check if the file exists no matter what you do, this is sort of racy. either you read the empty file, or you accidentaly open multiple files.
+	// using native os level locks would be better here.
+	_, err := os.Stat(filename)
+	if err == nil {
+		return os.ErrExist
 	}
-	return nil
+	fp, err := atomicfile.New(filename, 0o600)
+	if err != nil {
+		// cancel the write if file creation fails and error out
+		return err
+	}
+	n, err := fp.Write(data)
+	if err != nil || n != len(data) {
+		if n != len(data) && err == nil {
+			err = fmt.Errorf("short write (%d of %d bytes written)", n, len(data))
+		}
+		// cancel the write
+		fp.Cancel()
+		return err
+	}
+	// do another check, as a race check. this still isnt perfect.
+	_, err = os.Stat(filename)
+	if err == nil {
+		// cancel the write
+		fp.Cancel()
+		return os.ErrExist
+	}
+	// close, thereby flushing the write
+	return fp.Close()
 }
 
 // homeDir returns the best guess of the current user's home
