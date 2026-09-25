@@ -312,11 +312,11 @@ func (iss *ACMEIssuer) getTLSALPNPort() int {
 	return useTLSALPNPort
 }
 
-func (c *acmeClient) throttle(ctx context.Context, names []string) error {
-	email := c.iss.getEmail()
+func (client *acmeClient) throttle(ctx context.Context, names []string) error {
+	email := client.iss.getEmail()
 
 	// throttling is scoped to CA + account email
-	rateLimiterKey := c.acmeClient.Directory + "," + email
+	rateLimiterKey := client.acmeClient.Directory + "," + email
 	rateLimitersMu.Lock()
 	rl, ok := rateLimiters[rateLimiterKey]
 	if !ok {
@@ -325,30 +325,30 @@ func (c *acmeClient) throttle(ctx context.Context, names []string) error {
 		// TODO: stop rate limiter when it is garbage-collected...
 	}
 	rateLimitersMu.Unlock()
-	c.iss.Logger.Info("waiting on internal rate limiter",
+	client.iss.Logger.Info("waiting on internal rate limiter",
 		zap.Strings("identifiers", names),
-		zap.String("ca", c.acmeClient.Directory),
+		zap.String("ca", client.acmeClient.Directory),
 		zap.String("account", email),
 	)
 	err := rl.Wait(ctx)
 	if err != nil {
 		return err
 	}
-	c.iss.Logger.Info("done waiting on internal rate limiter",
+	client.iss.Logger.Info("done waiting on internal rate limiter",
 		zap.Strings("identifiers", names),
-		zap.String("ca", c.acmeClient.Directory),
+		zap.String("ca", client.acmeClient.Directory),
 		zap.String("account", email),
 	)
 	return nil
 }
 
-func (c *acmeClient) usingTestCA() bool {
-	return c.iss.TestCA != "" && c.acmeClient.Directory == c.iss.TestCA
+func (client *acmeClient) usingTestCA() bool {
+	return client.iss.TestCA != "" && client.acmeClient.Directory == client.iss.TestCA
 }
 
-func (c *acmeClient) revoke(ctx context.Context, cert *x509.Certificate, reason int) error {
-	return c.acmeClient.RevokeCertificate(ctx, c.account,
-		cert, c.account.PrivateKey, reason)
+func (client *acmeClient) revoke(ctx context.Context, cert *x509.Certificate, reason int) error {
+	return client.acmeClient.RevokeCertificate(ctx, client.account,
+		cert, client.account.PrivateKey, reason)
 }
 
 func buildUAString() string {
