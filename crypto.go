@@ -239,6 +239,8 @@ func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey s
 
 // loadCertResource loads a certificate resource from the given issuer's storage
 // location, using the given storage: see cachedStorage and groundTruthStorage.
+// A resource from the local cache that is due for renewal is read from Storage
+// instead, in case another instance already renewed it.
 func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certNamesKey string, storage Storage) (CertificateResource, error) {
 	certRes := CertificateResource{issuerKey: issuer.IssuerKey()}
 
@@ -265,6 +267,17 @@ func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certName
 	err = json.Unmarshal(metaBytes, &certRes)
 	if err != nil {
 		return CertificateResource{}, fmt.Errorf("decoding certificate metadata: %v", err)
+	}
+
+	// the local cache only learns of renewals this instance does, so a cached
+	// certificate due for renewal is the one a peer most likely replaced; the
+	// Storage read refreshes the local copy, so this is paid once per renewal
+	if ls, ok := storage.(localCacheStorage); ok && ls.readLocal {
+		if _, _, stale := cfg.managedCertNeedsRenewal(certRes, false); stale {
+			if current, err := cfg.loadCertResource(ctx, issuer, certNamesKey, cfg.groundTruthStorage()); err == nil {
+				return current, nil
+			}
+		}
 	}
 
 	return certRes, nil
