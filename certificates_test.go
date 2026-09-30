@@ -18,9 +18,51 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestCertificateNeedsRenewalConcurrentCacheOptions(t *testing.T) {
+	certCache := &Cache{logger: defaultTestLogger}
+	cacheOptions := CacheOptions{
+		GetConfigForCert:   func(Certificate) (*Config, error) { return nil, nil },
+		RenewCheckInterval: time.Minute,
+	}
+	certCache.SetOptions(cacheOptions)
+
+	now := time.Now()
+	cert := Certificate{Certificate: tls.Certificate{Leaf: &x509.Certificate{
+		NotBefore: now.Add(-24 * time.Hour),
+		NotAfter:  now.Add(24 * time.Hour),
+	}}}
+	cfg := &Config{
+		certCache:  certCache,
+		DisableARI: true,
+		Logger:     defaultTestLogger,
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 10_000; i++ {
+			cacheOptions.RenewCheckInterval = time.Duration(i%2+1) * time.Minute
+			certCache.SetOptions(cacheOptions)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 10_000; i++ {
+			cert.NeedsRenewal(cfg)
+		}
+	}()
+	close(start)
+	wg.Wait()
+}
 
 func TestUnexportedGetCertificate(t *testing.T) {
 	certCache := &Cache{cache: make(map[string]Certificate), cacheIndex: make(map[string][]string), logger: defaultTestLogger}
