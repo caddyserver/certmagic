@@ -43,8 +43,9 @@ import (
 // whereas "directories" are only implicit by leading up to the
 // file.
 //
-// The Load, Delete, List, and Stat methods should return
-// fs.ErrNotExist if the key does not exist.
+// The Load, List, and Stat methods should return fs.ErrNotExist
+// if the key does not exist. Delete is different: see its method
+// comment (missing keys are not an error).
 //
 // Processes running in a cluster should use the same Storage
 // value (with the same configuration) in order to share
@@ -82,9 +83,11 @@ type Storage interface {
 
 	// Delete deletes the named key. If the name is a
 	// directory (i.e. prefix of other keys), all keys
-	// prefixed by this key should be deleted. An error
-	// should be returned only if the key still exists
-	// when the method returns.
+	// prefixed by this key should be deleted. It is not
+	// an error if the key does not exist (including when
+	// it was already deleted); return nil in that case.
+	// Return an error only if the key still exists when
+	// the method returns (the delete did not fully apply).
 	Delete(ctx context.Context, key string) error
 
 	// Exists returns true if the key exists either as

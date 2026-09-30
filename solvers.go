@@ -887,7 +887,7 @@ func (sw solverWrapper) CleanUp(ctx context.Context, chal acme.Challenge) error 
 	activeChallengesMu.Lock()
 	delete(activeChallenges, challengeKey(chal))
 	activeChallengesMu.Unlock()
-	return sw.Solver.CleanUp(ctx, chal)
+	return sw.Solver.CleanUp(context.WithoutCancel(ctx), chal)
 }
 
 // Interface guards
