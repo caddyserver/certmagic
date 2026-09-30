@@ -70,6 +70,16 @@ type Config struct {
 	// ignore returned errors.
 	OnEvent func(ctx context.Context, event string, data map[string]any) error
 
+	// An optional callback reporting whether an event
+	// is worth emitting. Returning false skips the
+	// OnEvent call entirely, so it must account for
+	// everything OnEvent does -- logging, metrics --
+	// not only subscribed handlers, and must never
+	// answer no for an event something would observe.
+	// If unset, every event is emitted. Called during
+	// handshakes and concurrently; keep it fast.
+	ShouldEmitFunc func(event string) bool
+
 	// DefaultServerName specifies a server name
 	// to use when choosing a certificate if the
 	// ClientHello's ServerName field is empty.
@@ -97,6 +107,34 @@ type Config struct {
 	// issuers are specified, they will be tried in
 	// turn until one succeeds.
 	Issuers []Issuer
+
+	// By default, loading a certificate reads the certificate resource of
+	// every configured issuer and serves the newest of them, since any issuer
+	// may hold the most recent certificate for a name. That costs a storage
+	// round-trip per issuer on every load, including for issuers that have
+	// never issued for that name -- the usual case for an issuer configured
+	// only for failover.
+	//
+	// If LoadFirstUsableCert is true, a load stops reading issuers once one
+	// of them has a usable certificate, meaning one that does not need
+	// renewal. The newest of the resources it did read is still the one
+	// returned; only issuers that could not have supplied a certificate to
+	// serve are skipped.
+	//
+	// Nothing is skipped before a usable certificate is found: issuers that
+	// hold no certificate, or hold one that is due for renewal, are read and
+	// compared as usual, so a certificate obtained during failover is still
+	// found, and the newest still wins when none of them is usable.
+	//
+	// Issuers are documented to be in order of preference, which is what
+	// makes the certificate found first the right one to settle for. Note
+	// that an IssuerPolicy of UseFirstRandomIssuer gives up that order, so
+	// which issuer a load settles on is then arbitrary.
+	//
+	// This is worth setting when Storage is remote and the in-memory cache
+	// cannot hold every certificate being served, so that the round-trip
+	// skipped is one a TLS handshake would have waited for.
+	LoadFirstUsableCert bool
 
 	// How to select which issuer to use.
 	// Default: UseFirstIssuer (subject to change).
@@ -130,6 +168,37 @@ type Config struct {
 	// The storage to access when storing or loading
 	// TLS assets. Default is the local file system.
 	Storage Storage
+
+	// LocalCache is an optional, node-local Storage (for example a
+	// FileStorage on a local disk) used as a read-through cache in
+	// front of Storage for a certificate's assets: its certificate,
+	// private key, and metadata files, and its OCSP staple. This is
+	// useful when Storage is remote or high-latency, since assets are
+	// loaded from storage during handshakes whenever the in-memory
+	// cache does not have the certificate.
+	//
+	// Only reads that serve certificates are answered locally.
+	// Operations that coordinate with the rest of the cluster --
+	// renewals, issuance, and reloading a certificate that another
+	// instance renewed -- read Storage directly, and locking is never
+	// local; they all refresh the local cache with what they read.
+	// Writes and deletions go to Storage first, then to the local
+	// cache. Since it is only a cache, it may be cleared at any time.
+	//
+	// A certificate's files are not written atomically as a group,
+	// so a write that fails partway through can leave the local
+	// cache with a renewed certificate beside the key it replaced.
+	// A certificate the local cache cannot supply a usable pair for
+	// is reloaded from Storage, which replaces the local copies.
+	// So is one that is due for renewal, since the local cache does
+	// not learn of renewals done by other instances.
+	//
+	// Beware that this stores private keys on every instance that
+	// serves them, so the local cache should be at least as secure
+	// as Storage.
+	//
+	// EXPERIMENTAL: Subject to change or removal.
+	LocalCache Storage
 
 	// CertMagic will verify the storage configuration
 	// is acceptable before obtaining a certificate
@@ -259,6 +328,12 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	}
 	if cfg.OnEvent == nil {
 		cfg.OnEvent = Default.OnEvent
+		// the predicate is written for a specific handler, so it only
+		// comes along with the handler it belongs to; inheriting it onto
+		// a caller's own OnEvent could silence events it wants
+		if cfg.ShouldEmitFunc == nil {
+			cfg.ShouldEmitFunc = Default.ShouldEmitFunc
+		}
 	}
 	if cfg.KeySource == nil {
 		cfg.KeySource = Default.KeySource
@@ -271,6 +346,9 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	}
 	if cfg.Storage == nil {
 		cfg.Storage = Default.Storage
+	}
+	if cfg.LocalCache == nil {
+		cfg.LocalCache = Default.LocalCache
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = Default.Logger
@@ -352,7 +430,7 @@ func (cfg *Config) ClientCredentials(ctx context.Context, identifiers []string) 
 	}
 	var chains []tls.Certificate
 	for _, id := range identifiers {
-		certRes, err := cfg.loadCertResourceAnyIssuer(ctx, id)
+		certRes, err := cfg.loadCertResourceAnyIssuer(ctx, id, cfg.groundTruthStorage())
 		if err != nil {
 			return chains, err
 		}
@@ -807,16 +885,32 @@ func (cfg *Config) storageHasCertResourcesAnyIssuer(ctx context.Context, name st
 // cache with the new certificate. The certificate will not be renewed if it
 // is not close to expiring unless force is true.
 func (cfg *Config) RenewCertSync(ctx context.Context, name string, force bool) error {
-	return cfg.renewCert(ctx, name, force, true)
+	return cfg.renewCert(ctx, name, force, false, true)
 }
 
 // RenewCertAsync is the same as RenewCertSync(), except it runs in the
 // background; i.e. non-interactively, and with retries if it fails.
 func (cfg *Config) RenewCertAsync(ctx context.Context, name string, force bool) error {
-	return cfg.renewCert(ctx, name, force, false)
+	return cfg.renewCert(ctx, name, force, true, false)
 }
 
-func (cfg *Config) renewCert(ctx context.Context, name string, force, interactive bool) error {
+// renewCertOnce makes a single, non-interactive renewal attempt for name and
+// returns whatever error results, without looping through the retryIntervals
+// schedule internally. Unlike RenewCertSync, it never prompts on stdin
+// (interactive is always false for PreCheck/setEmail purposes), so it is safe
+// to call from a background goroutine. It still acquires/releases the same
+// storage lock as RenewCertSync/RenewCertAsync around the single attempt, so
+// cross-instance coordination is preserved.
+//
+// This exists for callers, such as the periodic maintenance loop, that
+// already have their own outer retry/backoff driver and therefore don't want
+// a single renewal job to camp on the jobManager dedup slot for its name for
+// up to maxRetryDuration; see queueRenewalTask.
+func (cfg *Config) renewCertOnce(ctx context.Context, name string, force bool) error {
+	return cfg.renewCert(ctx, name, force, false, false)
+}
+
+func (cfg *Config) renewCert(ctx context.Context, name string, force, retry, interactive bool) error {
 	if len(cfg.Issuers) == 0 {
 		return fmt.Errorf("no issuers configured; impossible to renew or check existing certificate in storage")
 	}
@@ -824,6 +918,25 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 	log := cfg.Logger.Named("renew")
 
 	name = cfg.transformSubject(ctx, log, name)
+
+	// If the certificate's resources are not in storage for any of the
+	// currently-configured issuers, there is nothing to renew: renewal reuses
+	// the stored certificate resource (to reuse the private key and to check
+	// whether renewal is still needed), so a missing resource can never be
+	// loaded and renewal would fail on every attempt until the certificate
+	// expires. This commonly happens when the issuer is changed (e.g. a
+	// different ACME CA) between config reloads while the previously-obtained
+	// certificate remains cached: the cached certificate belongs to an issuer
+	// that is no longer configured, so its resources live under a storage path
+	// that none of the current issuers will look at. In that case, obtain a
+	// fresh certificate from the currently-configured issuer(s) instead of
+	// retrying a renewal that can never succeed.
+	// See https://github.com/caddyserver/caddy/issues/6732
+	if !cfg.storageHasCertResourcesAnyIssuer(ctx, name) {
+		log.Info("certificate resources not found in storage for any configured issuer (issuer may have changed); obtaining a new certificate instead of renewing",
+			zap.String("identifier", name))
+		return cfg.obtainCert(ctx, name, interactive)
+	}
 
 	// ensure storage is writeable and readable
 	// TODO: this is not necessary every time; should only perform check once every so often for each storage, which may require some global state...
@@ -863,8 +976,9 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			}
 		}
 
-		// prepare for renewal (load PEM cert, key, and meta)
-		certRes, err := cfg.loadCertResourceAnyIssuer(ctx, name)
+		// prepare for renewal (load PEM cert, key, and meta); we hold the lock,
+		// so read storage to see if another instance already renewed this
+		certRes, err := cfg.loadCertResourceAnyIssuer(ctx, name, cfg.groundTruthStorage())
 		if err != nil {
 			return err
 		}
@@ -1034,10 +1148,10 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		return nil
 	}
 
-	if interactive {
-		err = f(ctx)
-	} else {
+	if retry {
 		err = doWithRetry(ctx, log, f)
+	} else {
+		err = f(ctx)
 	}
 
 	return err
@@ -1108,7 +1222,7 @@ func (cfg *Config) RevokeCert(ctx context.Context, domain string, reason int, in
 			return fmt.Errorf("issuer %d (%s) is not a Revoker", i, issuerKey)
 		}
 
-		certRes, err := cfg.loadCertResource(ctx, issuer, domain)
+		certRes, err := cfg.loadCertResource(ctx, issuer, domain, cfg.groundTruthStorage())
 		if err != nil {
 			return err
 		}
@@ -1161,6 +1275,8 @@ func (cfg *Config) TLSConfig() *tls.Config {
 	}
 }
 
+var errNoACMEChallengeInfo = errors.New("no active ACME challenge")
+
 // getACMEChallengeInfo loads the challenge info from either the internal challenge memory
 // or the external storage (implying distributed solving). The second return value
 // indicates whether challenge info was loaded from external storage. If true, the
@@ -1188,6 +1304,7 @@ func (cfg *Config) getACMEChallengeInfo(ctx context.Context, identifier string, 
 	var chalInfo acme.Challenge
 	var chalInfoBytes []byte
 	var tokenKey string
+	var challengeFound bool
 	for _, issuer := range cfg.Issuers {
 		ds := distributedSolver{
 			storage:                cfg.Storage,
@@ -1197,15 +1314,19 @@ func (cfg *Config) getACMEChallengeInfo(ctx context.Context, identifier string, 
 		var err error
 		chalInfoBytes, err = cfg.Storage.Load(ctx, tokenKey)
 		if err == nil {
+			challengeFound = true
 			break
 		}
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		return Challenge{}, false, fmt.Errorf("opening distributed challenge token file %s: %v", tokenKey, err)
+		return Challenge{}, false, fmt.Errorf("opening distributed challenge token file %s: %w", tokenKey, err)
+	}
+	if !challengeFound {
+		return Challenge{}, false, fmt.Errorf("%w: no information found to solve challenge for identifier: %s", errNoACMEChallengeInfo, identifier)
 	}
 	if len(chalInfoBytes) == 0 {
-		return Challenge{}, false, fmt.Errorf("no information found to solve challenge for identifier: %s", identifier)
+		return Challenge{}, false, fmt.Errorf("decoding challenge token file %s: empty data", tokenKey)
 	}
 
 	err := json.Unmarshal(chalInfoBytes, &chalInfo)
@@ -1296,19 +1417,20 @@ func (cfg *Config) storageHasCertResources(ctx context.Context, issuer Issuer, d
 // certificate, private key, and metadata file for domain from the
 // issuer with the given issuer key.
 func (cfg *Config) deleteSiteAssets(ctx context.Context, issuerKey, domain string) error {
-	err := cfg.Storage.Delete(ctx, StorageKeys.SiteCert(issuerKey, domain))
+	storage := cfg.groundTruthStorage()
+	err := storage.Delete(ctx, StorageKeys.SiteCert(issuerKey, domain))
 	if err != nil {
 		return fmt.Errorf("deleting certificate file: %v", err)
 	}
-	err = cfg.Storage.Delete(ctx, StorageKeys.SitePrivateKey(issuerKey, domain))
+	err = storage.Delete(ctx, StorageKeys.SitePrivateKey(issuerKey, domain))
 	if err != nil {
 		return fmt.Errorf("deleting private key: %v", err)
 	}
-	err = cfg.Storage.Delete(ctx, StorageKeys.SiteMeta(issuerKey, domain))
+	err = storage.Delete(ctx, StorageKeys.SiteMeta(issuerKey, domain))
 	if err != nil {
 		return fmt.Errorf("deleting metadata file: %v", err)
 	}
-	err = cfg.Storage.Delete(ctx, StorageKeys.CertsSitePrefix(issuerKey, domain))
+	err = storage.Delete(ctx, StorageKeys.CertsSitePrefix(issuerKey, domain))
 	if err != nil {
 		return fmt.Errorf("deleting site asset folder: %v", err)
 	}
@@ -1345,6 +1467,20 @@ func (cfg *Config) emit(ctx context.Context, eventName string, data map[string]a
 		return nil
 	}
 	return cfg.OnEvent(ctx, eventName, data)
+}
+
+// shouldEmit reports whether emitting the named event could reach
+// anything. Callers use it to avoid building an event's data when nothing
+// will see it; emit() cannot do that itself, since Go evaluates arguments
+// before it is entered. Only worth consulting on hot paths.
+func (cfg *Config) shouldEmit(eventName string) bool {
+	if cfg.OnEvent == nil {
+		return false
+	}
+	if cfg.ShouldEmitFunc == nil {
+		return true // no way to ask; assume it is
+	}
+	return cfg.ShouldEmitFunc(eventName)
 }
 
 // CertificateSelector is a type which can select a certificate to use given multiple choices.

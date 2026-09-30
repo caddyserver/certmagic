@@ -51,12 +51,16 @@ func (cfg *Config) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certif
 }
 
 func (cfg *Config) GetCertificateWithContext(ctx context.Context, clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	if err := cfg.emit(ctx, "tls_get_certificate", map[string]any{"client_hello": clientHelloWithoutConn(clientHello)}); err != nil {
-		cfg.Logger.Error("TLS handshake aborted by event handler",
-			zap.String("server_name", clientHello.ServerName),
-			zap.String("remote", clientHello.Conn.RemoteAddr().String()),
-			zap.Error(err))
-		return nil, fmt.Errorf("handshake aborted by event handler: %w", err)
+	// this runs for every handshake, and building the event's data is not
+	// free, so don't do it unless something is actually listening
+	if cfg.shouldEmit("tls_get_certificate") {
+		if err := cfg.emit(ctx, "tls_get_certificate", map[string]any{"client_hello": clientHelloWithoutConn(clientHello)}); err != nil {
+			cfg.Logger.Error("TLS handshake aborted by event handler",
+				zap.String("server_name", clientHello.ServerName),
+				zap.String("remote", clientHello.Conn.RemoteAddr().String()),
+				zap.Error(err))
+			return nil, fmt.Errorf("handshake aborted by event handler: %w", err)
+		}
 	}
 
 	if ctx == nil {
@@ -610,7 +614,7 @@ func (cfg *Config) handshakeMaintenance(ctx context.Context, hello *tls.ClientHe
 			zap.Time("this_update", cert.ocsp.ThisUpdate),
 			zap.Time("next_update", cert.ocsp.NextUpdate))
 
-		err := stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, nil)
+		err := stapleOCSP(ctx, cfg.OCSP, cfg.cachedStorage(), &cert, nil)
 		if err != nil {
 			// An error with OCSP stapling is not the end of the world, and in fact, is
 			// quite common considering not all certs have issuer URLs that support it.

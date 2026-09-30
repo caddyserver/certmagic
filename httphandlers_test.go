@@ -15,11 +15,27 @@
 package certmagic
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
+
+type loadResultStorage struct {
+	Storage
+	data []byte
+	err  error
+}
+
+func (s loadResultStorage) Load(context.Context, string) ([]byte, error) {
+	return s.data, s.err
+}
 
 func TestHTTPChallengeHandlerNoOp(t *testing.T) {
 	am := &ACMEIssuer{CA: "https://example.com/acme/directory", Logger: defaultTestLogger}
@@ -57,5 +73,90 @@ func TestHTTPChallengeHandlerNoOp(t *testing.T) {
 		if am.HandleHTTPChallenge(rw, req) {
 			t.Errorf("Got true with this URL, but shouldn't have: %s", url)
 		}
+	}
+}
+
+func TestHTTPChallengeLookupLogLevel(t *testing.T) {
+	tests := []struct {
+		name          string
+		storage       Storage
+		cancelRequest bool
+		wantLevel     zapcore.Level
+	}{
+		{
+			name:      "no active challenge",
+			storage:   &memoryStorage{},
+			wantLevel: zap.DebugLevel,
+		},
+		{
+			name: "empty challenge data",
+			storage: loadResultStorage{
+				Storage: &memoryStorage{},
+				data:    []byte{},
+			},
+			wantLevel: zap.WarnLevel,
+		},
+		{
+			name: "request canceled",
+			storage: loadResultStorage{
+				Storage: &memoryStorage{},
+				err:     context.Canceled,
+			},
+			cancelRequest: true,
+			wantLevel:     zap.DebugLevel,
+		},
+		{
+			name: "storage operation canceled",
+			storage: loadResultStorage{
+				Storage: &memoryStorage{},
+				err:     context.Canceled,
+			},
+			wantLevel: zap.WarnLevel,
+		},
+		{
+			name: "storage failure",
+			storage: loadResultStorage{
+				Storage: &memoryStorage{},
+				err:     errors.New("storage unavailable"),
+			},
+			wantLevel: zap.WarnLevel,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			core, logs := observer.New(zap.DebugLevel)
+			logger := zap.New(core)
+			am := &ACMEIssuer{
+				CA:     "https://example.com/acme/directory",
+				Logger: logger,
+			}
+			am.config = &Config{
+				Issuers: []Issuer{am},
+				Storage: tt.storage,
+				Logger:  logger,
+			}
+
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"http://example.com/.well-known/acme-challenge/token",
+				nil,
+			)
+			if tt.cancelRequest {
+				ctx, cancel := context.WithCancel(req.Context())
+				cancel()
+				req = req.WithContext(ctx)
+			}
+			if am.HandleHTTPChallenge(httptest.NewRecorder(), req) {
+				t.Fatal("expected challenge request not to be handled")
+			}
+
+			entries := logs.FilterMessage("looking up info for HTTP challenge").All()
+			if len(entries) != 1 {
+				t.Fatalf("expected one challenge lookup log, got %d", len(entries))
+			}
+			if entries[0].Level != tt.wantLevel {
+				t.Fatalf("expected log level %s, got %s", tt.wantLevel, entries[0].Level)
+			}
+		})
 	}
 }
