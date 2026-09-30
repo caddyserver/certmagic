@@ -229,25 +229,46 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 func (certCache *Cache) queueRenewalTask(ctx context.Context, oldCert Certificate, cfg *Config) error {
 	log := certCache.logger.Named("maintenance")
 
+	// Get the name which we should use to renew this certificate;
+	// we only support managing certificates with one name per cert,
+	// so this should be easy.
+	renewName := oldCert.Names[0]
+	jobName := "renew_" + renewName
+
+	// If a previous attempt for this name failed, don't try again until the
+	// backoff schedule (the same retryIntervals used by doWithRetry) says
+	// we're allowed to. This is what actually paces retries now: each
+	// renewal job below makes just ONE attempt and returns, so it never
+	// occupies jm's dedup slot for longer than a single attempt takes.
+	// Without this check, a certificate that keeps needing renewal (e.g.
+	// because the underlying cause, like a DNS outage, hasn't cleared yet)
+	// would cause a new attempt on every single maintenance tick, which is
+	// exactly the hammering that retryIntervals exists to avoid.
+	if !renewalRetrySchedule.readyFor(jobName) {
+		log.Debug("certificate expires soon, but renewal already failed recently; waiting for backoff before retrying",
+			zap.Strings("identifiers", oldCert.Names))
+		return nil
+	}
+
 	timeLeft := expiresAt(oldCert.Leaf).Sub(time.Now().UTC())
 	log.Info("certificate expires soon; queuing for renewal",
 		zap.Strings("identifiers", oldCert.Names),
 		zap.Duration("remaining", timeLeft))
 
-	// Get the name which we should use to renew this certificate;
-	// we only support managing certificates with one name per cert,
-	// so this should be easy.
-	renewName := oldCert.Names[0]
-
-	// queue up this renewal job (is a no-op if already active or queued)
-	jm.Submit(cfg.Logger, "renew_"+renewName, func() error {
+	// Queue up this renewal job (is a no-op if already active or queued,
+	// e.g. because this same certificate was independently queued for
+	// renewal elsewhere, such as manageOne or an on-demand handshake).
+	// Since this job makes only a single attempt (renewCertOnce) instead of
+	// looping internally for up to maxRetryDuration, it will not block
+	// future maintenance ticks from making progress once it returns.
+	jm.Submit(cfg.Logger, jobName, func() error {
 		timeLeft := expiresAt(oldCert.Leaf).Sub(time.Now().UTC())
 		log.Info("attempting certificate renewal",
 			zap.Strings("identifiers", oldCert.Names),
 			zap.Duration("remaining", timeLeft))
 
 		// perform renewal - crucially, this happens OUTSIDE a lock on certCache
-		err := cfg.RenewCertAsync(ctx, renewName, false)
+		err := cfg.renewCertOnce(ctx, renewName, false)
 		if err != nil {
 			if cfg.OnDemand != nil {
 				// loaded dynamically, remove dynamically
@@ -255,8 +276,14 @@ func (certCache *Cache) queueRenewalTask(ctx context.Context, oldCert Certificat
 				certCache.removeCertificate(oldCert)
 				certCache.mu.Unlock()
 			}
+			if exhausted := renewalRetrySchedule.recordFailure(jobName, time.Now()); exhausted {
+				log.Error("final attempt; giving up until next scheduled renewal check finds the certificate still needs renewal",
+					zap.Strings("identifiers", oldCert.Names),
+					zap.Error(err))
+			}
 			return fmt.Errorf("%v %v", oldCert.Names, err)
 		}
+		renewalRetrySchedule.clear(jobName)
 
 		// successful renewal, so update in-memory cache by loading
 		// renewed certificate so it will be used with handshakes

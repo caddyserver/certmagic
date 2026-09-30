@@ -95,6 +95,88 @@ func (jm *jobManager) worker() {
 	}
 }
 
+// renewalBackoff tracks, per certificate name, when the next renewal
+// attempt driven by the periodic maintenance loop is allowed to run. It
+// exists so that queueRenewalTask can make a single renewal attempt per
+// call (via renewCertOnce) instead of submitting a job to jm that loops
+// internally through retryIntervals for up to maxRetryDuration -- which
+// would otherwise occupy jm's dedup slot for that name and cause
+// subsequent maintenance ticks to silently no-op via jm.Submit until the
+// long-lived job's own internal sleep happens to wake up (up to 6 hours
+// later). By moving the schedule here, the periodic maintenance tick
+// (which already runs every RenewCheckInterval and only proceeds if the
+// certificate still needs renewal) becomes the actual retry driver, while
+// still following the same backoff schedule as doWithRetry.
+type renewalBackoff struct {
+	mu    sync.Mutex
+	state map[string]*renewalBackoffState
+}
+
+type renewalBackoffState struct {
+	nextAttempt  time.Time
+	intervalIdx  int // -1 until the first failed attempt
+	firstAttempt time.Time
+}
+
+var renewalRetrySchedule = &renewalBackoff{}
+
+// readyFor reports whether name is currently allowed to attempt a renewal.
+// It is always true for a name with no recorded failure.
+func (rb *renewalBackoff) readyFor(name string) bool {
+	return rb.readyForAsOf(name, time.Now())
+}
+
+// readyForAsOf is like readyFor but evaluates readiness as of the given
+// time instead of time.Now(); it exists so tests can exercise the backoff
+// schedule without sleeping for real minutes/hours/days.
+func (rb *renewalBackoff) readyForAsOf(name string, asOf time.Time) bool {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	st, ok := rb.state[name]
+	if !ok {
+		return true
+	}
+	return !asOf.Before(st.nextAttempt)
+}
+
+// recordFailure schedules the next allowed attempt for name using the same
+// retryIntervals/maxRetryDuration schedule as doWithRetry. It reports
+// whether the overall retry budget (maxRetryDuration since the first
+// recorded failure in this cycle) has been exhausted. If exhausted, the
+// backoff cycle for name is reset (mirroring doWithRetry's own behavior of
+// giving up and returning), so the next maintenance tick will attempt
+// immediately rather than being throttled forever; if the certificate still
+// needs renewal by then, a fresh backoff cycle begins.
+func (rb *renewalBackoff) recordFailure(name string, now time.Time) (exhausted bool) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	if rb.state == nil {
+		rb.state = make(map[string]*renewalBackoffState)
+	}
+	st, ok := rb.state[name]
+	if !ok {
+		st = &renewalBackoffState{intervalIdx: -1, firstAttempt: now}
+		rb.state[name] = st
+	}
+	if now.Sub(st.firstAttempt) >= maxRetryDuration {
+		delete(rb.state, name)
+		return true
+	}
+	if st.intervalIdx < len(retryIntervals)-1 {
+		st.intervalIdx++
+	}
+	st.nextAttempt = now.Add(retryIntervals[st.intervalIdx])
+	return false
+}
+
+// clear forgets any recorded backoff state for name, e.g. after a
+// successful renewal or once the certificate no longer needs renewing.
+func (rb *renewalBackoff) clear(name string) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	delete(rb.state, name)
+}
+
 func doWithRetry(ctx context.Context, log *zap.Logger, f func(context.Context) error) error {
 	var attempts int
 	ctx = context.WithValue(ctx, AttemptsCtxKey, &attempts)
