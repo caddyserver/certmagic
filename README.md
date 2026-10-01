@@ -95,7 +95,7 @@ CertMagic - Automatic HTTPS using Let's Encrypt
 	- Exponential backoff with carefully-tuned intervals
 	- Retries with optional test/staging CA endpoint instead of production, to avoid rate limits
 - Written in Go, a language with memory-safety guarantees
-- Powered by [ACMEz](https://github.com/mholt/acmez/v3), _the_ premier ACME client library for Go
+- Powered by [ACMEz](https://github.com/mholt/acmez), _the_ premier ACME client library for Go
 - All [libdns](https://github.com/libdns) DNS providers work out-of-the-box
 - Pluggable storage backends (default: file system)
 - Pluggable key sources
