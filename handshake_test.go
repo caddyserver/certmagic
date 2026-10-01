@@ -15,9 +15,15 @@ package certmagic
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"net"
 	"runtime"
 	"strings"
@@ -110,6 +116,87 @@ func TestGetCertificate(t *testing.T) {
 		t.Errorf("Got an error with no SNI but matching IP, but shouldn't have: %v", err)
 	} else if cert == nil || len(cert.Leaf.IPAddresses) == 0 {
 		t.Errorf("Expected IP cert, got: %v", cert)
+	}
+}
+
+func TestGetCertDuringHandshakeExpiredWildcardCacheObtainsExact(t *testing.T) {
+	const (
+		wildcardName = "*.example.com"
+		serverName   = "test.example.com"
+	)
+
+	ctx := context.Background()
+	certCache := &Cache{
+		cache:      make(map[string]Certificate),
+		cacheIndex: make(map[string][]string),
+		logger:     defaultTestLogger,
+	}
+
+	issuer := &handshakeTestIssuer{t: t}
+	cfg := newWithCache(certCache, Config{
+		Issuers:  []Issuer{issuer},
+		Storage:  &FileStorage{Path: t.TempDir()},
+		Logger:   defaultTestLogger,
+		OnDemand: &OnDemandConfig{},
+		OCSP:     OCSPConfig{DisableStapling: true},
+	})
+	certCache.options = CacheOptions{
+		GetConfigForCert:   func(Certificate) (*Config, error) { return cfg, nil },
+		RenewCheckInterval: DefaultRenewCheckInterval,
+		OCSPCheckInterval:  DefaultOCSPCheckInterval,
+		Logger:             defaultTestLogger,
+	}
+
+	now := time.Now()
+	wildcardKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating wildcard key: %v", err)
+	}
+	wildcardCertPEM := mustIssueCertificateForPublicKey(t, wildcardKey.Public(), []string{wildcardName}, now.Add(-4*time.Hour), now.Add(-2*time.Hour))
+	wildcardKeyPEM, err := PEMEncodePrivateKey(wildcardKey)
+	if err != nil {
+		t.Fatalf("encoding wildcard private key: %v", err)
+	}
+
+	err = cfg.saveCertResource(ctx, issuer, CertificateResource{
+		SANs:           []string{wildcardName},
+		CertificatePEM: wildcardCertPEM,
+		PrivateKeyPEM:  wildcardKeyPEM,
+	})
+	if err != nil {
+		t.Fatalf("saving wildcard certificate resource: %v", err)
+	}
+
+	wildcardCert, err := cfg.CacheManagedCertificate(ctx, wildcardName)
+	if err != nil {
+		t.Fatalf("caching wildcard certificate: %v", err)
+	}
+	if !wildcardCert.Expired() {
+		t.Fatalf("test wildcard certificate should be expired")
+	}
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("creating listener: %v", err)
+	}
+	defer l.Close()
+	conn, err := net.Dial("tcp", l.Addr().String())
+	if err != nil {
+		t.Fatalf("creating connection: %v", err)
+	}
+	defer conn.Close()
+
+	hello := &tls.ClientHelloInfo{ServerName: serverName, Conn: conn}
+	cert, err := cfg.getCertDuringHandshake(ctx, hello, true)
+	if err != nil {
+		t.Fatalf("getting certificate during handshake: %v", err)
+	}
+
+	if got := cert.Names[0]; got != serverName {
+		t.Fatalf("expected exact certificate for %s, got %s", serverName, got)
+	}
+	if got := issuer.issued.Load(); got != 1 {
+		t.Fatalf("expected exact certificate to be issued once, got %d", got)
 	}
 }
 
@@ -226,4 +313,51 @@ func TestGetCertDuringHandshakeWaiterErrorPropagation(t *testing.T) {
 	if got := decisionCalls.Load(); got != 1 {
 		t.Errorf("expected exactly 1 decision-func call (leader only), got %d", got)
 	}
+}
+
+type handshakeTestIssuer struct {
+	t      *testing.T
+	issued atomic.Int32
+}
+
+func (i *handshakeTestIssuer) Issue(ctx context.Context, csr *x509.CertificateRequest) (*IssuedCertificate, error) {
+	i.t.Helper()
+	i.issued.Add(1)
+
+	now := time.Now()
+	certPEM := mustIssueCertificateForPublicKey(i.t, csr.PublicKey, csr.DNSNames, now.Add(-time.Hour), now.Add(time.Hour))
+	return &IssuedCertificate{Certificate: certPEM}, nil
+}
+
+func (i *handshakeTestIssuer) IssuerKey() string { return "handshake_test" }
+
+func mustIssueCertificateForPublicKey(t *testing.T, publicKey any, dnsNames []string, notBefore, notAfter time.Time) []byte {
+	t.Helper()
+
+	signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating issuer key: %v", err)
+	}
+
+	commonName := ""
+	if len(dnsNames) > 0 {
+		commonName = dnsNames[0]
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: commonName},
+		DNSNames:              dnsNames,
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, publicKey, signer)
+	if err != nil {
+		t.Fatalf("creating certificate: %v", err)
+	}
+
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
