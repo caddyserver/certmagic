@@ -189,6 +189,9 @@ func (iss *ACMEIssuer) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 	// exclusive of other ones because it is usually only used
 	// in situations where the default challenges would fail)
 	if iss.DNS01Solver == nil {
+		// Keep challenge storage under the configured issuer key even when a retry after failure
+		// temporary switches to TestCA, so other instances can find it using IssuerKey().
+
 		// enable HTTP-01 challenge
 		if !iss.DisableHTTPChallenge {
 			var solver acmez.Solver = &httpSolver{
@@ -198,7 +201,7 @@ func (iss *ACMEIssuer) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 			if !iss.DisableDistributedSolvers {
 				solver = distributedSolver{
 					storage:                iss.config.Storage,
-					storageKeyIssuerPrefix: iss.storageKeyCAPrefix(client.Directory),
+					storageKeyIssuerPrefix: storageKeyACMECAPrefix(iss.IssuerKey()),
 					solver:                 solver,
 				}
 			}
@@ -214,7 +217,7 @@ func (iss *ACMEIssuer) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 			if !iss.DisableDistributedSolvers {
 				solver = distributedSolver{
 					storage:                iss.config.Storage,
-					storageKeyIssuerPrefix: iss.storageKeyCAPrefix(client.Directory),
+					storageKeyIssuerPrefix: storageKeyACMECAPrefix(iss.IssuerKey()),
 					solver:                 solver,
 				}
 			}
