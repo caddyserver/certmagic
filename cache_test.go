@@ -14,7 +14,12 @@
 
 package certmagic
 
-import "testing"
+import (
+	"crypto/tls"
+	"crypto/x509"
+	"testing"
+	"time"
+)
 
 func TestNewCache(t *testing.T) {
 	noop := func(Certificate) (*Config, error) { return new(Config), nil }
@@ -38,5 +43,41 @@ func TestNewCache(t *testing.T) {
 	}
 	if c.stopChan == nil {
 		t.Error("Expected stopChan to be set, but it was nil")
+	}
+}
+
+func TestEarliestManagedExpiration(t *testing.T) {
+	noop := func(Certificate) (*Config, error) { return new(Config), nil }
+	c := NewCache(CacheOptions{GetConfigForCert: noop})
+	defer c.Stop()
+
+	if _, ok := c.EarliestManagedExpiration(); ok {
+		t.Fatal("expected no expiration for an empty cache")
+	}
+
+	now := time.Now().Truncate(time.Second)
+	leaf := func(notAfter time.Time) *x509.Certificate { return &x509.Certificate{NotAfter: notAfter} }
+	cert := func(hash string, managed bool, notAfter time.Time) Certificate {
+		return Certificate{Certificate: tls.Certificate{Leaf: leaf(notAfter)}, hash: hash, managed: managed}
+	}
+	c.mu.Lock()
+	c.cache["unmanaged"] = cert("unmanaged", false, now.Add(time.Hour))
+	c.mu.Unlock()
+	if _, ok := c.EarliestManagedExpiration(); ok {
+		t.Fatal("expected unmanaged certificates to be ignored")
+	}
+
+	c.mu.Lock()
+	c.cache["later"] = cert("later", true, now.Add(72*time.Hour))
+	c.cache["sooner"] = cert("sooner", true, now.Add(24*time.Hour))
+	c.cache["no-leaf"] = Certificate{hash: "no-leaf", managed: true}
+	c.mu.Unlock()
+
+	got, ok := c.EarliestManagedExpiration()
+	if !ok {
+		t.Fatal("expected an expiration")
+	}
+	if want := expiresAt(leaf(now.Add(24 * time.Hour))); !got.Equal(want) {
+		t.Errorf("expected %s, got %s", want, got)
 	}
 }

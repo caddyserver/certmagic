@@ -404,6 +404,26 @@ type SubjectIssuer struct {
 	Subject, IssuerKey string
 }
 
+// EarliestManagedExpiration returns the earliest time at which a managed
+// certificate in the cache expires, and false if the cache holds no managed
+// certificates. It walks the cache under its read lock, so it is meant for
+// infrequent callers such as a metrics collector being scraped.
+func (certCache *Cache) EarliestManagedExpiration() (time.Time, bool) {
+	certCache.mu.RLock()
+	defer certCache.mu.RUnlock()
+
+	var earliest time.Time
+	for _, cert := range certCache.cache {
+		if !cert.managed || cert.Leaf == nil {
+			continue
+		}
+		if expires := expiresAt(cert.Leaf); earliest.IsZero() || expires.Before(earliest) {
+			earliest = expires
+		}
+	}
+	return earliest, !earliest.IsZero()
+}
+
 // RemoveManaged removes managed certificates for the given subjects from the cache.
 // This effectively stops maintenance of those certificates. If an IssuerKey is
 // specified alongside the subject, only certificates for that subject from the
