@@ -58,12 +58,12 @@ func PEMEncodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
 		pemType = "RSA"
 		keyBytes = x509.MarshalPKCS1PrivateKey(key)
 	case ed25519.PrivateKey:
-		var err error
-		pemType = "ED25519"
-		keyBytes, err = x509.MarshalPKCS8PrivateKey(key)
+		keyBytes, err := x509.MarshalPKCS8PrivateKey(key)
 		if err != nil {
 			return nil, err
 		}
+		// These bytes are PKCS#8. That PEM type is PRIVATE KEY.
+		return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyBytes}), nil
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", key)
 	}
@@ -178,7 +178,7 @@ func (cfg *Config) saveCertResource(ctx context.Context, issuer Issuer, cert Cer
 // set, the issuers after the first one holding a resource that does not need
 // renewal are not read. Callers pass the storage to load from: see
 // cachedStorage and groundTruthStorage.
-func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey string, storage Storage) (CertificateResource, error) {	// we can save some extra decoding steps if there's only one issuer, since
+func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey string, storage Storage) (CertificateResource, error) { // we can save some extra decoding steps if there's only one issuer, since
 	// we don't need to compare potentially multiple available resources to
 	// select the best one, when there's only one choice anyway
 	if len(cfg.Issuers) == 1 {

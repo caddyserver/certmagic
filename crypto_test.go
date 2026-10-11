@@ -25,6 +25,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/pem"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +82,42 @@ func TestSaveAndLoadECCPrivateKey(t *testing.T) {
 	// verify loaded key is correct
 	if !privateKeysSame(privateKey, loadedKey) {
 		t.Error("Expected key bytes to be the same, but they weren't")
+	}
+}
+
+func TestEncodeDecodeEd25519PrivateKey(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	savedBytes, err := PEMEncodePrivateKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(savedBytes)
+	if block == nil {
+		t.Fatal("ed25519 key did not decode as PEM")
+	}
+	if block.Type != "PRIVATE KEY" {
+		t.Fatalf("PEM type %q", block.Type)
+	}
+
+	loadedKey, err := PEMDecodePrivateKey(savedBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !privateKeysSame(privateKey, loadedKey) {
+		t.Fatal("loaded ed25519 key did not match")
+	}
+
+	oldLabel := pem.EncodeToMemory(&pem.Block{Type: "ED25519 PRIVATE KEY", Bytes: block.Bytes})
+	loadedOld, err := PEMDecodePrivateKey(oldLabel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !privateKeysSame(privateKey, loadedOld) {
+		t.Fatal("old ED25519 PRIVATE KEY label did not load")
 	}
 }
 
