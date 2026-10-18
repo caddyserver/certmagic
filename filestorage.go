@@ -174,9 +174,9 @@ func (s *FileStorage) Filename(key string) string {
 func (s *FileStorage) obtainLock(ctx context.Context, name string, attempts int) (bool, error) {
 	filename := s.lockFilename(name)
 
-	// sometimes the lockfiles read as empty (size 0) - this is either a stale lock or it
-	// is currently being written; we can retry a few times in this case, as it has been
-	// shown to help (issue #232)
+	// sometimes the lockfiles read as empty (size 0) or partially written - this is either
+	// a stale lock or it is currently being written; we can retry a few times in this case,
+	// as it has been shown to help (issue #232)
 	var emptyCount int
 
 	for {
@@ -209,7 +209,14 @@ func (s *FileStorage) obtainLock(ctx context.Context, name string, attempts int)
 		if err == nil {
 			err2 := json.NewDecoder(f).Decode(&meta)
 			f.Close()
-			if errors.Is(err2, io.EOF) {
+			if err2 != nil {
+				// see issue #232: this can error if the file is empty, which happens
+				// sometimes when the disk is REALLY slow; it can also error if the file
+				// is only partially written, which is what a process that crashes while
+				// updating its lockfile leaves behind. Retry a few times, then treat it
+				// as stale: its timestamps are unusable, so the stale-lock detection
+				// below can't work, and failing here would make the lock unacquirable
+				// forever.
 				emptyCount++
 				if emptyCount < 8 {
 					// wait for brief time and retry; could be that the file is in the process
@@ -220,15 +227,21 @@ func (s *FileStorage) obtainLock(ctx context.Context, name string, attempts int)
 						return false, ctx.Err()
 					}
 					continue
-				} else {
-					// lockfile is empty or truncated multiple times; I *think* we can assume
-					// the previous acquirer either crashed or had some sort of failure that
-					// caused them to be unable to fully acquire or retain the lock, therefore
-					// we should treat it as if the lockfile did not exist
-					defaultLogger.Sugar().Infof("[%s] %s: Empty lockfile (%v) - likely previous process crashed or storage medium failure; treating as stale", s, filename, err2)
 				}
-			} else if err2 != nil {
-				return false, fmt.Errorf("decoding lockfile contents: %w", err2)
+
+				// lockfile is empty or unreadable multiple times; I *think* we can assume
+				// the previous acquirer either crashed or had some sort of failure that
+				// caused them to be unable to fully acquire or retain the lock, therefore
+				// we should treat it as if the lockfile did not exist
+				if errors.Is(err2, io.EOF) {
+					defaultLogger.Sugar().Infof("[%s] %s: Empty lockfile (%v) - likely previous process crashed or storage medium failure; treating as stale", s, filename, err2)
+				} else {
+					defaultLogger.Sugar().Infof("[%s] %s: Unreadable lockfile (%v) - likely previous process crashed or storage medium failure; treating as stale", s, filename, err2)
+				}
+
+				// the timestamps may have been partially decoded from a corrupt
+				// lockfile; don't trust them to tell whether the lock is stale
+				meta = lockMeta{}
 			}
 		}
 
