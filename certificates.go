@@ -142,7 +142,7 @@ func (cfg *Config) certNeedsRenewal(leaf *x509.Certificate, ari acme.RenewalInfo
 			// time OR just before it if the next waking time would be after it; this
 			// cutoff can actually be before the start of the renewal window, but the spec
 			// author says that's OK: https://github.com/aarongable/draft-acme-ari/issues/71
-			cutoff := ari.SelectedTime.Add(-renewCheckInterval)
+			cutoff := selectedTime.Add(-renewCheckInterval)
 			if time.Now().After(cutoff) {
 				logger.Info("certificate needs renewal based on ARI window",
 					zap.Time("selected_time", selectedTime),

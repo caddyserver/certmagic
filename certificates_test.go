@@ -21,6 +21,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/mholt/acmez/v3/acme"
 )
 
 func TestCertificateNeedsRenewalConcurrentCacheOptions(t *testing.T) {
@@ -62,6 +64,54 @@ func TestCertificateNeedsRenewalConcurrentCacheOptions(t *testing.T) {
 	}()
 	close(start)
 	wg.Wait()
+}
+
+func TestCertNeedsRenewalARIWindowWithoutSelectedTime(t *testing.T) {
+	certCache := &Cache{logger: defaultTestLogger}
+	certCache.SetOptions(CacheOptions{
+		GetConfigForCert:   func(Certificate) (*Config, error) { return nil, nil },
+		RenewCheckInterval: time.Hour,
+	})
+	cfg := &Config{
+		certCache:          certCache,
+		RenewalWindowRatio: DefaultRenewalWindowRatio,
+		Logger:             defaultTestLogger,
+	}
+
+	now := time.Now()
+	leaf := &x509.Certificate{
+		NotBefore: now.Add(-24 * time.Hour),
+		NotAfter:  now.Add(89 * 24 * time.Hour),
+	}
+
+	for _, tc := range []struct {
+		desc        string
+		windowStart time.Time
+		windowEnd   time.Time
+		expect      bool
+	}{
+		{
+			desc:        "window in the future",
+			windowStart: now.Add(50 * 24 * time.Hour),
+			windowEnd:   now.Add(52 * 24 * time.Hour),
+			expect:      false,
+		},
+		{
+			desc:        "window in the past",
+			windowStart: now.Add(-2 * 24 * time.Hour),
+			windowEnd:   now.Add(-24 * time.Hour),
+			expect:      true,
+		},
+	} {
+		// a window exists but no time has been selected within it
+		var ari acme.RenewalInfo
+		ari.SuggestedWindow.Start = tc.windowStart
+		ari.SuggestedWindow.End = tc.windowEnd
+
+		if actual := cfg.certNeedsRenewal(leaf, ari, false); actual != tc.expect {
+			t.Errorf("%s: expected needs renewal to be %t, got %t", tc.desc, tc.expect, actual)
+		}
+	}
 }
 
 func TestUnexportedGetCertificate(t *testing.T) {
