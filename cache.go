@@ -17,6 +17,7 @@ package certmagic
 import (
 	"fmt"
 	weakrand "math/rand/v2"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -356,12 +357,36 @@ func (certCache *Cache) getAllCerts() []Certificate {
 	return certs
 }
 
-func (certCache *Cache) getConfig(cert Certificate) (*Config, error) {
+func (certCache *Cache) getConfig(cert Certificate) (cfg *Config, err error) {
 	certCache.optionsMu.RLock()
 	getCert := certCache.options.GetConfigForCert
 	certCache.optionsMu.RUnlock()
 
-	cfg, err := getCert(cert)
+	// The callback is the cache user's code, and both call sites invoke it
+	// from maintenance scans that hold certCache.mu for reading with the
+	// unlock written inline after the scan loop. A panic unwinding out of
+	// here skips that unlock and permanently leaks a reader: the maintenance
+	// goroutine recovers panics and keeps running, so nothing crashes, but
+	// every later attempt to take the write lock blocks forever (see
+	// caddyserver/caddy#8231). Surface the panic as an ordinary
+	// per-certificate error instead; both scans already log and skip the
+	// certificate on error. The recover wraps only the callback call, so
+	// the error can truthfully blame the callback, and the stack is logged
+	// here because it is gone the moment the panic becomes an error.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				buf := make([]byte, stackTraceBufferSize)
+				buf = buf[:runtime.Stack(buf, false)]
+				certCache.logger.Error("GetConfigForCert callback panicked",
+					zap.Strings("identifiers", cert.Names),
+					zap.Any("error", r),
+					zap.ByteString("stack", buf))
+				cfg, err = nil, fmt.Errorf("GetConfigForCert callback panicked for certificate %v: %v", cert.Names, r)
+			}
+		}()
+		cfg, err = getCert(cert)
+	}()
 	if err != nil {
 		return nil, err
 	}

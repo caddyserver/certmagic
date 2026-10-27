@@ -158,3 +158,72 @@ func TestQueueRenewalTaskPacesRetriesItself(t *testing.T) {
 		t.Fatalf("expected a second issuance attempt once the backoff interval elapsed, got %d", issuer.calls.Load())
 	}
 }
+
+// TestMaintenanceSurvivesPanickingGetConfigForCert is a regression test for
+// caddyserver/caddy#8231: when the GetConfigForCert callback panicked during
+// a maintenance scan (in Caddy's case, because the callback observed a
+// partially provisioned TLS app during a reload), the panic unwound out of
+// the scan loop in RenewManagedCertificates or updateOCSPStaples past the
+// inline certCache.mu.RUnlock(). maintainAssets recovers panics and restarts
+// the loop, so the process stayed up — but the leaked reader meant every
+// subsequent certCache.mu.Lock() blocked forever, hanging reloads and the
+// admin API.
+//
+// This test runs both scans against a cache whose callback always panics
+// and then proves the write lock is still acquirable. It deliberately does
+// not care how the scans dispose of the panic — converted to an error,
+// recovered, or propagated — only that the lock is released.
+func TestMaintenanceSurvivesPanickingGetConfigForCert(t *testing.T) {
+	const domain = "example.com"
+
+	certCache := &Cache{
+		cache:      make(map[string]Certificate),
+		cacheIndex: make(map[string][]string),
+		logger:     defaultTestLogger,
+	}
+	certCache.options.GetConfigForCert = func(Certificate) (*Config, error) {
+		panic("simulated callback panic over partially provisioned state")
+	}
+
+	// a managed, unexpired certificate, so both scans get past their
+	// early-skip checks and reach getConfig
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: domain},
+		DNSNames:     []string{domain},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+	}
+	leaf, _, _ := mustIssueTestCertificate(t, tmpl, nil, nil)
+	cert := Certificate{
+		Names:   []string{domain},
+		managed: true,
+		hash:    "panicking-callback-test",
+	}
+	cert.Leaf = leaf
+	certCache.cacheCertificate(cert)
+
+	// Run both scans. The current fix converts the callback's panic into a
+	// per-certificate error inside getConfig, but that is a mechanism, not
+	// the invariant: a different correct fix (deferred unlocks in the scans,
+	// say) would let the panic propagate the way maintainAssets already
+	// tolerates. Accept either outcome here so this test pins only the
+	// invariant that matters — the lock must be released either way.
+	runScan := func(scan func()) {
+		defer func() { _ = recover() }()
+		scan()
+	}
+	runScan(func() { _ = certCache.RenewManagedCertificates(context.Background()) })
+	runScan(func() { certCache.updateOCSPStaples(context.Background()) })
+
+	// The actual regression: the write lock must still be acquirable.
+	if !waitUntil(2*time.Second, func() bool {
+		if certCache.mu.TryLock() {
+			certCache.mu.Unlock()
+			return true
+		}
+		return false
+	}) {
+		t.Fatal("write lock not acquirable after maintenance scans: a panicking GetConfigForCert leaked the cache's read lock")
+	}
+}
