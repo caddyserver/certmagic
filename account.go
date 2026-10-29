@@ -425,7 +425,11 @@ func (am *ACMEIssuer) mostRecentAccountEmail(ctx context.Context, caURL string) 
 		return "", false
 	}
 
-	account, err := am.loadOrCreateAccount(ctx, caURL, path.Base(accountList[0]))
+	// only load the account; do not create one: if it can't be loaded (for example,
+	// because another goroutine is still in the middle of saving it), creating a new
+	// account here would use the name of the storage folder as the email address,
+	// e.g. "default" for an account without a contact (see issue #420)
+	account, err := am.loadAccount(ctx, caURL, path.Base(accountList[0]))
 	if err != nil {
 		return "", false
 	}

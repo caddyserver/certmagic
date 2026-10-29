@@ -17,6 +17,7 @@ package certmagic
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -521,3 +522,45 @@ func TestGetEmailFromRecent(t *testing.T) {
 // agreementTestURL is set during tests to skip requiring
 // setting up an entire ACME CA endpoint.
 var agreementTestURL string
+
+func TestGetEmailFromRecentIgnoresPartiallySavedAccount(t *testing.T) {
+	ctx := context.Background()
+
+	am := &ACMEIssuer{CA: dummyCA, Logger: zap.NewNop(), mu: new(sync.Mutex)}
+	testConfig := &Config{
+		Issuers:   []Issuer{am},
+		Storage:   &FileStorage{Path: t.TempDir()},
+		Logger:    defaultTestLogger,
+		certCache: new(Cache),
+	}
+	am.config = testConfig
+
+	DefaultACME.Email = ""
+	discoveredEmail = ""
+	defer func() { discoveredEmail = "" }()
+
+	// Simulate another obtain that is in the middle of saveAccount for an
+	// account without a contact: the registration has been stored, but the
+	// private key has not been stored yet.
+	account, err := am.newAccount("")
+	if err != nil {
+		t.Fatalf("Error creating account: %v", err)
+	}
+	regBytes, err := json.MarshalIndent(account, "", "\t")
+	if err != nil {
+		t.Fatalf("Error encoding account: %v", err)
+	}
+	if err := testConfig.Storage.Store(ctx, am.storageKeyUserReg(am.CA, ""), regBytes); err != nil {
+		t.Fatalf("Error storing registration: %v", err)
+	}
+
+	if err := am.setEmail(ctx, false); err != nil {
+		t.Fatalf("setEmail error: %v", err)
+	}
+	if email := am.getEmail(); email != "" {
+		t.Errorf("Expected no email while the most recent account is incomplete, but got '%s'", email)
+	}
+	if discoveredEmail != "" {
+		t.Errorf("Expected no discovered email while the most recent account is incomplete, but got '%s'", discoveredEmail)
+	}
+}
