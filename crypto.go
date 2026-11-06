@@ -65,7 +65,11 @@ func PEMEncodePrivateKey(key crypto.PrivateKey) ([]byte, error) {
 			return nil, err
 		}
 	default:
-		return nil, fmt.Errorf("unsupported key type: %T", key)
+		var err error
+		keyBytes, pemType, err = maybePQCEncode(key)
+		if err != nil {
+			return nil, err
+		}
 	}
 	pemKey := pem.Block{Type: pemType + " PRIVATE KEY", Bytes: keyBytes}
 	return pem.EncodeToMemory(&pemKey), nil
@@ -97,6 +101,10 @@ func PEMDecodePrivateKey(keyPEMBytes []byte) (crypto.Signer, error) {
 		case *rsa.PrivateKey, *ecdsa.PrivateKey, ed25519.PrivateKey:
 			return key.(crypto.Signer), nil
 		default:
+			if signer := maybePQCDecode(key); signer != nil {
+				return signer, nil
+			}
+
 			return nil, fmt.Errorf("found unknown private key type in PKCS#8 wrapping: %T", key)
 		}
 	}
@@ -178,7 +186,8 @@ func (cfg *Config) saveCertResource(ctx context.Context, issuer Issuer, cert Cer
 // set, the issuers after the first one holding a resource that does not need
 // renewal are not read. Callers pass the storage to load from: see
 // cachedStorage and groundTruthStorage.
-func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey string, storage Storage) (CertificateResource, error) {	// we can save some extra decoding steps if there's only one issuer, since
+func (cfg *Config) loadCertResourceAnyIssuer(ctx context.Context, certNamesKey string, storage Storage) (CertificateResource, error) {
+	// we can save some extra decoding steps if there's only one issuer, since
 	// we don't need to compare potentially multiple available resources to
 	// select the best one, when there's only one choice anyway
 	if len(cfg.Issuers) == 1 {
@@ -383,7 +392,13 @@ func (kg StandardKeyGenerator) GenerateKey() (crypto.PrivateKey, error) {
 		return rsa.GenerateKey(rand.Reader, 4096)
 	case RSA8192:
 		return rsa.GenerateKey(rand.Reader, 8192)
+	default:
+		key, err := maybePQCKeyGen(kg.KeyType)
+		if key != nil || err != nil {
+			return key, err
+		}
 	}
+
 	return nil, fmt.Errorf("unrecognized or unsupported key type: %s", kg.KeyType)
 }
 
