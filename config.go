@@ -1036,6 +1036,14 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, retry, int
 			return err
 		}
 
+		// Pass the predecessor through issuer wrappers; the ACME issuer checks
+		// that it belongs to the same CA before including it in the order.
+		if !cfg.DisableARI {
+			if acmeData, err := certRes.getACMEData(); err == nil && acmeData.CA != "" {
+				ctx = context.WithValue(ctx, ctxKeyARIReplaces, ariReplacement{cert: leaf, ca: acmeData.CA})
+			}
+		}
+
 		// try to obtain from each issuer until we succeed
 		var issuedCert *IssuedCertificate
 		var issuerUsed Issuer
@@ -1058,20 +1066,6 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, retry, int
 				err = prechecker.PreCheck(ctx, []string{name}, interactive)
 				if err != nil {
 					continue
-				}
-			}
-
-			// if we're renewing with the same ACME CA as before, have the ACME
-			// client tell the server we are replacing a certificate (but doing
-			// this on the wrong CA, or when the CA doesn't recognize the certID,
-			// can fail the order) -- TODO: change this check to whether we're using the same ACME account, not CA
-			if !cfg.DisableARI {
-				if acmeData, err := certRes.getACMEData(); err == nil && acmeData.CA != "" {
-					if acmeIss, ok := issuer.(*ACMEIssuer); ok {
-						if acmeIss.CA == acmeData.CA {
-							ctx = context.WithValue(ctx, ctxKeyARIReplaces, leaf)
-						}
-					}
 				}
 			}
 

@@ -475,6 +475,7 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 	// Notify the ACME server we are replacing a certificate (if the caller says we are),
 	// only if the following conditions are met:
 	// - The caller has set a Replaces value in the context, indicating this is a renewal.
+	// - The predecessor was issued by the same CA. TODO: check the ACME account, not just the CA.
 	// - Not using test CA. This should be obvious, but a test CA should be in a separate
 	// environment from production, and thus not have knowledge of the cert being replaced.
 	// - Not a certain attempt number. We skip setting Replaces once early on in the retries
@@ -483,8 +484,8 @@ func (am *ACMEIssuer) doIssue(ctx context.Context, csr *x509.CertificateRequest,
 	// and the server is rejecting the ARI certID. In any case, an invalid certID may cause
 	// orders to fail. So try once without setting it.
 	if !am.config.DisableARI && !usingTestCA && attempts != 2 {
-		if replacing, ok := ctx.Value(ctxKeyARIReplaces).(*x509.Certificate); ok {
-			params.Replaces = replacing
+		if replacing, ok := ctx.Value(ctxKeyARIReplaces).(ariReplacement); ok && replacing.ca == am.CA {
+			params.Replaces = replacing.cert
 		}
 	}
 
@@ -673,6 +674,11 @@ const prefixACME = "acme"
 type ctxKey string
 
 const ctxKeyARIReplaces = ctxKey("ari_replaces")
+
+type ariReplacement struct {
+	cert *x509.Certificate
+	ca   string
+}
 
 // Interface guards
 var (
