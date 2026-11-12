@@ -104,67 +104,70 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 	// write locks may be obtained during the actual operations.
 	var renewQueue, reloadQueue, deleteQueue, ariQueue certList
 
-	certCache.mu.RLock()
-	for certKey, cert := range certCache.cache {
-		if !cert.managed {
-			continue
-		}
-
-		// the list of names on this cert should never be empty... programmer error?
-		if len(cert.Names) == 0 {
-			log.Warn("certificate has no names; removing from cache", zap.String("cert_key", certKey))
-			deleteQueue = append(deleteQueue, cert)
-			continue
-		}
-
-		// get the config associated with this certificate
-		cfg, err := certCache.getConfig(cert)
-		if err != nil {
-			log.Error("unable to get configuration to manage certificate; unable to renew",
-				zap.Strings("identifiers", cert.Names),
-				zap.Error(err))
-			continue
-		}
-		if cfg.OnDemand != nil {
-			continue
-		}
-
-		// ACME-specific: see if if ACME Renewal Info (ARI) window needs refreshing
-		if !cfg.DisableARI && cert.ari.NeedsRefresh() {
-			configs[cert.hash] = cfg
-			ariQueue = append(ariQueue, cert)
-		}
-
-		// if time is up or expires soon, we need to try to renew it
-		if cert.NeedsRenewal(cfg) {
-			configs[cert.hash] = cfg
-
-			// see if the certificate in storage has already been renewed, possibly by another
-			// instance that didn't coordinate with this one; if so, just load it (this
-			// might happen if another instance already renewed it - kinda sloppy but checking disk
-			// first is a simple way to possibly drastically reduce rate limit problems)
-			storedCertNeedsRenew, err := cfg.managedCertInStorageNeedsRenewal(ctx, cert)
-			if err != nil {
-				// hmm, weird, but not a big deal, maybe it was deleted or something
-				log.Warn("error while checking if stored certificate is also expiring soon",
-					zap.Strings("identifiers", cert.Names),
-					zap.Error(err))
-			} else if !storedCertNeedsRenew {
-				// if the certificate does NOT need renewal and there was no error, then we
-				// are good to just reload the certificate from storage instead of repeating
-				// a likely-unnecessary renewal procedure
-				reloadQueue = append(reloadQueue, cert)
+	// scan under a read lock that is always released, even if a config callback panics
+	func() {
+		certCache.mu.RLock()
+		defer certCache.mu.RUnlock()
+		for certKey, cert := range certCache.cache {
+			if !cert.managed {
 				continue
 			}
 
-			// the certificate in storage has not been renewed yet, so we will do it
-			// NOTE: It is super-important to note that the TLS-ALPN challenge requires
-			// a write lock on the cache in order to complete its challenge, so it is extra
-			// vital that this renew operation does not happen inside our read lock!
-			renewQueue.insert(cert)
+			// the list of names on this cert should never be empty... programmer error?
+			if len(cert.Names) == 0 {
+				log.Warn("certificate has no names; removing from cache", zap.String("cert_key", certKey))
+				deleteQueue = append(deleteQueue, cert)
+				continue
+			}
+
+			// get the config associated with this certificate
+			cfg, err := certCache.getConfig(cert)
+			if err != nil {
+				log.Error("unable to get configuration to manage certificate; unable to renew",
+					zap.Strings("identifiers", cert.Names),
+					zap.Error(err))
+				continue
+			}
+			if cfg.OnDemand != nil {
+				continue
+			}
+
+			// ACME-specific: see if if ACME Renewal Info (ARI) window needs refreshing
+			if !cfg.DisableARI && cert.ari.NeedsRefresh() {
+				configs[cert.hash] = cfg
+				ariQueue = append(ariQueue, cert)
+			}
+
+			// if time is up or expires soon, we need to try to renew it
+			if cert.NeedsRenewal(cfg) {
+				configs[cert.hash] = cfg
+
+				// see if the certificate in storage has already been renewed, possibly by another
+				// instance that didn't coordinate with this one; if so, just load it (this
+				// might happen if another instance already renewed it - kinda sloppy but checking disk
+				// first is a simple way to possibly drastically reduce rate limit problems)
+				storedCertNeedsRenew, err := cfg.managedCertInStorageNeedsRenewal(ctx, cert)
+				if err != nil {
+					// hmm, weird, but not a big deal, maybe it was deleted or something
+					log.Warn("error while checking if stored certificate is also expiring soon",
+						zap.Strings("identifiers", cert.Names),
+						zap.Error(err))
+				} else if !storedCertNeedsRenew {
+					// if the certificate does NOT need renewal and there was no error, then we
+					// are good to just reload the certificate from storage instead of repeating
+					// a likely-unnecessary renewal procedure
+					reloadQueue = append(reloadQueue, cert)
+					continue
+				}
+
+				// the certificate in storage has not been renewed yet, so we will do it
+				// NOTE: It is super-important to note that the TLS-ALPN challenge requires
+				// a write lock on the cache in order to complete its challenge, so it is extra
+				// vital that this renew operation does not happen inside our read lock!
+				renewQueue.insert(cert)
+			}
 		}
-	}
-	certCache.mu.RUnlock()
+	}()
 
 	// Update ARI, and then for any certs where the ARI window changed,
 	// be sure to queue them for renewal if necessary
@@ -326,40 +329,43 @@ func (certCache *Cache) updateOCSPStaples(ctx context.Context) {
 	var updateQueue []updateQueueEntry // certs that need a refreshed staple
 	var renewQueue []renewQueueEntry   // certs that need to be renewed (due to revocation)
 
-	// obtain brief read lock during our scan to see which staples need updating
-	certCache.mu.RLock()
-	for certHash, cert := range certCache.cache {
-		// no point in updating OCSP for expired or "synthetic" certificates
-		if cert.Leaf == nil || cert.Expired() {
-			continue
-		}
-		cfg, err := certCache.getConfig(cert)
-		if err != nil {
-			logger.Error("unable to get automation config for certificate; maintenance for this certificate will likely fail",
-				zap.Strings("identifiers", cert.Names),
-				zap.Error(err))
-			continue
-		}
-		// always try to replace revoked certificates, even if OCSP response is still fresh
-		if certShouldBeForceRenewed(cert) {
-			renewQueue = append(renewQueue, renewQueueEntry{
-				oldCert: cert,
-				cfg:     cfg,
-			})
-			continue
-		}
-		// if the status is not fresh, get a new one
-		var lastNextUpdate time.Time
-		if cert.ocsp != nil {
-			lastNextUpdate = cert.ocsp.NextUpdate
-			if cert.ocsp.Status != ocsp.Unknown && freshOCSP(cert.ocsp) {
-				// no need to update our staple if still fresh and not Unknown
+	// obtain brief read lock during our scan to see which staples need updating;
+	// it is always released, even if a config callback panics
+	func() {
+		certCache.mu.RLock()
+		defer certCache.mu.RUnlock()
+		for certHash, cert := range certCache.cache {
+			// no point in updating OCSP for expired or "synthetic" certificates
+			if cert.Leaf == nil || cert.Expired() {
 				continue
 			}
+			cfg, err := certCache.getConfig(cert)
+			if err != nil {
+				logger.Error("unable to get automation config for certificate; maintenance for this certificate will likely fail",
+					zap.Strings("identifiers", cert.Names),
+					zap.Error(err))
+				continue
+			}
+			// always try to replace revoked certificates, even if OCSP response is still fresh
+			if certShouldBeForceRenewed(cert) {
+				renewQueue = append(renewQueue, renewQueueEntry{
+					oldCert: cert,
+					cfg:     cfg,
+				})
+				continue
+			}
+			// if the status is not fresh, get a new one
+			var lastNextUpdate time.Time
+			if cert.ocsp != nil {
+				lastNextUpdate = cert.ocsp.NextUpdate
+				if cert.ocsp.Status != ocsp.Unknown && freshOCSP(cert.ocsp) {
+					// no need to update our staple if still fresh and not Unknown
+					continue
+				}
+			}
+			updateQueue = append(updateQueue, updateQueueEntry{cert, certHash, lastNextUpdate, cfg})
 		}
-		updateQueue = append(updateQueue, updateQueueEntry{cert, certHash, lastNextUpdate, cfg})
-	}
-	certCache.mu.RUnlock()
+	}()
 
 	// perform updates outside of any lock on certCache
 	for _, qe := range updateQueue {
