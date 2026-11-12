@@ -2,6 +2,7 @@ package certmagic
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"fmt"
@@ -156,5 +157,42 @@ func TestQueueRenewalTaskPacesRetriesItself(t *testing.T) {
 	}
 	if !waitUntil(time.Second, func() bool { return issuer.calls.Load() == 2 }) {
 		t.Fatalf("expected a second issuance attempt once the backoff interval elapsed, got %d", issuer.calls.Load())
+	}
+}
+
+// TestMaintenanceReleasesReadLockOnPanic ensures a panicking config callback
+// does not leave the cache read-locked (caddyserver/caddy#8231).
+func TestMaintenanceReleasesReadLockOnPanic(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		scan func(*Cache)
+	}{
+		{"renew", func(c *Cache) { _ = c.RenewManagedCertificates(context.Background()) }},
+		{"ocsp", func(c *Cache) { c.updateOCSPStaples(context.Background()) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewCache(CacheOptions{
+				GetConfigForCert: func(Certificate) (*Config, error) { panic("boom") },
+			})
+			defer c.Stop()
+			c.cacheCertificate(Certificate{
+				Names:   []string{"example.com"},
+				hash:    "example",
+				managed: true,
+				Certificate: tls.Certificate{
+					Leaf: &x509.Certificate{NotAfter: time.Now().Add(time.Hour)},
+				},
+			})
+
+			func() {
+				defer func() { _ = recover() }()
+				tc.scan(c)
+			}()
+
+			if !c.mu.TryLock() {
+				t.Fatal("cache lock was not released after the scan panicked")
+			}
+			c.mu.Unlock()
+		})
 	}
 }
