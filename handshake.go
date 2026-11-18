@@ -298,6 +298,30 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 		return Certificate{}, err
 	}
 
+	// If certificate management is still loading this name's certificate
+	// -- for example, ManageAsync is loading existing certificates from
+	// storage while the process starts up -- wait for that load to finish
+	// and check the cache again, rather than failing a handshake for a
+	// certificate that is about to become available. If the load did not
+	// cache a certificate, we simply fall through to the usual logic
+	// below. (See https://github.com/caddyserver/caddy/issues/8431.)
+	if waited, err := cfg.waitForManagedLoad(ctx, name); err != nil {
+		return Certificate{}, err
+	} else if waited {
+		cert, matched, defaulted = cfg.getCertificateFromCache(hello)
+		if matched {
+			logger.Debug("matched certificate in cache after waiting for managed load",
+				zap.Strings("subjects", cert.Names),
+				zap.Bool("managed", cert.managed),
+				zap.Time("expiration", expiresAt(cert.Leaf)),
+				zap.String("hash", cert.hash))
+			if cert.managed && cfg.OnDemand != nil && loadOrObtainIfNecessary {
+				return cfg.optionalMaintenance(ctx, cfg.Logger.Named("on_demand"), cert, hello)
+			}
+			return cert, nil
+		}
+	}
+
 	// By this point, we need to load or obtain a certificate. If a swarm of requests comes in for the same
 	// domain, avoid pounding manager or storage thousands of times simultaneously. We use a similar sync
 	// strategy for obtaining certificate during handshake.
@@ -421,6 +445,58 @@ func (cfg *Config) getCertDuringHandshake(ctx context.Context, hello *tls.Client
 		zap.Bool("on_demand", cfg.OnDemand != nil))
 
 	return Certificate{}, fmt.Errorf("no certificate available for '%s'", name)
+}
+
+// waitForManagedLoad waits for any in-flight, management-initiated load
+// of a certificate for name (or for name's wildcard variant) to finish.
+// Such loads are registered by manageAll while a Manage call is loading
+// existing certificates from storage, which happens in the background
+// when ManageAsync is used, as is typical at process startup; a
+// handshake that arrives during that window would otherwise fail even
+// though the certificate is already in storage. It reports whether it
+// waited for at least one load. If a load finishes without caching a
+// certificate (for example because it failed), the caller is expected
+// to simply fall through to the usual handshake logic. Waiting is
+// bounded by ctx and by a timeout, so a stuck load cannot hang
+// handshakes indefinitely.
+func (cfg *Config) waitForManagedLoad(ctx context.Context, name string) (bool, error) {
+	candidates := []string{name}
+
+	// a managed wildcard certificate can satisfy this name, so a load
+	// of the wildcard variant is worth waiting for too
+	if idx := strings.Index(name, "."); idx > 0 {
+		candidates = append(candidates, "*"+name[idx:])
+	}
+
+	waited := false
+	for _, candidate := range candidates {
+		managedLoadWaitChansMu.Lock()
+		done, ok := managedLoadWaitChans[candidate]
+		managedLoadWaitChansMu.Unlock()
+		if !ok {
+			continue
+		}
+
+		cfg.Logger.Debug("waiting for in-flight managed load of certificate",
+			zap.String("server_name", name),
+			zap.String("identifier", candidate))
+		waited = true
+
+		timeout := time.NewTimer(2 * time.Minute)
+		select {
+		case <-done:
+			timeout.Stop()
+		case <-ctx.Done():
+			timeout.Stop()
+			return waited, ctx.Err()
+		case <-timeout.C:
+			// the load appears to be stuck; stop waiting and let
+			// the usual handshake logic decide the outcome
+			return waited, nil
+		}
+	}
+
+	return waited, nil
 }
 
 // loadCertFromStorage loads the certificate for name from storage and maintains it
@@ -980,6 +1056,41 @@ var (
 	certLoadWaitChans   = make(map[string]*certLoadWaiter)
 	certLoadWaitChansMu sync.Mutex
 )
+
+// managedLoadWaitChans tracks certificate loads initiated by Manage
+// calls (see manageAll) that are still in flight, keyed by name. A
+// handshake for a name with a load in flight waits for it to finish
+// and then checks the cache again, instead of failing with "no
+// certificate available" while the certificate is still being loaded
+// (see https://github.com/caddyserver/caddy/issues/8431). The channel
+// is closed when the load finishes, whether or not it cached a
+// certificate.
+var (
+	managedLoadWaitChans   = make(map[string]chan struct{})
+	managedLoadWaitChansMu sync.Mutex
+)
+
+// beginManagedLoad registers an in-flight managed load for name and
+// returns a function that marks the load as finished, waking any
+// handshakes that are waiting for it. If a load for name is already
+// registered (for example, by an overlapping Manage call), the
+// returned function is a no-op: waiters observe the earlier load,
+// while this load proceeds unregistered.
+func beginManagedLoad(name string) (end func()) {
+	managedLoadWaitChansMu.Lock()
+	defer managedLoadWaitChansMu.Unlock()
+	if _, ok := managedLoadWaitChans[name]; ok {
+		return func() {}
+	}
+	done := make(chan struct{})
+	managedLoadWaitChans[name] = done
+	return func() {
+		managedLoadWaitChansMu.Lock()
+		close(done)
+		delete(managedLoadWaitChans, name)
+		managedLoadWaitChansMu.Unlock()
+	}
+}
 
 type serializableClientHello struct {
 	CipherSuites      []uint16

@@ -460,11 +460,16 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 			continue
 		}
 
-		// otherwise, begin management immediately
+		// otherwise, begin management immediately; register the load as
+		// in flight first, so that a handshake for this name can wait for
+		// the initial load instead of failing while the certificate is
+		// still being loaded (see getCertDuringHandshake)
+		endManagedLoad := beginManagedLoad(domainName)
 		if async {
 			// don't block loading, since stapling OCSP uses the network and could block all other certs
 			// from being managed... (kind of tricky to make it truly async any lower-level than this)
 			go func(subject string) {
+				defer endManagedLoad()
 				err := cfg.manageOne(ctx, subject, async)
 				if err != nil {
 					cfg.Logger.Error("initiating certificate management",
@@ -474,6 +479,7 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 			}(domainName)
 		} else {
 			err := cfg.manageOne(ctx, domainName, async)
+			endManagedLoad()
 			if err != nil {
 				return err
 			}

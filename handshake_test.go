@@ -227,3 +227,147 @@ func TestGetCertDuringHandshakeWaiterErrorPropagation(t *testing.T) {
 		t.Errorf("expected exactly 1 decision-func call (leader only), got %d", got)
 	}
 }
+
+// delayedLoadStorage delays Load calls, simulating the slow storage
+// reads of a process that is still starting up.
+type delayedLoadStorage struct {
+	Storage
+	delay atomic.Int64 // nanoseconds
+}
+
+func (s *delayedLoadStorage) Load(ctx context.Context, key string) ([]byte, error) {
+	if d := time.Duration(s.delay.Load()); d > 0 {
+		select {
+		case <-time.After(d):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return s.Storage.Load(ctx, key)
+}
+
+// failingLoadStorage delays Load calls by delay, then fails them with
+// err, simulating a storage backend whose reads fail at startup.
+type failingLoadStorage struct {
+	Storage
+	delay time.Duration
+	err   error
+}
+
+func (s *failingLoadStorage) Load(ctx context.Context, key string) ([]byte, error) {
+	if s.delay > 0 {
+		select {
+		case <-time.After(s.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, s.err
+}
+
+// managedLoadTestConfig returns a Config backed by storage, set up the
+// same way as in production at process startup: an ACME issuer, OCSP
+// stapling and ARI disabled, and an empty certificate cache.
+func managedLoadTestConfig(storage Storage) (*Config, *ACMEIssuer) {
+	am := &ACMEIssuer{CA: "https://example.com/acme/directory"}
+	cfg := &Config{
+		Issuers:    []Issuer{am},
+		Storage:    storage,
+		Logger:     defaultTestLogger,
+		DisableARI: true,
+		certCache: &Cache{
+			cache:      make(map[string]Certificate),
+			cacheIndex: make(map[string][]string),
+			logger:     defaultTestLogger,
+		},
+	}
+	cfg.OCSP.DisableStapling = true
+	return cfg, am
+}
+
+// TestGetCertificateWaitsForManagedLoad is a regression test for
+// https://github.com/caddyserver/caddy/issues/8431: a certificate that
+// is already in storage must be served to a handshake that arrives
+// while ManageAsync is still loading it in the background, as happens
+// at process startup; before the fix, such a handshake failed with
+// "no certificate available".
+func TestGetCertificateWaitsForManagedLoad(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name       string
+		managed    string // name passed to ManageAsync
+		serverName string // SNI sent by the client
+	}{
+		{name: "exact name", managed: "example.test", serverName: "example.test"},
+		{name: "wildcard", managed: "*.example.test", serverName: "s1.example.test"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storage := &delayedLoadStorage{Storage: &FileStorage{Path: t.TempDir()}}
+			cfg, am := managedLoadTestConfig(storage)
+
+			// a previous run already issued and stored a valid cert
+			res := testIssuedCertResource(t, am, tc.managed, time.Now().Add(-time.Hour))
+			if err := cfg.saveCertResource(ctx, am, res); err != nil {
+				t.Fatalf("storing cert resource: %v", err)
+			}
+
+			// storage reads become slow: the startup window
+			const delay = 250 * time.Millisecond
+			storage.delay.Store(int64(delay))
+
+			// background certificate management begins, as at process startup
+			if err := cfg.ManageAsync(ctx, []string{tc.managed}); err != nil {
+				t.Fatalf("ManageAsync: %v", err)
+			}
+
+			// a handshake arrives immediately, while the initial load
+			// is still in flight; it must wait for the load and then
+			// be served the certificate
+			hello := &tls.ClientHelloInfo{ServerName: tc.serverName, Conn: testConn{}}
+			start := time.Now()
+			cert, err := cfg.GetCertificate(hello)
+			elapsed := time.Since(start)
+			if err != nil {
+				t.Fatalf("expected handshake during initial managed load to succeed, got: %v", err)
+			}
+			if cert == nil || cert.Leaf == nil {
+				t.Fatalf("expected a certificate, got: %v", cert)
+			}
+			if elapsed < delay {
+				t.Errorf("expected handshake to wait for the managed load (at least %v), but it returned after %v", delay, elapsed)
+			}
+		})
+	}
+}
+
+// TestGetCertificateManagedLoadFailure verifies that a handshake whose
+// name's managed load fails does not hang: once the load is over, the
+// handshake falls through to the usual "no certificate available"
+// error, promptly.
+func TestGetCertificateManagedLoadFailure(t *testing.T) {
+	ctx := context.Background()
+	const domain = "example.test"
+
+	storage := &failingLoadStorage{
+		Storage: &FileStorage{Path: t.TempDir()},
+		delay:   300 * time.Millisecond,
+		err:     errors.New("simulated storage failure"),
+	}
+	cfg, _ := managedLoadTestConfig(storage)
+
+	if err := cfg.ManageAsync(ctx, []string{domain}); err != nil {
+		t.Fatalf("ManageAsync: %v", err)
+	}
+
+	hello := &tls.ClientHelloInfo{ServerName: domain, Conn: testConn{}}
+	start := time.Now()
+	_, err := cfg.GetCertificate(hello)
+	elapsed := time.Since(start)
+	if err == nil || !strings.Contains(err.Error(), "no certificate available") {
+		t.Fatalf("expected 'no certificate available' error after failed managed load, got: %v", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Errorf("handshake took %v after a failed managed load; it must not hang", elapsed)
+	}
+}
