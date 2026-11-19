@@ -420,6 +420,45 @@ func (cfg *Config) ManageAsync(ctx context.Context, domainNames []string) error 
 	return cfg.manageAll(ctx, domainNames, true)
 }
 
+// ExpectNames announces that a Manage call for names is expected to
+// follow, so that TLS handshakes for those names wait for the
+// upcoming load instead of failing while it has not started yet.
+//
+// ExpectNames only makes handshakes wait; it never loads or obtains
+// certificates itself, and it does not change which names are
+// managed. It is intended to be called before listeners start
+// serving, with the actual Manage call following: servers such as
+// Caddy start serving before they call Manage, and with socket
+// activation handshakes can already be queued in that gap, before
+// Manage has registered any load to wait for. Announcing the names
+// first closes that gap, because the later Manage call adopts the
+// announcement and handshakes keep waiting on it until the load
+// finishes.
+//
+// ExpectNames is idempotent, and a no-op for names that are already
+// expected or already loading. If cfg is configured for on-demand
+// TLS, it is a no-op entirely, because Manage defers on-demand names
+// to handshakes and no load is coming for them.
+//
+// If the expected Manage call never comes, handshakes for the name
+// wait at most one bounded interval (see waitForManagedLoad) and
+// then fall through to the usual handshake logic; the announcement
+// itself is kept, without expiry, so that a Manage call that arrives
+// later still adopts it. Callers should therefore only announce
+// names they are about to manage.
+func (cfg *Config) ExpectNames(names []string) {
+	if cfg.OnDemand != nil || cfg.certCache == nil {
+		return
+	}
+	for _, name := range names {
+		name = normalizedName(name)
+		if name == "" {
+			continue
+		}
+		cfg.certCache.expectManagedLoad(name)
+	}
+}
+
 // ClientCredentials returns a list of TLS client certificate chains for the given identifiers.
 // The return value can be used in a tls.Config to enable client authentication using managed certificates.
 // Any certificates that need to be obtained or renewed for these identifiers will be managed accordingly.
@@ -460,11 +499,17 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 			continue
 		}
 
-		// otherwise, begin management immediately
+		// otherwise, begin management immediately; register the load as
+		// in flight first, so that a handshake for this name can wait for
+		// the initial load instead of failing while the certificate is
+		// still being loaded (see getCertDuringHandshake); if the name
+		// was announced with ExpectNames, this adopts that announcement
+		endManagedLoad := cfg.beginManagedLoad(domainName)
 		if async {
 			// don't block loading, since stapling OCSP uses the network and could block all other certs
 			// from being managed... (kind of tricky to make it truly async any lower-level than this)
 			go func(subject string) {
+				defer endManagedLoad()
 				err := cfg.manageOne(ctx, subject, async)
 				if err != nil {
 					cfg.Logger.Error("initiating certificate management",
@@ -474,6 +519,7 @@ func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bo
 			}(domainName)
 		} else {
 			err := cfg.manageOne(ctx, domainName, async)
+			endManagedLoad()
 			if err != nil {
 				return err
 			}

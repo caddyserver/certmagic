@@ -60,6 +60,18 @@ type Cache struct {
 	// Protects the cache and cacheIndex maps
 	mu sync.RWMutex
 
+	// managedLoads tracks certificate loads initiated by Manage calls
+	// that are still in flight, plus names that a Manage call is
+	// expected to load soon (see Config.ExpectNames), keyed by name.
+	// A handshake for a name with an entry here waits for the load to
+	// finish and then checks the cache again, instead of failing with
+	// "no certificate available" while the certificate is still being
+	// loaded. The map is initialized lazily by the methods that use
+	// it, so Cache values constructed as struct literals (mainly in
+	// tests) work too. See handshake.go for the registry methods.
+	managedLoads   map[string]*managedLoad
+	managedLoadsMu sync.Mutex
+
 	// Close this channel to cancel asset maintenance
 	stopChan chan struct{}
 
@@ -93,11 +105,12 @@ type Cache struct {
 // any locks for other processes to unblock!
 func NewCache(opts CacheOptions) *Cache {
 	c := &Cache{
-		cache:      make(map[string]Certificate),
-		cacheIndex: make(map[string][]string),
-		stopChan:   make(chan struct{}),
-		doneChan:   make(chan struct{}),
-		logger:     opts.Logger,
+		cache:        make(map[string]Certificate),
+		cacheIndex:   make(map[string][]string),
+		managedLoads: make(map[string]*managedLoad),
+		stopChan:     make(chan struct{}),
+		doneChan:     make(chan struct{}),
+		logger:       opts.Logger,
 	}
 
 	// absolutely do not allow a nil logger; panics galore
