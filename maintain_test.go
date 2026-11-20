@@ -6,6 +6,7 @@ import (
 	"crypto/x509/pkix"
 	"fmt"
 	"math/big"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -156,5 +157,139 @@ func TestQueueRenewalTaskPacesRetriesItself(t *testing.T) {
 	}
 	if !waitUntil(time.Second, func() bool { return issuer.calls.Load() == 2 }) {
 		t.Fatalf("expected a second issuance attempt once the backoff interval elapsed, got %d", issuer.calls.Load())
+	}
+}
+
+// emptyListingStorage runs hook when the nth listing of the watched key comes
+// back empty, before returning that listing to the caller. It stands for
+// another goroutine running between the cleaner's listing of a site folder and
+// what the cleaner does next.
+type emptyListingStorage struct {
+	Storage
+	watch string
+	nth   int32
+	seen  atomic.Int32
+	hook  func()
+}
+
+func (s *emptyListingStorage) List(ctx context.Context, prefix string, recursive bool) ([]string, error) {
+	keys, err := s.Storage.List(ctx, prefix, recursive)
+	if prefix == s.watch && err == nil && len(keys) == 0 && s.seen.Add(1) == s.nth {
+		s.hook()
+	}
+	return keys, err
+}
+
+// cleanRaceSetup returns what the tests of storage cleaning against a
+// first-time save have in common: a storage in which the site folder of
+// domain exists and is empty, as it is right after a save has created it,
+// and a config and issuer to do that save with.
+func cleanRaceSetup(t *testing.T, domain string) (*emptyListingStorage, *Config, Issuer, CleanStorageOptions) {
+	t.Helper()
+
+	issuer := &ACMEIssuer{CA: "https://example.com/acme/directory"}
+	siteKey := StorageKeys.CertsSitePrefix(issuer.IssuerKey(), domain)
+	fileStorage := &FileStorage{Path: t.TempDir()}
+	if err := os.MkdirAll(fileStorage.Filename(siteKey), 0o700); err != nil {
+		t.Fatalf("Expected no error creating site folder, got: %v", err)
+	}
+	storage := &emptyListingStorage{Storage: fileStorage, watch: siteKey, hook: func() {}}
+	cfg := &Config{
+		Issuers: []Issuer{issuer},
+		Storage: storage,
+		Logger:  defaultTestLogger,
+		certCache: &Cache{
+			cache:      make(map[string]Certificate),
+			cacheIndex: make(map[string][]string),
+			logger:     defaultTestLogger,
+		},
+	}
+	issuer.config = cfg
+
+	return storage, cfg, issuer, CleanStorageOptions{Logger: defaultTestLogger, ExpiredCerts: true}
+}
+
+func TestCleanStorageDeletesEmptySiteFolder(t *testing.T) {
+	ctx := context.Background()
+	storage, _, _, opts := cleanRaceSetup(t, "example.com")
+
+	if err := CleanStorage(ctx, storage, opts); err != nil {
+		t.Fatalf("Expected no error cleaning storage, got: %v", err)
+	}
+
+	if storage.Exists(ctx, storage.watch) {
+		t.Errorf("Expected the empty site folder %s to be deleted", storage.watch)
+	}
+}
+
+// A site folder that a save fills after the cleaner listed it as empty must
+// not be deleted on the strength of that listing (issue #426).
+func TestCleanStorageKeepsSiteFolderFilledAfterItWasListedEmpty(t *testing.T) {
+	ctx := context.Background()
+	const domain = "example.com"
+	storage, cfg, issuer, opts := cleanRaceSetup(t, domain)
+
+	// the cleaner lists a site folder twice before it decides to delete it;
+	// the save happens right after the second listing
+	storage.nth = 2
+	storage.hook = func() { saveTestCertResource(t, cfg, issuer, domain, time.Now()) }
+
+	if err := CleanStorage(ctx, storage, opts); err != nil {
+		t.Fatalf("Expected no error cleaning storage, got: %v", err)
+	}
+
+	if storage.seen.Load() < storage.nth {
+		t.Fatalf("Expected the cleaner to list the site folder at least %d times, got %d", storage.nth, storage.seen.Load())
+	}
+	assertCertResourceStored(t, storage, issuer, domain)
+}
+
+// A save that starts while the cleaner is deleting the empty site folder has
+// to wait until the cleaner is done, or the folder is deleted from under it
+// (issue #426).
+func TestSaveCertResourceWaitsForCleanerDeletingSiteFolder(t *testing.T) {
+	ctx := context.Background()
+	const domain = "example.com"
+	storage, cfg, issuer, opts := cleanRaceSetup(t, domain)
+	certRes := testIssuedCertResource(t, issuer, domain, time.Now())
+
+	// the third listing is the one the cleaner deletes the folder on; give a
+	// save that starts right after it the time to finish if nothing holds it
+	saved := make(chan error, 1)
+	storage.nth = 3
+	storage.hook = func() {
+		go func() { saved <- cfg.saveCertResource(ctx, issuer, certRes) }()
+		select {
+		case err := <-saved:
+			saved <- err
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+
+	if err := CleanStorage(ctx, storage, opts); err != nil {
+		t.Fatalf("Expected no error cleaning storage, got: %v", err)
+	}
+
+	select {
+	case err := <-saved:
+		if err != nil {
+			t.Fatalf("Expected no error saving cert resource, got: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Expected the save to finish once the cleaner was done")
+	}
+	assertCertResourceStored(t, storage, issuer, domain)
+}
+
+func assertCertResourceStored(t *testing.T, storage Storage, issuer Issuer, domain string) {
+	t.Helper()
+	for _, key := range []string{
+		StorageKeys.SitePrivateKey(issuer.IssuerKey(), domain),
+		StorageKeys.SiteCert(issuer.IssuerKey(), domain),
+		StorageKeys.SiteMeta(issuer.IssuerKey(), domain),
+	} {
+		if !storage.Exists(context.Background(), key) {
+			t.Errorf("Expected %s to be in storage after the save and the cleaning", key)
+		}
 	}
 }
