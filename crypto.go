@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io/fs"
+	"path"
 	"sort"
 	"strings"
 
@@ -168,7 +169,27 @@ func (cfg *Config) saveCertResource(ctx context.Context, issuer Issuer, cert Cer
 		},
 	}
 
+	// A first-time save creates the site folder, which is empty until the
+	// first asset is in it. Storage cleaning deletes empty site folders, so
+	// hold the lock it takes for that until all the assets are stored.
+	lockKey := siteFolderLockKey(StorageKeys.CertsSitePrefix(issuerKey, certKey))
+	if err := acquireLock(ctx, cfg.Storage, lockKey); err != nil {
+		return fmt.Errorf("unable to acquire lock '%s': %v", lockKey, err)
+	}
+	defer func() {
+		if err := releaseLock(ctx, cfg.Storage, lockKey); err != nil {
+			cfg.Logger.Error("unable to unlock", zap.String("lock_key", lockKey), zap.Error(err))
+		}
+	}()
+
 	return storeTx(ctx, cfg.groundTruthStorage(), all)
+}
+
+// siteFolderLockKey returns the name of the lock that must be held to fill
+// the site folder at siteKey for the first time or to delete it when it is
+// empty. siteKey is the folder's storage key, as CertsSitePrefix returns it.
+func siteFolderLockKey(siteKey string) string {
+	return "site_folder_" + path.Base(path.Dir(siteKey)) + "_" + path.Base(siteKey)
 }
 
 // loadCertResourceAnyIssuer loads and returns the certificate resource from any

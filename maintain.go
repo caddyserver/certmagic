@@ -877,8 +877,7 @@ func deleteExpiredCerts(ctx context.Context, storage Storage, logger *zap.Logger
 				continue
 			}
 			if len(siteAssets) == 0 {
-				logger.Info("deleting site folder because key is empty", zap.String("site_key", siteKey))
-				err := storage.Delete(ctx, siteKey)
+				err := deleteEmptySiteFolder(ctx, storage, logger, siteKey)
 				if err != nil {
 					return fmt.Errorf("deleting empty site folder %s: %v", siteKey, err)
 				}
@@ -886,6 +885,30 @@ func deleteExpiredCerts(ctx context.Context, storage Storage, logger *zap.Logger
 		}
 	}
 	return nil
+}
+
+// deleteEmptySiteFolder deletes the site folder at siteKey unless it has
+// assets in it. A folder that looks empty may be one that saveCertResource
+// has just created and is about to fill, so the listing and the deletion
+// happen within the lock that saveCertResource holds while it does that.
+func deleteEmptySiteFolder(ctx context.Context, storage Storage, logger *zap.Logger, siteKey string) error {
+	lockKey := siteFolderLockKey(siteKey)
+	if err := acquireLock(ctx, storage, lockKey); err != nil {
+		return fmt.Errorf("unable to acquire lock '%s': %v", lockKey, err)
+	}
+	defer func() {
+		if err := releaseLock(ctx, storage, lockKey); err != nil {
+			logger.Error("unable to unlock", zap.String("lock_key", lockKey), zap.Error(err))
+		}
+	}()
+
+	siteAssets, err := storage.List(ctx, siteKey, false)
+	if err != nil || len(siteAssets) > 0 {
+		return nil
+	}
+
+	logger.Info("deleting site folder because key is empty", zap.String("site_key", siteKey))
+	return storage.Delete(ctx, siteKey)
 }
 
 // forceRenew forcefully renews cert and replaces it in the cache, and returns the new certificate. It is intended
