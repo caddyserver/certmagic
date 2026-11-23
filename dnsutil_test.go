@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/miekg/dns"
 	"go.uber.org/zap"
 )
 
@@ -263,4 +264,98 @@ func clearFqdnCache() {
 	fqdnSOACacheMu.Lock()
 	fqdnSOACache = make(map[string]*soaCacheEntry)
 	fqdnSOACacheMu.Unlock()
+}
+
+// serveTestNameserver starts a local UDP nameserver that answers every
+// query with the given answer RR (which may be nil) and returns its
+// address.
+func serveTestNameserver(t *testing.T, answer dns.RR) string {
+	t.Helper()
+
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen on UDP: %v", err)
+	}
+
+	server := &dns.Server{
+		PacketConn: pc,
+		Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+			m := new(dns.Msg)
+			m.SetReply(r)
+			if answer != nil {
+				m.Answer = append(m.Answer, answer)
+			}
+			if err := w.WriteMsg(m); err != nil {
+				t.Errorf("failed to write DNS response: %v", err)
+			}
+		}),
+	}
+	go server.ActivateAndServe()
+	t.Cleanup(func() {
+		server.Shutdown()
+	})
+
+	return pc.LocalAddr().String()
+}
+
+func TestCheckAuthoritativeNss(t *testing.T) {
+	const expectedValue = "propagation-test-value"
+	hasRecord := serveTestNameserver(t, &dns.TXT{
+		Hdr: dns.RR_Header{
+			Name:   "_acme-challenge.example.com.",
+			Rrtype: dns.TypeTXT,
+			Class:  dns.ClassINET,
+			Ttl:    3600,
+		},
+		Txt: []string{expectedValue},
+	})
+	missingRecord := serveTestNameserver(t, nil)
+
+	testCases := []struct {
+		desc       string
+		requireAll bool
+		servers    []string
+		expected   bool
+	}{
+		{
+			desc:       "all required: only the first nameserver has the record",
+			requireAll: true,
+			servers:    []string{hasRecord, missingRecord},
+			expected:   false,
+		},
+		{
+			desc:       "all required: every nameserver has the record",
+			requireAll: true,
+			servers:    []string{hasRecord, hasRecord},
+			expected:   true,
+		},
+		{
+			desc:       "any one: only the second nameserver has the record",
+			requireAll: false,
+			servers:    []string{missingRecord, hasRecord},
+			expected:   true,
+		},
+		{
+			desc:       "any one: no nameserver has the record",
+			requireAll: false,
+			servers:    []string{missingRecord, missingRecord},
+			expected:   false,
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			t.Parallel()
+
+			ready, err := checkAuthoritativeNss(context.Background(),
+				"_acme-challenge.example.com.", dns.TypeTXT,
+				expectedValue, test.requireAll, test.servers)
+			if err != nil {
+				t.Fatalf("expected no error, got: %v", err)
+			}
+			if ready != test.expected {
+				t.Errorf("expected ready=%v, got %v", test.expected, ready)
+			}
+		})
+	}
 }

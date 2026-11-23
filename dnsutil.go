@@ -228,7 +228,9 @@ func populateNameserverPorts(servers []string) {
 	}
 }
 
-// checkDNSPropagation checks if the expected record has been propagated to all authoritative nameservers.
+// checkDNSPropagation checks if the expected record has been propagated to all
+// authoritative nameservers, or to any one of the given resolvers if
+// checkAuthoritativeServers is false.
 func checkDNSPropagation(ctx context.Context, logger *zap.Logger, fqdn string, recType uint16, expectedValue string, checkAuthoritativeServers bool, resolvers []string) (bool, error) {
 	logger = logger.Named("propagation")
 
@@ -259,11 +261,13 @@ func checkDNSPropagation(ctx context.Context, logger *zap.Logger, fqdn string, r
 	}
 	logger.Debug("checking authoritative nameservers", zap.Strings("resolvers", resolvers))
 
-	return checkAuthoritativeNss(ctx, fqdn, recType, expectedValue, resolvers)
+	return checkAuthoritativeNss(ctx, fqdn, recType, expectedValue, checkAuthoritativeServers, resolvers)
 }
 
-// checkAuthoritativeNss queries each of the given nameservers for the expected record.
-func checkAuthoritativeNss(ctx context.Context, fqdn string, recType uint16, expectedValue string, nameservers []string) (bool, error) {
+// checkAuthoritativeNss queries the given nameservers for the expected record.
+// If requireAll is true, every nameserver has to serve the expected record;
+// otherwise it is enough if any one of them does.
+func checkAuthoritativeNss(ctx context.Context, fqdn string, recType uint16, expectedValue string, requireAll bool, nameservers []string) (bool, error) {
 	for _, ns := range nameservers {
 		r, err := dnsQuery(ctx, fqdn, recType, []string{ns}, true)
 		if err != nil {
@@ -280,29 +284,42 @@ func checkAuthoritativeNss(ctx context.Context, fqdn string, recType uint16, exp
 			return false, fmt.Errorf("NS %s returned %s for %s", ns, dns.RcodeToString[r.Rcode], fqdn)
 		}
 
+		found := false
 		for _, rr := range r.Answer {
 			switch recType {
 			case dns.TypeTXT:
 				if txt, ok := rr.(*dns.TXT); ok {
 					record := strings.Join(txt.Txt, "")
 					if record == expectedValue {
-						return true, nil
+						found = true
 					}
 				}
 			case dns.TypeCNAME:
 				if cname, ok := rr.(*dns.CNAME); ok {
 					// TODO: whether a DNS provider assumes a trailing dot or not varies, and we may have to standardize this in libdns packages
 					if strings.TrimSuffix(cname.Target, ".") == strings.TrimSuffix(expectedValue, ".") {
-						return true, nil
+						found = true
 					}
 				}
 			default:
 				return false, fmt.Errorf("unsupported record type: %d", recType)
 			}
 		}
+
+		if found && !requireAll {
+			// any one of the nameservers serving the record is enough
+			return true, nil
+		}
+		if requireAll && !found {
+			// this nameserver does not have the record yet, have the
+			// caller try again
+			return false, nil
+		}
 	}
 
-	return false, nil
+	// reaching this point means every nameserver serves the expected
+	// record when requireAll is true, or none of them does otherwise
+	return requireAll, nil
 }
 
 // lookupNameservers returns the authoritative nameservers for the given fqdn.
